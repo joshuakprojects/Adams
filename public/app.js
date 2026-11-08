@@ -97,6 +97,7 @@
     $('#board-date').value = state.date;
     const rel = state.date === state.today ? 'Today · ' : state.date === addDays(state.today, 1) ? 'Tomorrow · ' : '';
     $('#board-title').textContent = rel + longDate(state.date);
+    $('#drivers-title').textContent = state.date === state.today ? 'Drivers today' : state.date === addDays(state.today, 1) ? 'Drivers tomorrow' : 'Drivers this day';
 
     // Alerts: driver texts the system didn't understand.
     const ac = $('#alert-count');
@@ -109,7 +110,21 @@
         <span class="body">${esc(m.body)}</span>
         <span class="muted small">${esc(fmtStamp(m.created_at))}</span>
         <button class="btn tiny" data-act="seen" data-id="${m.id}">Got it</button>
+      </div>`).join('') + (state.board.unmatched_tickets || []).map((t) => `
+      <div class="alert photo">
+        <a href="/api/tickets/${t.id}/image" target="_blank"><img src="/api/tickets/${t.id}/image" alt=""></a>
+        <span class="body"><b>${esc(t.driver_name || 'Unknown number')}</b> texted a ticket photo we couldn't match to a job.</span>
+        <button class="btn tiny" data-act="attach-ticket" data-id="${t.id}" data-driver="${t.driver_id || ''}">Attach to job…</button>
+        <button class="btn tiny danger" data-act="delete-ticket" data-id="${t.id}">Delete</button>
       </div>`).join('');
+
+    // Lineup ("text drivers their day") status.
+    const lu = state.board.lineup;
+    const parts = [];
+    if (lu.sent) parts.push(`Day sent to ${lu.sent} of ${lu.drivers} driver${lu.drivers === 1 ? '' : 's'} · ${fmtStamp(lu.last_sent_at)}`);
+    else if (lu.auto_time && state.date === addDays(state.today, 1)) parts.push(`Auto-texts drivers at ${fmtTime(lu.auto_time)} today`);
+    $('#lineup-status').textContent = parts.join('');
+    $('#send-lineup').classList.toggle('hidden', state.date < state.today || !lu.drivers);
 
     $('#jobs').innerHTML = jobs.length ? jobs.map(renderJob).join('') :
       `<div class="empty">No jobs on this day yet.<br><br><button class="btn primary big" data-act="new">+ New job</button></div>`;
@@ -118,7 +133,7 @@
       <div class="drow">
         <span class="name">${esc(d.name)}</span>
         ${d.jobs.length ? d.jobs.map((j) => `<span class="chip ${j.status}" title="${esc(STATUS[j.status])}">#${j.job_id}</span>`).join('') : '<span class="free">Free</span>'}
-      </div>`).join('') : '<p class="muted">Add drivers under "Drivers &amp; Trucks".</p>';
+      </div>`).join('') : '<p class="muted">Add drivers on the Setup tab.</p>';
   }
 
   function renderJob(job) {
@@ -167,6 +182,10 @@
       <div class="job-meta">${[job.customer && 'Customer: ' + esc(job.customer), job.contact_name && 'Contact: ' + esc(job.contact_name + ' ' + prettyPhone(job.contact_phone))].filter(Boolean).join(' · ')}</div>
       ${job.notes ? `<div class="job-notes">${esc(job.notes)}</div>` : ''}
       ${progress}
+      ${job.tickets.length ? `<div class="tickets-row">
+        <span class="lbl" data-act="tickets" data-job="${job.id}">🧾 ${job.tickets.length} ticket${job.tickets.length === 1 ? '' : 's'}</span>
+        ${job.tickets.slice(-6).map((t) => `<img src="/api/tickets/${t.id}/image" alt="" loading="lazy" data-act="tickets" data-job="${job.id}">`).join('')}
+      </div>` : ''}
       <div class="assignments">${rows || '<div class="asg muted">No driver assigned</div>'}</div>
       <div class="job-actions">
         ${job.status === 'cancelled' ? `<button class="btn" data-act="reopen" data-job="${job.id}">Re-open</button>` : `
@@ -222,6 +241,20 @@
         toast(`Copied to job #${job.id} on ${longDate(date)} — not texted yet`);
       }
       if (act === 'seen') await api('/messages/seen', { method: 'POST', body: { ids: [Number(el.dataset.id)] } });
+      if (act === 'tickets') return openTickets(Number(jobId));
+      if (act === 'attach-ticket') {
+        const driverId = Number(el.dataset.driver);
+        const mine = state.board.jobs.filter((j) => j.assignments.some((a) => a.driver_id === driverId)).map((j) => j.id);
+        const id = prompt(`Attach this photo to which job number?${mine.length ? ` (This driver is on #${mine.join(', #')} today)` : ''}`, mine[0] || '');
+        if (!id) return;
+        await api(`/tickets/${el.dataset.id}/attach`, { method: 'POST', body: { job_id: Number(id) } });
+        toast(`Attached to job #${id}`);
+      }
+      if (act === 'delete-ticket') {
+        if (!confirm('Delete this photo?')) return;
+        await api(`/tickets/${el.dataset.id}`, { method: 'DELETE' });
+        if ($('#ticket-dialog').open) { await loadBoard(); return openTickets(Number(el.dataset.job)); }
+      }
       if (act !== 'new' && act !== 'edit' && act !== 'copylink') {
         el.closest('details')?.removeAttribute('open');
         await loadBoard();
@@ -238,6 +271,34 @@
   }));
   $('#board-date').addEventListener('change', (e) => { if (e.target.value) { state.date = e.target.value; loadBoard(); } });
   $('#new-job').addEventListener('click', () => openJobForm());
+
+  $('#send-lineup').addEventListener('click', async () => {
+    const lu = state.board.lineup;
+    const when = state.date === addDays(state.today, 1) ? 'tomorrow' : longDate(state.date);
+    const again = lu.sent ? `\n\nThey were already sent their day ${fmtStamp(lu.last_sent_at)}. This sends it again to everyone.` : '';
+    if (!confirm(`Text ${lu.drivers} driver${lu.drivers === 1 ? '' : 's'} a list of all their jobs for ${when}?${again}`)) return;
+    try {
+      const out = await api('/lineup/send', { method: 'POST', body: { date: state.date } });
+      const failed = out.results.filter((r) => !r.ok);
+      toast(failed.length ? `Failed for ${failed.map((r) => r.driver).join(', ')}` : `Texted ${out.results.length} driver${out.results.length === 1 ? '' : 's'} their day`);
+      loadBoard();
+    } catch (err) { toast(err.message); }
+  });
+
+  // ---------- ticket photos ----------
+  function openTickets(jobId) {
+    const job = state.board.jobs.find((j) => j.id === jobId);
+    if (!job) return;
+    $('#ticket-title').textContent = `Job #${job.id} — scale tickets (${job.tickets.length})`;
+    $('#ticket-list').innerHTML = job.tickets.map((t) => `
+      <figure>
+        <a href="/api/tickets/${t.id}/image" target="_blank"><img src="/api/tickets/${t.id}/image" alt="Ticket photo"></a>
+        <figcaption><span>${esc(t.driver_name || '')} · ${esc(fmtStamp(t.created_at))}${t.source === 'sms' ? ' · texted' : ''}</span>
+          <button class="btn tiny danger" data-act="delete-ticket" data-id="${t.id}" data-job="${job.id}">Delete</button></figcaption>
+      </figure>`).join('') || '<p class="muted">No tickets.</p>';
+    if (!$('#ticket-dialog').open) $('#ticket-dialog').showModal();
+  }
+  $('[data-close-tickets]').addEventListener('click', () => $('#ticket-dialog').close());
 
   // ---------- job form ----------
   const dialog = $('#job-dialog');
@@ -287,7 +348,7 @@
         <label class="nm" for="as-${d.id}">${esc(d.name)}${busy ? `<span class="busy">Also on ${busy}</span>` : ''}</label>
         <select>${truckOptions(on ? formAssignments.get(d.id) : d.default_truck_id)}</select>
       </div>`;
-    }).join('') || '<p class="muted">No drivers yet — add them under "Drivers &amp; Trucks".</p>';
+    }).join('') || '<p class="muted">No drivers yet — add them on the Setup tab.</p>';
   }
 
   $('#assign-list').addEventListener('change', (e) => {
@@ -369,7 +430,10 @@
   const KIND = { haul: 'Gravel / end dump', float: 'Float / lowbed', septic: 'Septic pump', other: 'Other' };
 
   async function loadPeople() {
-    const [drivers, trucks] = await Promise.all([api('/drivers?all=1'), api('/trucks?all=1')]);
+    const [drivers, trucks, settings] = await Promise.all([api('/drivers?all=1'), api('/trucks?all=1'), api('/settings')]);
+    const sf = $('#settings-form');
+    sf.elements.lineup_on.checked = Boolean(settings.lineup_time);
+    sf.elements.lineup_time.value = settings.lineup_time || '17:00';
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
     $('#driver-rows').innerHTML = drivers.map((d) => `
@@ -412,6 +476,15 @@
     });
     $(formId).addEventListener('reset', (e) => setTimeout(() => { e.target.elements.id.value = ''; }));
   }
+
+  $('#settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target.elements;
+    try {
+      const out = await api('/settings', { method: 'POST', body: { lineup_time: f.lineup_on.checked ? f.lineup_time.value : '' } });
+      toast(out.lineup_time ? `Drivers will get tomorrow's jobs at ${fmtTime(out.lineup_time)} each day` : 'Evening text turned off');
+    } catch (err) { toast(err.message); }
+  });
 
   // ---------- messages ----------
   async function loadMessages() {
@@ -457,7 +530,7 @@
     await loadBoard();
     // Keep the board fresh so driver confirmations show up without reloading.
     setInterval(() => {
-      if (document.hidden || dialog.open) return;
+      if (document.hidden || dialog.open || $('#ticket-dialog').open) return;
       if (state.tab === 'board' && !document.querySelector('details[open]')) loadBoard().catch(() => {});
       if (state.tab === 'messages') loadMessages().catch(() => {});
     }, 15000);

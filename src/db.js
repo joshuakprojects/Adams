@@ -93,6 +93,34 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS messages_created ON messages(created_at);
+
+-- Scale ticket / delivery photos. source: web (job page) | sms (texted photo) | office
+CREATE TABLE IF NOT EXISTS tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  assignment_id INTEGER REFERENCES assignments(id) ON DELETE SET NULL,
+  job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+  driver_id INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+  filename TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'web',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS tickets_job ON tickets(job_id);
+
+-- Which drivers got the day's lineup text, so the automatic evening send doesn't repeat itself.
+CREATE TABLE IF NOT EXISTS lineup_sends (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL,
+  driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+  auto INTEGER NOT NULL DEFAULT 0,
+  sent_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS lineup_sends_date ON lineup_sends(date);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `;
 
 function openDb(file) {

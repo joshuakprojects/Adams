@@ -7,7 +7,26 @@ const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
 
-function createApp({ db, dispatch }) {
+/** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
+async function fetchTwilioMedia(url) {
+  const u = new URL(url);
+  if (u.protocol !== 'https:' || u.hostname !== 'api.twilio.com') throw new Error('Unexpected media URL');
+  const { accountSid, authToken } = config.twilio;
+  const res = await fetch(u, { headers: { Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64') } });
+  if (!res.ok) throw new Error(`Media download failed (${res.status})`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType: res.headers.get('content-type') || '' };
+}
+
+function sendImage(res, ticket) {
+  if (!ticket) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', ticket.content_type);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.setHeader('Content-Security-Policy', "default-src 'none'");
+  res.sendFile(ticket.path, (err) => { if (err && !res.headersSent) res.status(404).send('Not found'); });
+}
+
+function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
   const app = express();
   app.set('trust proxy', true);
   app.disable('x-powered-by');
@@ -30,7 +49,26 @@ function createApp({ db, dispatch }) {
     if (!a) return res.status(404).send(renderNotFound());
     // Opening the link counts as "seen" but not as confirmed — they still tap Got it or text OK.
     res.setHeader('Cache-Control', 'no-store');
-    res.send(renderDriverPage(a, dispatch.otherJobsForDriver(a.driver_id, a.id)));
+    res.send(renderDriverPage(a, dispatch.otherJobsForDriver(a.driver_id, a.id), dispatch.ticketsForAssignment(a.id)));
+  });
+
+  // Scale ticket photo from the job page. The page shrinks the photo first and posts the raw image.
+  app.post('/j/:token/ticket', express.raw({ type: () => true, limit: '13mb' }), (req, res) => {
+    const a = dispatch.assignmentByToken(req.params.token);
+    if (!a) return res.status(404).json({ error: 'Job not found' });
+    try {
+      const t = dispatch.saveTicket({ driverId: a.driver_id, assignment: a, buffer: req.body, contentType: req.get('content-type'), source: 'web' });
+      res.json({ ok: true, id: t.id });
+    } catch (err) {
+      if (!(err instanceof ValidationError)) throw err;
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get('/j/:token/ticket/:id', (req, res) => {
+    const a = dispatch.assignmentByToken(req.params.token);
+    const t = a && dispatch.getTicket(req.params.id);
+    sendImage(res, t && t.assignment_id === a.id ? t : null);
   });
 
   app.post('/j/:token/:action', (req, res) => {
@@ -43,15 +81,30 @@ function createApp({ db, dispatch }) {
   });
 
   // ---------- inbound texts from Twilio ----------
-  app.post('/sms/inbound', (req, res) => {
-    if (config.smsEnabled) {
-      const url = config.publicUrl + req.originalUrl;
-      if (!sms.validTwilioSignature(req.get('X-Twilio-Signature'), url, req.body || {})) {
-        return res.status(403).send('Bad signature');
+  app.post('/sms/inbound', async (req, res, next) => {
+    try {
+      if (config.smsEnabled) {
+        const url = config.publicUrl + req.originalUrl;
+        if (!sms.validTwilioSignature(req.get('X-Twilio-Signature'), url, req.body || {})) {
+          return res.status(403).send('Bad signature');
+        }
       }
+      // Photos texted in (scale tickets).
+      const media = [];
+      const count = Math.min(Number(req.body.NumMedia) || 0, 10);
+      for (let i = 0; i < count; i++) {
+        try {
+          const m = await fetchMedia(req.body[`MediaUrl${i}`]);
+          if (m.buffer.length) media.push(m);
+        } catch (err) {
+          console.error('Could not download texted photo:', err.message);
+        }
+      }
+      const { reply } = dispatch.handleInbound(req.body.From, req.body.Body, { media });
+      res.type('text/xml').send(sms.twiml(reply));
+    } catch (err) {
+      next(err);
     }
-    const { reply } = dispatch.handleInbound(req.body.From, req.body.Body);
-    res.type('text/xml').send(sms.twiml(reply));
   });
 
   // ---------- office ----------
@@ -100,6 +153,20 @@ function createApp({ db, dispatch }) {
     dispatch.deleteJob(req.params.id);
     res.json({ ok: true });
   });
+  api.get('/tickets/:id/image', (req, res) => sendImage(res, dispatch.getTicket(req.params.id)));
+  api.post('/tickets/:id/attach', (req, res) => res.json(dispatch.attachTicket(req.params.id, req.body.job_id)));
+  api.delete('/tickets/:id', (req, res) => {
+    dispatch.deleteTicket(req.params.id);
+    res.json({ ok: true });
+  });
+  api.get('/settings', (_req, res) => res.json(dispatch.getSettings()));
+  api.post('/settings', (req, res) => res.json(dispatch.saveSettings(req.body || {})));
+  // Text every driver their whole day for a date (the "tomorrow's jobs" text, sent by hand).
+  api.post('/lineup/send', wrap(async (req, res) => {
+    const date = String(req.body?.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ValidationError('Pick a date');
+    res.json(await dispatch.sendLineup(date));
+  }));
   // Office can set a driver's status by hand (e.g. driver phoned in).
   api.post('/assignments/:token/:action', (req, res) => res.json(dispatch.driverAction(req.params.token, req.params.action, 'office')));
 
@@ -138,9 +205,15 @@ if (require.main === module) {
   auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
   createApp({ db, dispatch }).listen(config.port, () => {
-    console.log(`Dispatch running on ${config.publicUrl} (port ${config.port})`);
+    console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
+  // Evening "tomorrow's jobs" text: checked every minute against the time set on the Setup tab.
+  setInterval(() => {
+    dispatch.runScheduledLineup()
+      .then((out) => out && console.log(`Sent lineup for ${out.date} to ${out.results.length} driver(s)`))
+      .catch((err) => console.error('Lineup send failed:', err));
+  }, 60 * 1000);
 }
 
 module.exports = { createApp };

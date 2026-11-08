@@ -41,3 +41,6 @@ h2 { font-size: 18px; margin: 24px 0 8px; }
 .others li a { display: block; background: #fff; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; color: #1a1a1a;
   text-decoration: none; font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.1); }
 .others li span { display: block; font-weight: 400; color: #555; font-size: 16px; }
+.btn.photo { background: #6d4c41; color: #fff; }
+.tickets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.tickets img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; display: block; background: #ddd; }

@@ -32,6 +32,15 @@ Drivers don't install an app or log in.
 6. The **Details link** is optional. It opens a big-button page with map buttons, a **+1 Load delivered** counter,
    **Job finished**, and **Call dispatch**.
 
+**Scale tickets:** a driver can tap **📷 Add scale ticket photo** on the job page, or just **text a photo** to the
+dispatch number. The photo is attached to the job they're on today. Tickets show as thumbnails on the job card.
+A texted photo that can't be matched to a job shows up at the top of the board, and the office can attach it to a job.
+
+**Tomorrow's jobs:** every evening (5:00 PM Eastern by default; change or turn it off on the **Setup** tab), each driver
+gets one text listing all their jobs for tomorrow, with a details link for each. One `OK` confirms them all.
+The board also has a **📱 Text drivers their day** button to send it whenever you want. The automatic send skips
+drivers who already got their day, unless something was added or changed.
+
 Other features:
 - **Edit a job** that was already texted: the driver is flagged **Needs update**. One click sends an "UPDATED Job" text, and they confirm again.
 - **Take a driver off** a job: they automatically get a text saying so.
@@ -69,12 +78,15 @@ npm run add-user -- jane@adamsbros.ca "Jane" "a-good-password"
    to the app's real address (for example `https://dispatch.adamsbros.ca`).
 3. In Twilio, under the number's settings, set **"A message comes in"** to webhook
    `POST https://dispatch.adamsbros.ca/sms/inbound`. Inbound texts are checked against Twilio's signature.
+   Make sure the number is **MMS-capable** so drivers can text ticket photos.
 
 ## Hosting
 
 Any small server or VPS works (for example a $5–10/month droplet or Render/Fly.io with a persistent disk).
 Run it behind HTTPS on a subdomain like `dispatch.adamsbros.ca` and set `COOKIE_SECURE=true`.
-All data is in one SQLite file (`DB_PATH`, default `data/dispatch.db`). Back up that file.
+All data is in the `data/` folder: the SQLite database (`DB_PATH`, default `data/dispatch.db`) and ticket photos
+(`UPLOAD_DIR`, default `data/uploads`). Back up that folder.
+Times use Eastern (`TZ_NAME=America/Toronto`).
 
 ## Code layout
 
@@ -90,7 +102,6 @@ All data is in one SQLite file (`DB_PATH`, default `data/dispatch.db`). Back up 
 
 ## Ideas for later
 
-- Scale-ticket or delivery photos from the driver page
-- Evening "tomorrow's jobs" text to each driver
+- Typing the ticket number and weight next to each photo
 - Billing export / QuickBooks: jobs already record customer, material, quantity and loads per driver
 - Saved customers and pits with exact map pins

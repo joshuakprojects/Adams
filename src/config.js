@@ -11,7 +11,11 @@ module.exports = {
   // Public URL of this app, used for links in texts and Twilio signature checks.
   publicUrl: (env.PUBLIC_URL || `http://localhost:${env.PORT || 3000}`).replace(/\/$/, ''),
   dbPath: env.DB_PATH || path.join(__dirname, '..', 'data', 'dispatch.db'),
-  timeZone: env.TZ_NAME || 'America/Edmonton',
+  timeZone: env.TZ_NAME || 'America/Toronto',
+  // Where scale ticket photos are stored.
+  uploadDir: env.UPLOAD_DIR || path.join(__dirname, '..', 'data', 'uploads'),
+  // Default time to text drivers tomorrow's jobs (HH:MM, blank = off). Can be changed on the Setup tab.
+  lineupTime: env.LINEUP_TIME ?? '17:00',
   companyName: env.COMPANY_NAME || 'ADAMS BROS',
   dispatchPhone: env.DISPATCH_PHONE || '',
   twilio: {

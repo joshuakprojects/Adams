@@ -87,6 +87,32 @@ function buildJobText(job, assignment, { updated = false } = {}) {
   return lines.join('\n');
 }
 
+/**
+ * The evening "here's your day" text. One job gets the full job text; several get a numbered list,
+ * each with its own details link.
+ */
+function buildLineupText(date, items) {
+  if (items.length === 1) {
+    const { job, assignment } = items[0];
+    return `Your job for ${formatDate(date)}:\n` + buildJobText(job, assignment, { updated: false });
+  }
+  const lines = [`${config.companyName} - Your ${items.length} jobs for ${formatDate(date)}:`];
+  items.forEach(({ job, assignment }, i) => {
+    const t = jobTypeInfo(job.job_type);
+    lines.push('');
+    lines.push(`${i + 1}) ${job.scheduled_time ? formatTime(job.scheduled_time) + ' - ' : ''}Job #${job.id}`);
+    const cargo = cargoSummary(job);
+    if (cargo) lines.push(`${t.what}: ${cargo}`);
+    if (job.from_location) lines.push(`${t.from}: ${job.from_location}`);
+    if (job.to_location) lines.push(`${t.to}: ${job.to_location}`);
+    if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
+    lines.push(`Details: ${jobLink(assignment.token)}`);
+  });
+  lines.push('');
+  lines.push('Reply OK to confirm all. Reply DONE when you finish each job.');
+  return lines.join('\n');
+}
+
 function buildCancelText(job) {
   return `${config.companyName} - Job #${job.id} on ${formatDate(job.scheduled_date)} is CANCELLED. ` +
     `You do not need to do this job. Call dispatch with any questions.`;
@@ -183,6 +209,7 @@ module.exports = {
   cargoSummary,
   jobLink,
   buildJobText,
+  buildLineupText,
   buildCancelText,
   buildRemovedText,
   parseReply,

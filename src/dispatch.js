@@ -1,4 +1,6 @@
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const config = require('./config');
 const { tx } = require('./db');
 const sms = require('./sms');
@@ -18,6 +20,19 @@ function todayIn(timeZone = config.timeZone) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
+/** Current local time as 'HH:MM' in the company time zone. */
+function nowHmIn(timeZone = config.timeZone, date = new Date()) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date);
+}
+
+function addDays(ymd, n) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+const IMAGE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/gif': 'gif' };
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
 function newToken() {
   return crypto.randomBytes(12).toString('base64url');
 }
@@ -33,7 +48,7 @@ const ASSIGNMENT_SELECT = `
 /**
  * All dispatch business logic. `send(to, body)` is injectable so tests don't hit Twilio.
  */
-function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
+function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHmIn, uploadDir = config.uploadDir } = {}) {
   const q = (sql) => db.prepare(sql);
 
   // ---------- drivers & trucks ----------
@@ -102,13 +117,17 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
     const job = q('SELECT * FROM jobs WHERE id = ?').get(Number(id));
     if (!job) return null;
     job.assignments = assignmentsFor(job.id);
+    job.tickets = ticketsFor(job.id);
     return job;
   }
 
   function listJobs({ from, to }) {
     const jobs = q(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
                     ORDER BY scheduled_date, (scheduled_time = ''), scheduled_time, id`).all(from, to);
-    for (const job of jobs) job.assignments = assignmentsFor(job.id);
+    for (const job of jobs) {
+      job.assignments = assignmentsFor(job.id);
+      job.tickets = ticketsFor(job.id);
+    }
     return jobs;
   }
 
@@ -225,6 +244,15 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
     }
   }
 
+  /** After a driver is texted new or changed details: they need to confirm again, unless already working it. */
+  function markTexted(assignmentId) {
+    q(`UPDATE assignments SET needs_resend = 0, sent_at = datetime('now'),
+         status = CASE WHEN status IN ('pending','sent','acknowledged') THEN 'sent' ELSE status END,
+         ack_at = CASE WHEN status IN ('pending','sent','acknowledged') THEN NULL ELSE ack_at END,
+         ack_via = CASE WHEN status IN ('pending','sent','acknowledged') THEN NULL ELSE ack_via END
+       WHERE id = ?`).run(assignmentId);
+  }
+
   /** Tell drivers who were taken off a job. */
   async function notifyRemoved(job, removed) {
     for (const a of removed) await sendText(a.driver_id, a.driver_phone, sms.buildRemovedText(job));
@@ -245,14 +273,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
       if (a.status === 'done' && !assignmentId) continue;
       const updated = a.status !== 'pending';
       const res = await sendText(a.driver_id, a.driver_phone, sms.buildJobText(job, a, { updated }), a.id);
-      if (res.ok) {
-        // A changed job needs a fresh confirmation, unless the driver is already working it.
-        q(`UPDATE assignments SET needs_resend = 0, sent_at = datetime('now'),
-             status = CASE WHEN status IN ('pending','sent','acknowledged') THEN 'sent' ELSE status END,
-             ack_at = CASE WHEN status IN ('pending','sent','acknowledged') THEN NULL ELSE ack_at END,
-             ack_via = CASE WHEN status IN ('pending','sent','acknowledged') THEN NULL ELSE ack_via END
-           WHERE id = ?`).run(a.id);
-      }
+      if (res.ok) markTexted(a.id);
       results.push({ assignment_id: a.id, driver: a.driver_name, ...res });
     }
     return { job: getJob(jobId), results };
@@ -378,12 +399,12 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
    * A driver texted us. Understands OK / DONE (optionally with a job number); anything else is
    * flagged on the dashboard for the office. Returns { reply } — the text to send back, if any.
    */
-  function handleInbound(fromRaw, bodyRaw) {
+  function handleInbound(fromRaw, bodyRaw, { media = [] } = {}) {
     const phone = sms.normalizePhone(fromRaw) || String(fromRaw || '');
-    const body = String(bodyRaw || '').trim().slice(0, 1600);
+    let body = String(bodyRaw || '').trim().slice(0, 1600);
     const driver = q('SELECT * FROM drivers WHERE phone = ?').get(phone);
     if (!driver) {
-      logInbound(phone, body, null, null, false);
+      logInbound(phone, body || `[${media.length} photo(s)]`, null, null, false);
       return { reply: null };
     }
 
@@ -394,10 +415,37 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
                     ORDER BY j.scheduled_date, (j.scheduled_time = ''), j.scheduled_time, j.id`).all(driver.id);
     const first = driver.name.split(' ')[0];
     const finish = (reply, assignmentId, handled = true) => {
-      logInbound(phone, body, driver.id, assignmentId, handled);
+      logInbound(phone, body || '[photo]', driver.id, assignmentId, handled);
       if (reply) logAutoReply(driver, reply, assignmentId);
       return { reply };
     };
+
+    // The job a driver most likely means: the one they named, else today's job in progress, else today's first.
+    const currentJob = () => {
+      if (jobId) return open.find((a) => a.job_id === jobId) || null;
+      const current = open.filter((a) => a.scheduled_date <= today());
+      return current.find((a) => a.status === 'in_progress') || current[0] || null;
+    };
+
+    // A texted photo is a scale ticket for the current job.
+    if (media.length) {
+      const target = currentJob();
+      for (const m of media) {
+        saveTicket({ driverId: driver.id, assignment: target, buffer: m.buffer, contentType: m.contentType, source: 'sms' });
+      }
+      const n = media.length === 1 ? 'ticket photo' : `${media.length} ticket photos`;
+      if (!target) {
+        if (!body) body = '[photo - no job today to attach it to]';
+        return finish(`Got your ${n}, but couldn't tell which job it's for. Dispatch will sort it out.`, null, false);
+      }
+      if (!action) {
+        if (body && !sms.SMALL_TALK.test(body)) {
+          // Photo plus a real message: save the photo, still show the message to the office.
+          return finish(`Got your ${n} for Job #${target.job_id}.`, target.id, false);
+        }
+        return finish(`Got your ${n} for Job #${target.job_id}.`, target.id);
+      }
+    }
 
     if (action === 'ack') {
       let targets = open.filter((a) => a.status === 'sent');
@@ -416,14 +464,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
     }
 
     if (action === 'done') {
-      let target;
-      if (jobId) {
-        target = open.find((a) => a.job_id === jobId);
-        if (!target) return finish(`Couldn't find an open Job #${jobId} for you. Call dispatch if that's wrong.`, null, false);
-      } else {
-        const current = open.filter((a) => a.scheduled_date <= today());
-        target = current.find((a) => a.status === 'in_progress') || current[0];
-        if (!target) return finish(`No job today to mark done. Reply DONE and the job number, e.g. DONE ${open[0]?.job_id || 1042}`, null, false);
+      const target = currentJob();
+      if (!target) {
+        if (jobId) return finish(`Couldn't find an open Job #${jobId} for you. Call dispatch if that's wrong.`, null, false);
+        return finish(`No job today to mark done. Reply DONE and the job number, e.g. DONE ${open[0]?.job_id || 1042}`, null, false);
       }
       q(`UPDATE assignments SET status = 'done', done_at = datetime('now'),
            ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, 'sms') WHERE id = ?`).run(target.id);
@@ -437,6 +481,149 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
     if (sms.SMALL_TALK.test(body)) return finish(null, open[0]?.id || null, true);
     const linked = jobId ? open.find((a) => a.job_id === jobId) : open.length === 1 ? open[0] : null;
     return finish(null, linked?.id || null, false);
+  }
+
+  // ---------- scale tickets ----------
+
+  function ticketsFor(jobId) {
+    return q(`SELECT t.id, t.assignment_id, t.driver_id, t.source, t.created_at, d.name AS driver_name
+              FROM tickets t LEFT JOIN drivers d ON d.id = t.driver_id
+              WHERE t.job_id = ? ORDER BY t.id`).all(jobId);
+  }
+
+  /** Save a ticket photo. `assignment` may be null (photo texted with no job to match). */
+  function saveTicket({ driverId = null, assignment = null, buffer, contentType, source = 'web' }) {
+    const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+    const ext = IMAGE_TYPES[type];
+    if (!ext) throw new ValidationError('Only photos can be uploaded');
+    if (!buffer || !buffer.length) throw new ValidationError('The photo was empty');
+    if (buffer.length > MAX_IMAGE_BYTES) throw new ValidationError('That photo is too big');
+    fs.mkdirSync(uploadDir, { recursive: true });
+    const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    fs.writeFileSync(path.join(uploadDir, filename), buffer);
+    const r = q(`INSERT INTO tickets (assignment_id, job_id, driver_id, filename, content_type, source) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(assignment?.id ?? null, assignment?.job_id ?? null, driverId ?? assignment?.driver_id ?? null, filename, type, source);
+    return getTicket(r.lastInsertRowid);
+  }
+
+  function getTicket(id) {
+    const t = q('SELECT * FROM tickets WHERE id = ?').get(Number(id));
+    if (t) t.path = path.join(uploadDir, t.filename);
+    return t || null;
+  }
+
+  function ticketsForAssignment(assignmentId) {
+    return q('SELECT id, created_at, source FROM tickets WHERE assignment_id = ? ORDER BY id').all(assignmentId);
+  }
+
+  /** Photos texted in that couldn't be matched to a job — the office attaches them by hand. */
+  function unmatchedTickets() {
+    return q(`SELECT t.id, t.created_at, t.driver_id, d.name AS driver_name FROM tickets t
+              LEFT JOIN drivers d ON d.id = t.driver_id WHERE t.job_id IS NULL ORDER BY t.id DESC LIMIT 50`).all();
+  }
+
+  function attachTicket(ticketId, jobId) {
+    const t = getTicket(ticketId);
+    if (!t) throw new ValidationError('Ticket not found');
+    const a = t.driver_id ? q('SELECT * FROM assignments WHERE job_id = ? AND driver_id = ?').get(Number(jobId), t.driver_id) : null;
+    if (!q('SELECT id FROM jobs WHERE id = ?').get(Number(jobId))) throw new ValidationError('Job not found');
+    q('UPDATE tickets SET job_id = ?, assignment_id = ? WHERE id = ?').run(Number(jobId), a?.id ?? null, t.id);
+    return getTicket(t.id);
+  }
+
+  function deleteTicket(ticketId) {
+    const t = getTicket(ticketId);
+    if (!t) return;
+    q('DELETE FROM tickets WHERE id = ?').run(t.id);
+    fs.rmSync(t.path, { force: true });
+  }
+
+  // ---------- settings ----------
+
+  function getSetting(key, fallback = '') {
+    const row = q('SELECT value FROM settings WHERE key = ?').get(key);
+    return row ? row.value : fallback;
+  }
+
+  function setSetting(key, value) {
+    q('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value));
+  }
+
+  function getSettings() {
+    return { lineup_time: getSetting('lineup_time', config.lineupTime || '') };
+  }
+
+  function saveSettings(data) {
+    if ('lineup_time' in data) {
+      const t = str(data.lineup_time, 5);
+      if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new ValidationError('Time must look like 17:00');
+      setSetting('lineup_time', t);
+    }
+    return getSettings();
+  }
+
+  // ---------- day lineup ("tomorrow's jobs" text) ----------
+
+  /** Per driver, their open jobs on `date`, in time order. */
+  function lineupFor(date) {
+    const jobs = listJobs({ from: date, to: date }).filter((j) => j.status === 'open');
+    const byDriver = new Map();
+    for (const job of jobs) {
+      for (const a of job.assignments) {
+        if (a.status === 'cancelled' || a.status === 'done') continue;
+        if (!byDriver.has(a.driver_id)) byDriver.set(a.driver_id, { driver_id: a.driver_id, name: a.driver_name, phone: a.driver_phone, items: [] });
+        byDriver.get(a.driver_id).items.push({ job, assignment: a });
+      }
+    }
+    return [...byDriver.values()];
+  }
+
+  function lineupStatus(date) {
+    const sent = q(`SELECT driver_id, MAX(sent_at) AS sent_at FROM lineup_sends WHERE date = ? GROUP BY driver_id`).all(date);
+    const drivers = lineupFor(date);
+    return {
+      date,
+      drivers: drivers.length,
+      sent: sent.length,
+      last_sent_at: sent.reduce((m, r) => (r.sent_at > m ? r.sent_at : m), '') || null,
+    };
+  }
+
+  /**
+   * Text each driver their whole day for `date`.
+   * auto=true (the evening send) skips drivers who already got the lineup and have nothing new since.
+   */
+  async function sendLineup(date, { auto = false } = {}) {
+    const results = [];
+    for (const d of lineupFor(date)) {
+      if (auto) {
+        const already = q('SELECT 1 FROM lineup_sends WHERE date = ? AND driver_id = ?').get(date, d.driver_id);
+        const somethingNew = d.items.some(({ assignment: a }) => a.status === 'pending' || a.needs_resend);
+        if (already && !somethingNew) continue;
+      }
+      const res = await sendText(d.driver_id, d.phone, sms.buildLineupText(date, d.items),
+        d.items.length === 1 ? d.items[0].assignment.id : null);
+      if (res.ok) {
+        for (const { assignment: a } of d.items) {
+          if (a.status === 'pending' || a.needs_resend) markTexted(a.id);
+        }
+        q('INSERT INTO lineup_sends (date, driver_id, auto) VALUES (?, ?, ?)').run(date, d.driver_id, auto ? 1 : 0);
+      }
+      results.push({ driver: d.name, jobs: d.items.length, ...res });
+    }
+    return { date, results };
+  }
+
+  /**
+   * Called every minute. Once the set time has passed each day, texts everyone their jobs for tomorrow.
+   */
+  async function runScheduledLineup() {
+    const time = getSettings().lineup_time;
+    if (!time) return null;
+    const day = today();
+    if (nowHm() < time || getSetting('lineup_auto_last') === day) return null;
+    setSetting('lineup_auto_last', day);
+    return sendLineup(addDays(day, 1), { auto: true });
   }
 
   // ---------- dashboard ----------
@@ -469,6 +656,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
       drivers,
       trucks: listTrucks(),
       alerts: listMessages({ unhandledOnly: true, limit: 50 }),
+      unmatched_tickets: unmatchedTickets(),
+      lineup: { ...lineupStatus(date), auto_time: getSettings().lineup_time },
     };
   }
 
@@ -483,8 +672,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn } = {}) {
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
+    saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
+    getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,
   };
 }
 
-module.exports = { createDispatch, ValidationError, todayIn, JOB_TYPES, TRUCK_KINDS, ACTIVE_STATUSES };
+module.exports = { createDispatch, ValidationError, todayIn, nowHmIn, addDays, JOB_TYPES, TRUCK_KINDS, ACTIVE_STATUSES, IMAGE_TYPES, MAX_IMAGE_BYTES };

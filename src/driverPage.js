@@ -22,7 +22,7 @@ function row(label, value, extra = '') {
  * The page a driver opens from the link in their text. Big text, big buttons, no login.
  * Works without JavaScript (plain form posts).
  */
-function renderDriverPage(a, otherJobs = []) {
+function renderDriverPage(a, otherJobs = [], tickets = []) {
   const job = a.job;
   const t = sms.jobTypeInfo(job.job_type);
   const cancelled = a.status === 'cancelled' || job.status === 'cancelled';
@@ -48,6 +48,17 @@ function renderDriverPage(a, otherJobs = []) {
   const contactPhone = sms.prettyPhone(job.contact_phone);
   const contactLink = job.contact_phone && /^\+?\d+$/.test(job.contact_phone)
     ? ` <a class="call" href="tel:${esc(job.contact_phone)}">Call</a>` : '';
+
+  const ticketSection = cancelled ? '' : `
+    <h2>Scale tickets</h2>
+    ${tickets.length ? `<div class="tickets">${tickets.map((t) => `
+      <a href="/j/${esc(a.token)}/ticket/${t.id}" target="_blank"><img src="/j/${esc(a.token)}/ticket/${t.id}" alt="Ticket photo" loading="lazy"></a>`).join('')}
+    </div>` : ''}
+    <label class="btn photo" id="photo-btn">📷 Add scale ticket photo
+      <input type="file" accept="image/*" capture="environment" id="photo-input" hidden>
+    </label>
+    <div id="photo-status" class="tip"></div>
+    <p class="tip">Or just text a photo of the ticket to this number.</p>`;
 
   const others = otherJobs.length ? `
     <h2>Your other jobs</h2>
@@ -78,10 +89,49 @@ function renderDriverPage(a, otherJobs = []) {
     ${row('Notes', job.notes)}
   </div>
   <div class="actions">${buttons}</div>
+  ${ticketSection}
   ${config.dispatchPhone ? `<a class="btn call-dispatch" href="tel:${esc(config.dispatchPhone)}">📞 Call dispatch</a>` : ''}
   <p class="tip">You can also just text back <b>OK</b> to confirm or <b>DONE</b> when finished.</p>
   ${others}
 </main>
+<script>
+(function () {
+  var input = document.getElementById('photo-input');
+  if (!input) return;
+  var status = document.getElementById('photo-status');
+  // Shrink big phone photos so they upload quickly on a weak signal.
+  function shrink(file) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        var max = 1800, w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
+        var c = document.createElement('canvas');
+        c.width = Math.round(w * s); c.height = Math.round(h * s);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob(function (b) { resolve(b || file); }, 'image/jpeg', 0.8);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(file); };
+      img.src = url;
+    });
+  }
+  input.addEventListener('change', function () {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    status.textContent = 'Uploading photo…';
+    shrink(file).then(function (blob) {
+      return fetch(location.pathname + '/ticket', { method: 'POST', headers: { 'Content-Type': blob.type || 'image/jpeg' }, body: blob });
+    }).then(function (res) {
+      if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || 'Upload failed'); });
+      status.textContent = '✔ Photo saved';
+      location.reload();
+    }).catch(function (err) {
+      status.textContent = '✖ ' + err.message + ' — try again, or text the photo instead.';
+    });
+  });
+})();
+</script>
 </body></html>`;
 }
 

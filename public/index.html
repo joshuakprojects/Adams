@@ -11,7 +11,7 @@
     <div class="brand">Dispatch</div>
     <nav class="tabs">
       <button data-tab="board" class="active">Board</button>
-      <button data-tab="people">Drivers &amp; Trucks</button>
+      <button data-tab="people">Setup</button>
       <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
     </nav>
     <div class="spacer"></div>
@@ -29,13 +29,15 @@
       <input type="date" id="board-date">
       <h2 id="board-title"></h2>
       <div class="spacer"></div>
+      <span id="lineup-status" class="muted small"></span>
+      <button class="btn" id="send-lineup" title="Text each driver a list of all their jobs for this day">📱 Text drivers their day</button>
       <button class="btn primary big" id="new-job">+ New job</button>
     </div>
     <div id="alerts"></div>
     <div class="board">
       <div id="jobs" class="jobs"></div>
       <aside class="drivers-panel">
-        <h3>Drivers today</h3>
+        <h3 id="drivers-title">Drivers today</h3>
         <div id="driver-list"></div>
       </aside>
     </div>
@@ -43,6 +45,17 @@
 
   <!-- DRIVERS & TRUCKS -->
   <section id="tab-people" class="tab hidden">
+    <div class="panel settings">
+      <h2>Evening text: tomorrow's jobs</h2>
+      <form id="settings-form" class="inline-form">
+        <label class="check"><input type="checkbox" name="lineup_on"> Automatically text each driver their jobs for tomorrow at</label>
+        <input type="time" name="lineup_time" value="17:00">
+        <span class="muted small">(Eastern time)</span>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+      <p class="muted small">Drivers who already got their day by text are only texted again if a job was added or changed.
+        You can also send it any time with the "Text drivers their day" button on the board.</p>
+    </div>
     <div class="two-col">
       <div class="panel">
         <h2>Drivers</h2>
@@ -140,6 +153,17 @@
         <button type="submit" class="btn primary big" value="send">Save &amp; text drivers</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- TICKET PHOTOS -->
+  <dialog id="ticket-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="ticket-title">Scale tickets</h2>
+        <button type="button" class="link" data-close-tickets>✕</button>
+      </div>
+      <div id="ticket-list" class="ticket-list"></div>
+    </div>
   </dialog>
 
   <datalist id="dl-customers"></datalist>
