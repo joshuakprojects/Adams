@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dispatch – Log in</title>
+  <link rel="stylesheet" href="/login.css">
+</head>
+<body class="login-page">
+  <form id="login" class="login-box">
+    <h1>Dispatch</h1>
+    <p class="muted">Office login</p>
+    <label>Email <input name="email" type="email" autocomplete="username" required autofocus></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <div id="err" class="error"></div>
+    <button class="btn primary" type="submit">Log in</button>
+  </form>
+  <script>
+    document.getElementById('login').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: f.get('email'), password: f.get('password') }),
+      });
+      if (res.ok) location.href = '/';
+      else document.getElementById('err').textContent = (await res.json()).error || 'Login failed';
+    });
+  </script>
+</body>
+</html>
