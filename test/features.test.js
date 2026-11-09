@@ -34,11 +34,11 @@ test('lineup: one text per driver listing all their jobs, and it counts as texti
   assert.equal(out.results.length, 2);
   const toDave = sent.find((m) => m.to === '+14035550101').body;
   assert.match(toDave, /Your 2 jobs for Wed Nov 11/);
-  assert.match(toDave, /1\) 7:00 AM - Job #1001/);
-  assert.match(toDave, /2\) 1:00 PM - Job #1002/);
+  assert.match(toDave, /1\) 7:00 AM - Aggregate #1001/);
+  assert.match(toDave, /2\) 1:00 PM - Aggregate #1002/);
   assert.match(toDave, /Reply OK to confirm all/);
   const toRon = sent.find((m) => m.to === '+14035550102').body;
-  assert.match(toRon, /Your job for Wed Nov 11:\nADAMS BROS - Job #1001/);
+  assert.match(toRon, /Your job for Wed Nov 11:\nADAMS BROS - Aggregate Work Order #1001/);
   assert.ok(d.getJob(1001).assignments.every((a) => a.status === 'sent'));
   // One OK confirms both of Dave's jobs.
   assert.match(d.handleInbound('+14035550101', 'ok').reply, /Jobs #1001 .*#1002/);
@@ -101,4 +101,46 @@ test('ticket photos: from the job page, texted in, and unmatched', async () => {
 
   d.deleteTicket(t.id);
   assert.ok(!fs.existsSync(path.join(uploadDir, t.filename)));
+});
+
+test('septic job: office details, driver report, and the customer/billing fields', async () => {
+  const { d, dave } = setup();
+  const { job } = d.saveJob({
+    job_type: 'septic', scheduled_date: '2026-11-10', to_location: '12 Bay St', municipality: 'McDougall',
+    customer: 'J. Larson', customer_phone: '705-555-0199', customer_email: 'j@example.com', billing_address: 'PO Box 1',
+    quoted_price: '$350', payment_method: 'Cash', collect_payment: true, paper_wo: '9440',
+    details: { tank_type: 'Holding', tank_size: '1000 gal', lids_uncovered: 'At grade', bogus: 'dropped' },
+    assignments: [{ driver_id: dave.id }],
+  });
+  assert.deepEqual(job.details, { lids_uncovered: 'At grade', tank_type: 'Holding', tank_size: '1000 gal' });
+  assert.equal(job.customer_phone, '+17055550199');
+  assert.equal(job.collect_payment, 1);
+  assert.throws(() => d.saveJob({ ...job, id: job.id, details: { tank_type: 'Swimming pool' } }), /Type of tank/);
+
+  await d.sendJob(job.id);
+  // Office-only changes (billing address) don't ask drivers to re-confirm; a tank detail change does.
+  d.saveJob({ ...job, id: job.id, billing_address: 'PO Box 2', assignments: [{ driver_id: dave.id }] });
+  assert.equal(d.getJob(job.id).assignments[0].needs_resend, 0);
+  d.saveJob({ ...job, id: job.id, details: { ...job.details, hose_length: '200 ft' }, assignments: [{ driver_id: dave.id }] });
+  assert.equal(d.getJob(job.id).assignments[0].needs_resend, 1);
+
+  const token = job.assignments[0].token;
+  const a = d.saveReport(token, { outlet_baffle: 'Recommend replacement', liquid_level: 'High', lids_broken: 'No',
+    payment_collected: 'Cash', amount_collected: '$350', comments: 'Baffle cracked', junk: 'x' });
+  assert.deepEqual(a.report, { outlet_baffle: 'Recommend replacement', liquid_level: 'High', lids_broken: 'No',
+    comments: 'Baffle cracked', payment_collected: 'Cash', amount_collected: '$350' });
+  assert.equal(a.status, 'acknowledged');
+  assert.throws(() => d.saveReport(token, { liquid_level: 'Full' }), /Liquid level/);
+});
+
+test('book the pick-up for a portable toilet', () => {
+  const { d, dave } = setup();
+  const { job } = d.saveJob({ job_type: 'toilet', scheduled_date: '2026-11-10', to_location: 'Cottage',
+    details: { trip: 'Deliver', pickup_date: '2026-11-24', toilet1_type: 'Standard', toilet1_qty: '2' }, assignments: [{ driver_id: dave.id }] });
+  const pickup = d.bookPickup(job.id);
+  assert.equal(pickup.scheduled_date, '2026-11-24');
+  assert.equal(pickup.details.trip, 'Pick up');
+  assert.equal(pickup.details.toilet1_qty, '2');
+  assert.equal(pickup.assignments.length, 0);
+  assert.match(pickup.notes, /Pick-up for job #1001/);
 });

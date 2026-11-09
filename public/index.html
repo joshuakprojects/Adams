@@ -76,12 +76,7 @@
         <form id="truck-form" class="inline-form">
           <input type="hidden" name="id">
           <input name="unit" placeholder="Unit # (e.g. T12)" required>
-          <select name="kind">
-            <option value="haul">Gravel / end dump</option>
-            <option value="float">Float / lowbed</option>
-            <option value="septic">Septic pump</option>
-            <option value="other">Other</option>
-          </select>
+          <select name="kind" id="truck-kind"></select>
           <input name="description" placeholder="Description (Kenworth tri-axle…)">
           <label class="check"><input type="checkbox" name="active" checked> Active</label>
           <button class="btn primary" type="submit">Save truck</button>
@@ -116,30 +111,59 @@
         <button type="button" class="link" data-close>✕</button>
       </div>
       <input type="hidden" name="id">
-      <div class="segmented" id="job-type">
-        <label><input type="radio" name="job_type" value="haul" checked><span>🪨 Haul</span></label>
-        <label><input type="radio" name="job_type" value="float"><span>🚜 Float</span></label>
-        <label><input type="radio" name="job_type" value="septic"><span>💧 Septic</span></label>
-      </div>
-      <div class="grid">
-        <label>Date <input type="date" name="scheduled_date" required></label>
-        <label>Start time <input type="time" name="scheduled_time"></label>
-        <label class="wide">Customer <input name="customer" list="dl-customers" autocomplete="off"></label>
+      <div class="segmented types" id="job-type"></div>
+      <div class="form-title" id="form-title"></div>
 
-        <label class="wide"><span data-label="what">Material</span>
-          <input name="material" list="dl-materials" autocomplete="off"></label>
-        <label><span data-label="qty">Quantity</span> <input name="quantity" placeholder="e.g. 200"></label>
-        <label><span>Unit</span> <input name="unit" list="dl-units" placeholder="tonnes / yards"></label>
-        <label data-show="haul septic"><span>Number of loads</span> <input type="number" name="loads_planned" min="0" max="999"></label>
+      <fieldset class="sec">
+        <legend>When</legend>
+        <div class="grid">
+          <label><span data-label="date">Delivery date</span> <input type="date" name="scheduled_date" required></label>
+          <label>Time <input type="time" name="scheduled_time"></label>
+          <label>Paper W.O. # <input name="paper_wo" placeholder="if written on paper"></label>
+        </div>
+      </fieldset>
 
-        <label class="wide"><span data-label="from">From (pit / yard)</span>
-          <input name="from_location" list="dl-locations" autocomplete="off"></label>
-        <label class="wide"><span data-label="to">Deliver to</span>
-          <input name="to_location" list="dl-locations" autocomplete="off"></label>
-        <label>Site contact <input name="contact_name"></label>
-        <label>Contact phone <input name="contact_phone" type="tel"></label>
-        <label class="wide">Notes for driver <textarea name="notes" rows="2" placeholder="Gate code, where to dump, tarp required…"></textarea></label>
-      </div>
+      <fieldset class="sec">
+        <legend>Customer</legend>
+        <div class="grid">
+          <label class="span2">Name <input name="customer" list="dl-customers" autocomplete="off"></label>
+          <label>Phone # <input name="customer_phone" type="tel"></label>
+          <label class="span2">Billing / mailing address <input name="billing_address"></label>
+          <label>PO # <input name="po_number"></label>
+          <label class="wide">Email <input name="customer_email" type="email"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="sec">
+        <legend id="job-legend">Job</legend>
+        <div class="grid">
+          <label class="wide" data-when="what"><span data-label="what">Material</span>
+            <input name="material" list="dl-what" autocomplete="off"></label>
+          <label data-when="quantity">Quantity <input name="quantity" placeholder="e.g. 200"></label>
+          <label data-when="quantity">Unit <input name="unit" list="dl-units" placeholder="tonnes / yards"></label>
+          <label data-when="loads">Number of loads <input type="number" name="loads_planned" min="0" max="999"></label>
+          <label class="wide" data-when="from"><span data-label="from">From</span>
+            <input name="from_location" list="dl-locations" autocomplete="off"></label>
+          <label class="span2"><span data-label="to">Delivery address</span>
+            <input name="to_location" list="dl-locations" autocomplete="off"></label>
+          <label>Municipality <input name="municipality" list="dl-municipalities" autocomplete="off"></label>
+          <label class="span2">Site contact name <input name="contact_name"></label>
+          <label>Site contact phone # <input name="contact_phone" type="tel"></label>
+        </div>
+        <div class="grid" id="type-fields"></div>
+        <div class="grid">
+          <label class="wide">Special instructions (drivers see this) <textarea name="notes" rows="2" placeholder="Gate code, where to dump, tarp required…"></textarea></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="sec">
+        <legend>Price &amp; payment</legend>
+        <div class="grid">
+          <label>Quoted price <input name="quoted_price" placeholder="$"></label>
+          <label>Payment method <select name="payment_method"></select></label>
+          <label class="check-row"><input type="checkbox" name="collect_payment"> Driver collects payment on site</label>
+        </div>
+      </fieldset>
 
       <h3>Drivers</h3>
       <p class="muted small">Tick everyone on this job. Pick the truck each one is taking.</p>
@@ -167,11 +191,14 @@
   </dialog>
 
   <datalist id="dl-customers"></datalist>
-  <datalist id="dl-materials"></datalist>
+  <datalist id="dl-what"></datalist>
+  <datalist id="dl-municipalities"></datalist>
+  <datalist id="dl-toilets"></datalist>
   <datalist id="dl-locations"></datalist>
   <datalist id="dl-units"></datalist>
 
   <div id="toast" class="toast hidden"></div>
+  <script src="/forms.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

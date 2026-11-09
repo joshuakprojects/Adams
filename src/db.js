@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
--- truck kind: haul (gravel/aggregate/asphalt), float (lowbed), septic (pump-out), other
+-- truck kind: haul (aggregate), float (lowbed), septic (vac), bin, toilet (service), other
 CREATE TABLE IF NOT EXISTS trucks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   unit TEXT NOT NULL UNIQUE,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS drivers (
   notes TEXT NOT NULL DEFAULT ''
 );
 
--- job_type: haul | float | septic
+-- job_type: haul (aggregate) | bin | septic | toilet | float | misc  (see public/forms.js)
 -- status:   open | complete | cancelled
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,10 +128,43 @@ function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   db.exec(SCHEMA);
+  migrate(db);
   // Start job numbers at 1001 so they look like real job numbers on the trucks.
   const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'jobs'").get();
   if (!seq) db.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('jobs', 1000)").run();
   return db;
+}
+
+// Columns added after the first version. Added to existing databases on start-up.
+const ADDED_COLUMNS = {
+  jobs: {
+    // Customer & billing, as on the paper work orders.
+    customer_phone: "TEXT NOT NULL DEFAULT ''",
+    customer_email: "TEXT NOT NULL DEFAULT ''",
+    billing_address: "TEXT NOT NULL DEFAULT ''",
+    po_number: "TEXT NOT NULL DEFAULT ''",
+    municipality: "TEXT NOT NULL DEFAULT ''",
+    paper_wo: "TEXT NOT NULL DEFAULT ''",
+    quoted_price: "TEXT NOT NULL DEFAULT ''",
+    payment_method: "TEXT NOT NULL DEFAULT ''",
+    collect_payment: 'INTEGER NOT NULL DEFAULT 0',
+    // Type-specific form fields (bin service, septic tank details, toilet types…) as JSON.
+    details: "TEXT NOT NULL DEFAULT '{}'",
+  },
+  assignments: {
+    // What the driver filled in after the job (septic conditions, payment collected, notes) as JSON.
+    report: "TEXT NOT NULL DEFAULT '{}'",
+    report_at: 'TEXT',
+  },
+};
+
+function migrate(db) {
+  for (const [table, cols] of Object.entries(ADDED_COLUMNS)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, def] of Object.entries(cols)) {
+      if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+    }
+  }
 }
 
 /** Run fn inside a transaction. */

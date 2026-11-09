@@ -1,5 +1,7 @@
 const config = require('./config');
 const sms = require('./sms');
+const FORMS = require('../public/forms');
+const { reportFields } = require('./dispatch');
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const mapsUrl = (address) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
@@ -18,52 +20,84 @@ function row(label, value, extra = '') {
   return `<div class="row"><div class="label">${esc(label)}</div><div class="value">${esc(value)}${extra}</div></div>`;
 }
 
+function fieldInput(f, value, prefix = '') {
+  const name = esc(prefix + f.key);
+  if (f.kind === 'choice') {
+    return `<fieldset class="choice"><legend>${esc(f.label)}</legend>${f.options.map((o) => `
+      <label><input type="radio" name="${name}" value="${esc(o)}" ${value === o ? 'checked' : ''}><span>${esc(o)}</span></label>`).join('')}
+    </fieldset>`;
+  }
+  if (f.kind === 'textarea') {
+    return `<label class="field">${esc(f.label)}<textarea name="${name}" rows="3">${esc(value)}</textarea></label>`;
+  }
+  return `<label class="field">${esc(f.label)}<input name="${name}" value="${esc(value)}" ${f.kind === 'number' ? 'inputmode="decimal"' : ''}></label>`;
+}
+
 /**
  * The page a driver opens from the link in their text. Big text, big buttons, no login.
  * Works without JavaScript (plain form posts).
  */
-function renderDriverPage(a, otherJobs = [], tickets = []) {
+function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {}) {
   const job = a.job;
   const t = sms.jobTypeInfo(job.job_type);
+  const d = FORMS.parseDetails(job);
   const cancelled = a.status === 'cancelled' || job.status === 'cancelled';
   const action = (name, label, cls = '') =>
     `<form method="post" action="/j/${esc(a.token)}/${name}"><button class="btn ${cls}" type="submit">${label}</button></form>`;
 
-  let buttons = '';
+  let top = '';
+  let finish = '';
   if (cancelled) {
-    buttons = `<div class="banner cancelled">This job was CANCELLED. You do not need to do it.</div>`;
+    top = `<div class="banner cancelled">This job was CANCELLED. You do not need to do it.</div>`;
   } else if (a.status === 'done') {
-    buttons = `<div class="banner done">✔ Finished${a.loads_done ? ` — ${a.loads_done} load${a.loads_done === 1 ? '' : 's'}` : ''}. Thank you!</div>
-      ${action('reopen', 'Oops — not finished yet', 'small')}`;
+    top = `<div class="banner done">✔ Finished${a.loads_done ? ` — ${a.loads_done} load${a.loads_done === 1 ? '' : 's'}` : ''}. Thank you!</div>`;
+    finish = action('reopen', 'Oops — not finished yet', 'small');
   } else {
-    if (a.status === 'pending' || a.status === 'sent') buttons += action('ack', '👍 Got it', 'primary');
-    if (job.job_type === 'haul' || job.loads_planned) {
-      buttons += `<div class="loads">Loads done: <b>${a.loads_done}</b>${job.loads_planned ? ` of ${job.loads_planned}` : ''}</div>`;
-      buttons += action('load', '+1 Load delivered', 'load');
-      if (a.loads_done > 0) buttons += action('unload', 'Undo last load', 'small');
+    if (a.status === 'pending' || a.status === 'sent') top += action('ack', '👍 Got it', 'primary');
+    if (t.loads || job.loads_planned) {
+      top += `<div class="loads">Loads done: <b>${a.loads_done}</b>${job.loads_planned ? ` of ${job.loads_planned}` : ''}</div>`;
+      top += action('load', '+1 Load delivered', 'load');
+      if (a.loads_done > 0) top += action('unload', 'Undo last load', 'small');
     }
-    buttons += action('done', '✔ Job finished', 'finish');
+    finish = action('done', '✔ Job finished', 'finish');
   }
 
-  const contactPhone = sms.prettyPhone(job.contact_phone);
-  const contactLink = job.contact_phone && /^\+?\d+$/.test(job.contact_phone)
-    ? ` <a class="call" href="tel:${esc(job.contact_phone)}">Call</a>` : '';
+  const callLink = (phone) => (phone && /^\+?\d+$/.test(phone) ? ` <a class="call" href="tel:${esc(phone)}">Call</a>` : '');
+  const site = sms.siteAddress(job);
+  const typeRows = t.fields
+    .filter((f) => !/^toilet\d_/.test(f.key) && f.key !== 'service' && f.key !== 'trip')
+    .map((f) => row(f.label, f.kind === 'date' ? sms.formatDate(d[f.key]) : d[f.key])).join('');
 
+  // After-job report: the form's own questions (septic conditions), payment if the driver collects it, notes.
+  const fields = reportFields(job.job_type).filter((f) =>
+    !['payment_collected', 'amount_collected'].includes(f.key) || job.collect_payment);
+  const typeReport = t.report.length > 0;
+  const r = a.report || {};
+  const reportForm = cancelled ? '' : `
+    <form method="post" action="/j/${esc(a.token)}/report" id="report" class="report ${typeReport || job.collect_payment ? '' : 'compact'}">
+      <h2>${esc(t.reportTitle || (job.collect_payment ? 'Payment & notes' : 'Notes for the office'))}</h2>
+      ${saved ? '<div class="banner saved">✔ Saved — thanks!</div>' : ''}
+      ${job.collect_payment ? `<div class="collect">Collect: <b>${esc(job.quoted_price || 'see office')}</b>${job.payment_method ? ` (${esc(job.payment_method)})` : ''}</div>` : ''}
+      ${fields.map((f) => fieldInput(f, r[f.key])).join('')}
+      <button class="btn primary" type="submit">Save${typeReport ? ' report' : ''}</button>
+    </form>`;
+
+  const photoWord = ['haul', 'misc'].includes(job.job_type) ? 'scale ticket' : 'job';
   const ticketSection = cancelled ? '' : `
-    <h2>Scale tickets</h2>
-    ${tickets.length ? `<div class="tickets">${tickets.map((t) => `
-      <a href="/j/${esc(a.token)}/ticket/${t.id}" target="_blank"><img src="/j/${esc(a.token)}/ticket/${t.id}" alt="Ticket photo" loading="lazy"></a>`).join('')}
+    <h2>${photoWord === 'job' ? 'Photos' : 'Scale tickets'}</h2>
+    ${tickets.length ? `<div class="tickets">${tickets.map((tk) => `
+      <a href="/j/${esc(a.token)}/ticket/${tk.id}" target="_blank"><img src="/j/${esc(a.token)}/ticket/${tk.id}" alt="Photo" loading="lazy"></a>`).join('')}
     </div>` : ''}
-    <label class="btn photo" id="photo-btn">📷 Add scale ticket photo
+    <label class="btn photo" id="photo-btn">📷 Add ${photoWord} photo
       <input type="file" accept="image/*" capture="environment" id="photo-input" hidden>
     </label>
     <div id="photo-status" class="tip"></div>
-    <p class="tip">Or just text a photo of the ticket to this number.</p>`;
+    <p class="tip">Or just text the photo to this number.</p>`;
 
   const others = otherJobs.length ? `
     <h2>Your other jobs</h2>
     <ul class="others">${otherJobs.map((o) => `
-      <li><a href="/j/${esc(o.token)}">#${o.job_id} · ${esc(sms.formatDate(o.scheduled_date))} ${esc(sms.formatTime(o.scheduled_time))}
+      <li><a href="/j/${esc(o.token)}">${esc(sms.jobTypeInfo(o.job_type).name)} #${o.job_id} · ${esc(sms.formatDate(o.scheduled_date))} ${esc(sms.formatTime(o.scheduled_time))}
         <span>${esc(o.material || o.to_location || '')}</span></a></li>`).join('')}
     </ul>` : '';
 
@@ -71,25 +105,29 @@ function renderDriverPage(a, otherJobs = [], tickets = []) {
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Job #${job.id} – ${esc(config.companyName)}</title>
+<title>${esc(t.name)} #${job.id} – ${esc(config.companyName)}</title>
 <link rel="stylesheet" href="/driver.css">
 </head><body>
-<header><div class="co">${esc(config.companyName)}</div><div class="num">Job #${job.id}</div></header>
+<header><div class="co">${esc(config.companyName)}</div><div class="num">${esc(t.icon)} #${job.id}</div></header>
 <main>
+  <div class="form-title">${esc(t.title)}</div>
   <div class="status s-${esc(cancelled ? 'cancelled' : a.status)}">${esc(cancelled ? STATUS_TEXT.cancelled : STATUS_TEXT[a.status] || a.status)}</div>
   <div class="when">${esc(sms.formatDate(job.scheduled_date))}${job.scheduled_time ? ` @ ${esc(sms.formatTime(job.scheduled_time))}` : ''}</div>
   <div class="card">
+    ${row(t.what || 'Job', sms.cargoSummary(job))}
+    ${t.from ? row(t.from, job.from_location, job.from_location ? `<a class="map" href="${mapsUrl(job.from_location)}">Map ➜</a>` : '') : ''}
+    ${row(t.to, site, site ? `<a class="map" href="${mapsUrl(site)}">Map ➜</a>` : '')}
+    ${typeRows}
+    ${row('Customer', [job.customer, sms.prettyPhone(job.customer_phone)].filter(Boolean).join(' '), callLink(job.customer_phone))}
+    ${row('Site contact', [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' '), callLink(job.contact_phone))}
+    ${row('Notes', job.notes)}
     ${row('Driver', a.driver_name)}
     ${row('Truck', a.truck_unit)}
-    ${row(t.what, sms.cargoSummary(job))}
-    ${row(t.from, job.from_location, job.from_location ? `<a class="map" href="${mapsUrl(job.from_location)}">Map ➜</a>` : '')}
-    ${row(t.to, job.to_location, job.to_location ? `<a class="map" href="${mapsUrl(job.to_location)}">Map ➜</a>` : '')}
-    ${row('Customer', job.customer)}
-    ${row('Site contact', [job.contact_name, contactPhone].filter(Boolean).join(' '), contactLink)}
-    ${row('Notes', job.notes)}
   </div>
-  <div class="actions">${buttons}</div>
+  <div class="actions">${top}</div>
+  ${reportForm}
   ${ticketSection}
+  <div class="actions">${finish}</div>
   ${config.dispatchPhone ? `<a class="btn call-dispatch" href="tel:${esc(config.dispatchPhone)}">📞 Call dispatch</a>` : ''}
   <p class="tip">You can also just text back <b>OK</b> to confirm or <b>DONE</b> when finished.</p>
   ${others}

@@ -6,6 +6,7 @@ const { createDispatch, ValidationError } = require('./dispatch');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
+const { renderPrintPage } = require('./printPage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
 async function fetchTwilioMedia(url) {
@@ -49,7 +50,19 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
     if (!a) return res.status(404).send(renderNotFound());
     // Opening the link counts as "seen" but not as confirmed — they still tap Got it or text OK.
     res.setHeader('Cache-Control', 'no-store');
-    res.send(renderDriverPage(a, dispatch.otherJobsForDriver(a.driver_id, a.id), dispatch.ticketsForAssignment(a.id)));
+    res.send(renderDriverPage(a, dispatch.otherJobsForDriver(a.driver_id, a.id), dispatch.ticketsForAssignment(a.id),
+      { saved: req.query.saved === '1' }));
+  });
+
+  // The driver's after-job report (septic conditions, payment collected, notes) — a plain form post.
+  app.post('/j/:token/report', (req, res) => {
+    try {
+      dispatch.saveReport(req.params.token, req.body || {}, 'web');
+    } catch (err) {
+      if (!(err instanceof ValidationError)) throw err;
+      return res.status(400).send(`${err.message}. Go back and try again.`);
+    }
+    res.redirect(303, `/j/${encodeURIComponent(req.params.token)}?saved=1#report`);
   });
 
   // Scale ticket photo from the job page. The page shrinks the photo first and posts the raw image.
@@ -144,6 +157,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
   }));
   api.post('/jobs/:id/cancel', wrap(async (req, res) => res.json(await dispatch.cancelJob(req.params.id))));
   api.post('/jobs/:id/status', (req, res) => res.json(dispatch.setJobStatus(req.params.id, req.body.status)));
+  api.post('/jobs/:id/pickup', (req, res) => res.json(dispatch.bookPickup(req.params.id, req.body?.date, req.user.id)));
   api.post('/jobs/:id/duplicate', (req, res) => res.json(dispatch.duplicateJob(req.params.id, req.body.date, req.user.id)));
   api.delete('/jobs/:id', (req, res) => {
     const job = dispatch.getJob(req.params.id);
@@ -188,6 +202,12 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
   app.use('/api', api);
 
   app.get('/', auth.requireUser, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+  // Printable work order, laid out like the paper forms.
+  app.get('/print/:id', auth.requireUser, (req, res) => {
+    const job = dispatch.getJob(req.params.id);
+    if (!job) return res.status(404).send('Job not found');
+    res.send(renderPrintPage(job));
+  });
   app.use(auth.requireUser, express.static(pub, { index: false }));
 
   app.use((err, req, res, _next) => {

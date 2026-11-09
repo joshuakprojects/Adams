@@ -41,25 +41,23 @@ function formatTime(hm) {
   return `${h12}:${String(m || 0).padStart(2, '0')} ${suffix}`;
 }
 
-/** Field labels per job type — shared idea with the dashboard and the driver page. */
-const JOB_TYPES = {
-  haul: { name: 'Haul', what: 'Haul', from: 'From', to: 'To' },
-  float: { name: 'Float', what: 'Move', from: 'Pick up', to: 'Drop off' },
-  septic: { name: 'Septic', what: 'Pump-out', from: 'Pump at', to: 'Dump at' },
-};
+const FORMS = require('../public/forms');
 
 function jobTypeInfo(type) {
-  return JOB_TYPES[type] || JOB_TYPES.haul;
+  return FORMS.typeInfo(type);
 }
 
-/** "3/4 clear — 12 loads" style summary of what's being hauled. */
+/** One-line description of the work ("2" minus - 20 loads", "Empty & return - 20 yd"). */
 function cargoSummary(job) {
-  const parts = [];
-  if (job.material) parts.push(job.material);
-  const qty = [job.quantity, job.unit].filter(Boolean).join(' ');
-  if (qty) parts.push(qty);
-  if (job.loads_planned) parts.push(`${job.loads_planned} load${job.loads_planned === 1 ? '' : 's'}`);
-  return parts.join(' - ');
+  return FORMS.summary(job);
+}
+
+/** Delivery address with the municipality added, unless it's already in there. */
+function siteAddress(job) {
+  const to = job.to_location || '';
+  const muni = job.municipality || '';
+  if (!muni || to.toLowerCase().includes(muni.toLowerCase())) return to;
+  return to ? `${to}, ${muni}` : muni;
 }
 
 function jobLink(token) {
@@ -70,16 +68,20 @@ function jobLink(token) {
 function buildJobText(job, assignment, { updated = false } = {}) {
   const t = jobTypeInfo(job.job_type);
   const lines = [];
-  lines.push(`${config.companyName} - ${updated ? 'UPDATED ' : ''}Job #${job.id}`);
+  lines.push(`${config.companyName} - ${updated ? 'UPDATED ' : ''}${t.title} #${job.id}`);
   lines.push(`${formatDate(job.scheduled_date)}${job.scheduled_time ? ' @ ' + formatTime(job.scheduled_time) : ''}`);
   if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
   const cargo = cargoSummary(job);
-  if (cargo) lines.push(`${t.what}: ${cargo}`);
-  if (job.from_location) lines.push(`${t.from}: ${job.from_location}`);
-  if (job.to_location) lines.push(`${t.to}: ${job.to_location}`);
-  if (job.customer) lines.push(`Customer: ${job.customer}`);
+  if (cargo) lines.push(`${t.what || 'Job'}: ${cargo}`);
+  if (t.from && job.from_location) lines.push(`${t.from}: ${job.from_location}`);
+  const site = siteAddress(job);
+  if (site) lines.push(`${t.to}: ${site}`);
+  for (const [label, value] of FORMS.smsLines(job)) lines.push(`${label}: ${value}`);
+  const customer = [job.customer, prettyPhone(job.customer_phone)].filter(Boolean).join(' ');
+  if (customer) lines.push(`Customer: ${customer}`);
   const contact = [job.contact_name, prettyPhone(job.contact_phone)].filter(Boolean).join(' ');
   if (contact) lines.push(`Site contact: ${contact}`);
+  if (job.collect_payment) lines.push(`COLLECT PAYMENT: ${[job.quoted_price, job.payment_method].filter(Boolean).join(' - ') || 'see office'}`);
   if (job.notes) lines.push(`Notes: ${job.notes}`);
   lines.push('');
   lines.push('Reply OK to confirm. Reply DONE when finished.');
@@ -100,12 +102,14 @@ function buildLineupText(date, items) {
   items.forEach(({ job, assignment }, i) => {
     const t = jobTypeInfo(job.job_type);
     lines.push('');
-    lines.push(`${i + 1}) ${job.scheduled_time ? formatTime(job.scheduled_time) + ' - ' : ''}Job #${job.id}`);
+    lines.push(`${i + 1}) ${job.scheduled_time ? formatTime(job.scheduled_time) + ' - ' : ''}${t.name} #${job.id}`);
     const cargo = cargoSummary(job);
-    if (cargo) lines.push(`${t.what}: ${cargo}`);
-    if (job.from_location) lines.push(`${t.from}: ${job.from_location}`);
-    if (job.to_location) lines.push(`${t.to}: ${job.to_location}`);
+    if (cargo) lines.push(cargo);
+    if (t.from && job.from_location) lines.push(`${t.from}: ${job.from_location}`);
+    const site = siteAddress(job);
+    if (site) lines.push(`${t.to}: ${site}`);
     if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
+    if (job.collect_payment) lines.push('COLLECT PAYMENT');
     lines.push(`Details: ${jobLink(assignment.token)}`);
   });
   lines.push('');
@@ -204,8 +208,8 @@ module.exports = {
   prettyPhone,
   formatDate,
   formatTime,
-  JOB_TYPES,
   jobTypeInfo,
+  siteAddress,
   cargoSummary,
   jobLink,
   buildJobText,

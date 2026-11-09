@@ -56,8 +56,13 @@ test('office login, create & text a job, driver confirms by SMS and finishes on 
   // Driver opens the link and taps buttons (no login).
   res = await fetch(base + '/j/' + token);
   const html = await res.text();
-  assert.match(html, /Job #1001/);
+  assert.match(html, /Aggregate Work Order/);
+  assert.match(html, /#1001/);
   assert.match(html, /Topsoil/);
+  res = await fetch(`${base}/j/${token}/report`, { method: 'POST', redirect: 'manual',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ driver_notes: 'Gate was locked, waited 10 min' }) });
+  assert.equal(res.status, 303);
+  assert.match(await (await fetch(base + '/j/' + token + '?saved=1')).text(), /Saved/);
   // Scale ticket photo from the page, and one texted in.
   res = await fetch(`${base}/j/${token}/ticket`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: JPEG });
   const { id: ticketId } = await res.json();
@@ -81,6 +86,7 @@ test('office login, create & text a job, driver confirms by SMS and finishes on 
   assert.equal(board.jobs[0].assignments[0].loads_done, 1);
   assert.equal(board.jobs[0].assignments[0].ack_via, 'sms');
   assert.equal(board.jobs[0].tickets.length, 2);
+  assert.equal(board.jobs[0].assignments[0].report.driver_notes, 'Gate was locked, waited 10 min');
   res = await fetch(`${base}/api/tickets/${ticketId}/image`, { headers: { cookie } });
   assert.equal(res.status, 200);
   assert.equal((await api('/settings', { lineup_time: '18:30' })).data.lineup_time, '18:30');

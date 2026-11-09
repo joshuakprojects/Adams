@@ -17,7 +17,16 @@ module.exports = {
   // Default time to text drivers tomorrow's jobs (HH:MM, blank = off). Can be changed on the Setup tab.
   lineupTime: env.LINEUP_TIME ?? '17:00',
   companyName: env.COMPANY_NAME || 'ADAMS BROS',
-  dispatchPhone: env.DISPATCH_PHONE || '',
+  // Printed on work orders, as on the paper forms.
+  company: {
+    legalName: env.COMPANY_LEGAL_NAME || 'Adams Bros. Construction Ltd.',
+    address: env.COMPANY_ADDRESS || '116 William St., P.O. Box 324, Parry Sound, ON  P2A 2X4',
+    phone: env.COMPANY_PHONE || '(705) 746-2962',
+    email: env.COMPANY_EMAIL || 'info@adamsbros.ca',
+    website: env.COMPANY_WEBSITE || 'www.adamsbros.ca',
+    hst: env.COMPANY_HST || 'R100046929',
+  },
+  dispatchPhone: env.DISPATCH_PHONE || '+17057462962',
   twilio: {
     accountSid: env.TWILIO_ACCOUNT_SID || '',
     authToken: env.TWILIO_AUTH_TOKEN || '',

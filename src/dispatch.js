@@ -4,9 +4,10 @@ const path = require('node:path');
 const config = require('./config');
 const { tx } = require('./db');
 const sms = require('./sms');
+const FORMS = require('../public/forms');
 
-const JOB_TYPES = ['haul', 'float', 'septic'];
-const TRUCK_KINDS = ['haul', 'float', 'septic', 'other'];
+const JOB_TYPES = FORMS.TYPE_KEYS;
+const TRUCK_KINDS = Object.keys(FORMS.TRUCK_KINDS);
 const ACTIVE_STATUSES = ['sent', 'acknowledged', 'in_progress'];
 
 class ValidationError extends Error {
@@ -38,6 +39,39 @@ function newToken() {
 }
 
 const str = (v, max = 500) => (v == null ? '' : String(v).trim().slice(0, max));
+
+/** Keep only known form fields, trimmed; choice fields must be one of their options. */
+function cleanFields(fields, input) {
+  const src = input && typeof input === 'object' ? input : {};
+  const out = {};
+  for (const f of fields) {
+    let v = str(src[f.key], f.kind === 'textarea' ? 1000 : 200);
+    if (!v) continue;
+    if (f.kind === 'choice' && !f.options.includes(v)) throw new ValidationError(`${f.label}: pick one of ${f.options.join(', ')}`);
+    if (f.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new ValidationError(`${f.label} must be a date`);
+    if (f.kind === 'number') {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) throw new ValidationError(`${f.label} must be a number`);
+      v = String(n);
+    }
+    out[f.key] = v;
+  }
+  return out;
+}
+
+/** What the driver can fill in after a job: the form's report fields, plus payment and notes for any job. */
+function reportFields(jobType) {
+  return [
+    ...FORMS.typeInfo(jobType).report,
+    { key: 'payment_collected', label: 'Payment collected', kind: 'choice', options: FORMS.COLLECTED },
+    { key: 'amount_collected', label: 'Amount collected', kind: 'text' },
+    { key: 'driver_notes', label: 'Notes for the office', kind: 'textarea' },
+  ];
+}
+
+function parseJson(text) {
+  try { return JSON.parse(text || '{}') || {}; } catch { return {}; }
+}
 
 const ASSIGNMENT_SELECT = `
   SELECT a.*, d.name AS driver_name, d.phone AS driver_phone, t.unit AS truck_unit, t.kind AS truck_kind
@@ -110,25 +144,25 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   // ---------- jobs ----------
 
   function assignmentsFor(jobId) {
-    return q(`${ASSIGNMENT_SELECT} WHERE a.job_id = ? ORDER BY d.name COLLATE NOCASE`).all(jobId);
+    return q(`${ASSIGNMENT_SELECT} WHERE a.job_id = ? ORDER BY d.name COLLATE NOCASE`).all(jobId)
+      .map((a) => ({ ...a, report: parseJson(a.report) }));
   }
 
-  function getJob(id) {
-    const job = q('SELECT * FROM jobs WHERE id = ?').get(Number(id));
-    if (!job) return null;
+  function hydrate(job) {
+    job.details = parseJson(job.details);
     job.assignments = assignmentsFor(job.id);
     job.tickets = ticketsFor(job.id);
     return job;
   }
 
+  function getJob(id) {
+    const job = q('SELECT * FROM jobs WHERE id = ?').get(Number(id));
+    return job ? hydrate(job) : null;
+  }
+
   function listJobs({ from, to }) {
-    const jobs = q(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
-                    ORDER BY scheduled_date, (scheduled_time = ''), scheduled_time, id`).all(from, to);
-    for (const job of jobs) {
-      job.assignments = assignmentsFor(job.id);
-      job.tickets = ticketsFor(job.id);
-    }
-    return jobs;
+    return q(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
+              ORDER BY scheduled_date, (scheduled_time = ''), scheduled_time, id`).all(from, to).map(hydrate);
   }
 
   function cleanJob(data) {
@@ -142,9 +176,23 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       throw new ValidationError('Number of loads must be a whole number');
     }
     const contactRaw = str(data.contact_phone, 30);
+    const customerPhoneRaw = str(data.customer_phone, 30);
+    const paymentMethod = str(data.payment_method, 40);
+    if (paymentMethod && !FORMS.PAYMENT_METHODS.includes(paymentMethod)) throw new ValidationError('Unknown payment method');
+    const t = FORMS.typeInfo(job_type);
     return {
       job_type,
       customer: str(data.customer, 200),
+      customer_phone: sms.normalizePhone(customerPhoneRaw) || customerPhoneRaw,
+      customer_email: str(data.customer_email, 200),
+      billing_address: str(data.billing_address, 500),
+      po_number: str(data.po_number, 60),
+      municipality: str(data.municipality, 100),
+      paper_wo: str(data.paper_wo, 30),
+      quoted_price: str(data.quoted_price, 200),
+      payment_method: paymentMethod,
+      collect_payment: data.collect_payment === true || data.collect_payment === 1 || data.collect_payment === '1' || data.collect_payment === 'on' ? 1 : 0,
+      details: JSON.stringify(cleanFields(t.fields, data.details)),
       material: str(data.material, 200),
       quantity: str(data.quantity, 40),
       unit: str(data.unit, 40),
@@ -160,7 +208,11 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   }
 
   const JOB_FIELDS = ['job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
-    'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'notes'];
+    'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'notes',
+    'customer_phone', 'customer_email', 'billing_address', 'po_number', 'municipality', 'paper_wo',
+    'quoted_price', 'payment_method', 'collect_payment', 'details'];
+  // Office-only fields: changing these doesn't mean drivers need a new text.
+  const OFFICE_ONLY = new Set(['customer_email', 'billing_address', 'po_number', 'paper_wo']);
 
   function cleanAssignments(list) {
     const seen = new Set();
@@ -191,7 +243,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (id) {
         const before = q('SELECT * FROM jobs WHERE id = ?').get(id);
         if (!before) throw new ValidationError('Job not found');
-        const changed = JOB_FIELDS.some((f) => String(before[f] ?? '') !== String(fields[f] ?? ''));
+        const changed = JOB_FIELDS.some((f) => !OFFICE_ONLY.has(f) && String(before[f] ?? '') !== String(fields[f] ?? ''));
         q(`UPDATE jobs SET ${JOB_FIELDS.map((f) => `${f} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`)
           .run(...JOB_FIELDS.map((f) => fields[f]), id);
         if (changed) {
@@ -308,9 +360,28 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   function duplicateJob(jobId, date, userId = null) {
     const job = getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
-    const copy = { ...job, id: null, scheduled_date: date || job.scheduled_date };
+    const copy = { ...job, id: null, scheduled_date: date || job.scheduled_date, paper_wo: '' };
     copy.assignments = job.assignments.map((a) => ({ driver_id: a.driver_id, truck_id: a.truck_id }));
     return saveJob(copy, userId).job;
+  }
+
+  /**
+   * Book the return trip for a portable toilet or bin: same customer and address on the pick-up date,
+   * no driver yet (it's usually a different day and truck).
+   */
+  function bookPickup(jobId, date, userId = null) {
+    const job = getJob(jobId);
+    if (!job) throw new ValidationError('Job not found');
+    if (!['toilet', 'bin'].includes(job.job_type)) throw new ValidationError('Pick-ups are for toilets and bins');
+    const when = date || job.details.pickup_date;
+    if (!when) throw new ValidationError('Set the expected pick-up date first');
+    const details = { ...job.details };
+    if (job.job_type === 'toilet') details.trip = 'Pick up';
+    else details.service = 'Empty & no return';
+    return saveJob({
+      ...job, id: null, scheduled_date: when, scheduled_time: '', paper_wo: '', collect_payment: 0, details,
+      notes: [`Pick-up for job #${job.id}.`, job.notes].filter(Boolean).join(' '), assignments: [],
+    }, userId).job;
   }
 
   function deleteJob(jobId) {
@@ -323,7 +394,21 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     const a = q(`${ASSIGNMENT_SELECT} WHERE a.token = ?`).get(String(token || ''));
     if (!a) return null;
     a.job = q('SELECT * FROM jobs WHERE id = ?').get(a.job_id);
+    a.job.details = parseJson(a.job.details);
+    a.report = parseJson(a.report);
     return a;
+  }
+
+  /** The driver's after-job report from their phone (septic conditions, payment collected, notes). */
+  function saveReport(token, data, via = 'web') {
+    const a = assignmentByToken(token);
+    if (!a) throw new ValidationError('Job not found');
+    const report = cleanFields(reportFields(a.job.job_type), data);
+    q(`UPDATE assignments SET report = ?, report_at = datetime('now'),
+         ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, ?),
+         status = CASE WHEN status IN ('pending','sent') THEN 'acknowledged' ELSE status END
+       WHERE id = ?`).run(JSON.stringify(report), via, a.id);
+    return assignmentByToken(token);
   }
 
   /** Other upcoming jobs for the same driver, so the job page can link between them. */
@@ -665,17 +750,22 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   function suggestions() {
     const col = (c) => q(`SELECT ${c} AS v, COUNT(*) AS n FROM jobs WHERE ${c} != '' GROUP BY ${c} ORDER BY n DESC LIMIT 200`).all().map((r) => r.v);
     const locations = [...new Set([...col('from_location'), ...col('to_location')])];
-    return { customers: col('customer'), materials: col('material'), locations, units: col('unit') };
+    const materialsByType = {};
+    for (const r of q(`SELECT job_type, material, COUNT(*) AS n FROM jobs WHERE material != '' GROUP BY job_type, material ORDER BY n DESC LIMIT 500`).all()) {
+      (materialsByType[r.job_type] ||= []).push(r.material);
+    }
+    return { customers: col('customer'), materialsByType, locations, units: col('unit'), municipalities: col('municipality') };
   }
 
   return {
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
+    saveReport, bookPickup, reportFields,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
     getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,
   };
 }
 
-module.exports = { createDispatch, ValidationError, todayIn, nowHmIn, addDays, JOB_TYPES, TRUCK_KINDS, ACTIVE_STATUSES, IMAGE_TYPES, MAX_IMAGE_BYTES };
+module.exports = { createDispatch, reportFields, ValidationError, todayIn, nowHmIn, addDays, JOB_TYPES, TRUCK_KINDS, ACTIVE_STATUSES, IMAGE_TYPES, MAX_IMAGE_BYTES };

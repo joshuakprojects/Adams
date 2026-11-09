@@ -5,8 +5,7 @@ Drivers don't install an app or log in.
 
 ## How it works
 
-1. **The office creates a job** on the dashboard and picks the type: **Haul** (gravel, clear, topsoil, asphalt…),
-   **Float** (equipment moves) or **Septic** (pump-outs). They fill in the material or equipment, quantity, number of loads,
+1. **The office creates a job** on the dashboard and picks the type: work order type (Aggregate, Bin, Septic, Toilet, Float or Misc, see below). They fill in the material or equipment, quantity, number of loads,
    pickup and drop-off, time, site contact and notes, then tick the drivers and the truck each one is taking.
 2. **Save & text drivers** sends each driver a plain text with all the details:
 
@@ -50,6 +49,34 @@ Other features:
 - The office can mark a driver confirmed, add a load, or mark them done by hand when a driver phones in.
 - The **Texts** tab is a full log of every text sent and received.
 
+## Work orders (matching the paper forms)
+
+Each job is one of the office's work order types. The fields come from the paper forms:
+
+| Type | Paper form | Type-specific fields |
+|---|---|---|
+| 🪨 **Aggregate** | Aggregate work order | Aggregate type (sand fill, 2" minus, 3/4" clear…), quantity, loads, pit |
+| 🗑️ **Bin** | Bin Work Order (green) | Bin size; Deliver bin / Empty & return / Empty & no return / H&G |
+| 💧 **Septic** | Septic pump-out sheet | Tank size, elevation, hose length, lids uncovered, tank type, tank location, steep driveway, back in, directions |
+| 🚻 **Toilet** | Portable toilet rental (blue) | Deliver / pick up / service, expected pick-up date, up to 3 toilet types with counts, placement, extra servicing |
+| 🚜 **Float** | Equipment moves | Equipment, pick up and drop off |
+| 🛠️ **Misc** | Miscellaneous Work Order | Work or material, quantity, loads |
+
+Every type also has the fields that are on all the forms: customer name, phone, email, billing/mailing address,
+PO #, delivery address, municipality, site contact, delivery date, quoted price and payment method. If a job was
+first written in a paper book, the paper W.O. # can be recorded too.
+
+- **Driver reports:** for septic, the driver fills in the *observed conditions of tanks* half of the sheet on their
+  phone (baffles, liquid level, filter, lids…) with big tap buttons. If "Driver collects payment on site" is ticked,
+  the text says **COLLECT PAYMENT** with the amount, and the driver records what they collected. Any driver can leave notes for the office.
+- **🖨 Print** opens the job laid out like the paper form, with the chosen options circled, the driver's report filled in,
+  and the company header and HST #. A septic sheet with no report yet prints the conditions section blank so it can be filled in by hand.
+- **Book pick-up** on a toilet or bin job creates the return trip on the pick-up date.
+- The fields for each type are defined in one place, `public/forms.js`. Add or change a question there and the
+  office form, driver text, driver page and printout all follow.
+
+Not covered yet: the **equipment rental agreement** (counter rentals with a signature). That could be added as its own type.
+
 ## Running it
 
 Requires Node.js 22.13 or newer. The only dependency is Express; the database is SQLite (built into Node).
@@ -86,7 +113,7 @@ Any small server or VPS works (for example a $5–10/month droplet or Render/Fly
 Run it behind HTTPS on a subdomain like `dispatch.adamsbros.ca` and set `COOKIE_SECURE=true`.
 All data is in the `data/` folder: the SQLite database (`DB_PATH`, default `data/dispatch.db`) and ticket photos
 (`UPLOAD_DIR`, default `data/uploads`). Back up that folder.
-Times use Eastern (`TZ_NAME=America/Toronto`).
+Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on work orders (address, phone, HST #) can be changed with the `COMPANY_*` settings in `.env`.
 
 ## Code layout
 
@@ -95,7 +122,9 @@ Times use Eastern (`TZ_NAME=America/Toronto`).
 | `src/server.js` | Web server and routes (office API, driver job page, Twilio webhook) |
 | `src/dispatch.js` | Dispatch logic: jobs, assignments, sending, reply handling |
 | `src/sms.js` | Text wording, reply parsing (OK / DONE), Twilio sending and signature check |
-| `src/driverPage.js` | The driver's job page (works without JavaScript) |
+| `public/forms.js` | The work order types and their fields, modelled on the paper forms (shared by server and dashboard) |
+| `src/driverPage.js` | The driver's job page and after-job report (works without JavaScript) |
+| `src/printPage.js` | Printable work orders laid out like the paper forms |
 | `src/db.js` | SQLite schema |
 | `src/auth.js` | Office logins and sessions |
 | `public/` | Office dashboard (plain HTML/CSS/JS, no build step) |
