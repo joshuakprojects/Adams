@@ -138,10 +138,20 @@
 
     renderJobsArea(jobs);
 
-    $('#driver-list').innerHTML = drivers.length ? drivers.map((d) => `
-      <div class="drow">
+    // A driver is free once none of their jobs on this day are still to do. Busy drivers first, then free ones.
+    const rows = drivers.map((d) => {
+      const todo = d.jobs.filter((j) => j.status !== 'done' && j.status !== 'cancelled');
+      const done = d.jobs.filter((j) => j.status === 'done');
+      return { d, todo, done };
+    }).sort((a, b) => (b.todo.length > 0) - (a.todo.length > 0) || a.d.name.localeCompare(b.d.name));
+    const freeCount = rows.filter((r) => !r.todo.length).length;
+    if (drivers.length) $('#drivers-title').textContent += ` · ${freeCount} free`;
+    $('#driver-list').innerHTML = drivers.length ? rows.map(({ d, todo, done }) => `
+      <div class="drow ${todo.length ? 'busy' : 'is-free'}">
         <span class="name">${esc(d.name)}</span>
-        ${d.jobs.length ? d.jobs.map((j) => `<span class="chip ${j.status}" title="${esc(STATUS[j.status])}">#${j.job_id}</span>`).join('') : '<span class="free">Free</span>'}
+        ${todo.map((j) => `<span class="chip ${j.status}" title="${esc(STATUS[j.status])}">#${j.job_id}</span>`).join('')}
+        ${todo.length ? '' : '<span class="free">Free</span>'}
+        ${done.map((j) => `<span class="chip finished" title="Done">✓ #${j.job_id}</span>`).join('')}
       </div>`).join('') : '<p class="muted">Add drivers on the Setup tab.</p>';
   }
 
@@ -586,6 +596,7 @@
     for (const j of jobs) {
       if (j.id === Number(jobId) || j.status === 'cancelled') continue;
       for (const a of j.assignments) {
+        if (a.status === 'done' || a.status === 'cancelled') continue; // finished work doesn't make a driver busy
         const label = `#${j.id}${jobTime(j) ? ' ' + jobTime(j) : ''}`;
         busyByDriver.set(a.driver_id, busyByDriver.has(a.driver_id) ? busyByDriver.get(a.driver_id) + ', ' + label : label);
       }
