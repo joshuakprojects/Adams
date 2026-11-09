@@ -74,7 +74,7 @@ function renderSheet(job) {
 
   return `<article class="sheet t-${esc(job.job_type)}">
   <header>
-    <div class="logo"><div class="mark">ADAMS <span>BROS</span></div><div class="sub">CONSTRUCTION</div></div>
+    <div class="logo"><img src="/brand/adams-a.png" alt="" class="mark-a"><div><div class="mark">ADAMS BROS</div><div class="sub">CONSTRUCTION</div></div></div>
     <div class="co">
       <div>${esc(c.address)}</div>
       <div>${esc(c.phone)} · ${esc(c.email)} · ${esc(c.website)}</div>
@@ -137,6 +137,9 @@ function page(title, body, toolbarNote = '') {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <link rel="stylesheet" href="/print.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/brand/favicon-64.png">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 </head><body>
 <div class="toolbar no-print"><button onclick="window.print()">🖨 Print / Save as PDF</button> <button onclick="window.close()">Close</button>${toolbarNote ? `<div class="note">${toolbarNote}</div>` : ''}</div>
 ${body}

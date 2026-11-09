@@ -108,6 +108,9 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
 <meta name="robots" content="noindex">
 <title>${esc(t.name)} #${job.id} – ${esc(config.companyName)}</title>
 <link rel="stylesheet" href="/driver.css">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/brand/favicon-64.png">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
 </head><body>
 <header><div class="co">${esc(config.companyName)}</div><div class="num">${esc(t.icon)} #${job.id}</div></header>
 <main>
@@ -180,7 +183,10 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
 
 function renderNotFound() {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/driver.css"><title>Job not found</title></head>
+<link rel="stylesheet" href="/driver.css"><title>Job not found</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/brand/favicon-64.png">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png"></head>
 <body><header><div class="co">${esc(config.companyName)}</div></header><main>
 <div class="banner cancelled">This job link isn't valid anymore. Call dispatch.</div>
 ${config.dispatchPhone ? `<a class="btn call-dispatch" href="tel:${esc(config.dispatchPhone)}">📞 Call dispatch</a>` : ''}

@@ -49,6 +49,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 
   const pub = path.join(__dirname, '..', 'public');
   app.get('/driver.css', (_req, res) => res.sendFile(path.join(pub, 'driver.css')));
+  // Logo and browser-tab icons: public, so the login page and driver pages can show them.
+  app.use('/brand', express.static(path.join(pub, 'brand'), { maxAge: '7d', fallthrough: false }));
+  app.get('/favicon.ico', (_req, res) => res.sendFile(path.join(pub, 'brand', 'favicon.ico'), { maxAge: '7d' }));
   app.get('/healthz', (_req, res) => res.json({ ok: true, db: db.kind }));
 
   // ---------- driver job page (the link in the text; the token is the key) ----------
