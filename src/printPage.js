@@ -96,7 +96,7 @@ function renderPrintPage(job) {
     </div>
     <div>
       ${line('Date', created)}
-      ${line(job.job_type === 'septic' ? 'Pump-out date' : 'Delivery date', `${sms.formatDate(job.scheduled_date)}${job.scheduled_time ? ' @ ' + sms.formatTime(job.scheduled_time) : ''}`)}
+      ${line(job.job_type === 'septic' ? 'Pump-out date' : 'Delivery date', sms.formatJobWhen(job))}
       ${line(t.to, job.to_location, 'wide')}
       ${line('Municipality', job.municipality)}
       ${line('Site contact name / phone #', [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' / '))}

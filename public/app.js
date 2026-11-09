@@ -52,6 +52,11 @@
     const [h, m] = hm.split(':').map(Number);
     return `${h % 12 || 12}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`;
   }
+  function jobTime(job) {
+    const t = fmtTime(job.scheduled_time);
+    if (job.first_thing) return t ? `First thing (${t})` : 'First thing';
+    return t;
+  }
   function fmtStamp(sqlUtc) {
     if (!sqlUtc) return '';
     const d = new Date(sqlUtc.replace(' ', 'T') + 'Z');
@@ -171,7 +176,7 @@
     return `<article class="job t-${job.job_type} ${job.status}">
       <div class="job-head">
         <span class="job-num">#${job.id}</span>
-        <span class="job-time">${esc(fmtTime(job.scheduled_time) || 'Any time')}</span>
+        <span class="job-time ${job.first_thing ? 'first' : ''}">${esc(jobTime(job) || 'Any time')}</span>
         <span class="tag ${job.job_type}" title="${esc(t.title)}">${t.icon} ${esc(t.name)}</span>
         ${statusTag}
         ${job.paper_wo ? `<span class="muted small" title="Paper work order #">W.O. ${esc(job.paper_wo)}</span>` : ''}
@@ -455,7 +460,7 @@
     for (const j of jobs) {
       if (j.id === Number(jobId) || j.status === 'cancelled') continue;
       for (const a of j.assignments) {
-        const label = `#${j.id}${j.scheduled_time ? ' ' + fmtTime(j.scheduled_time) : ''}`;
+        const label = `#${j.id}${jobTime(j) ? ' ' + jobTime(j) : ''}`;
         busyByDriver.set(a.driver_id, busyByDriver.has(a.driver_id) ? busyByDriver.get(a.driver_id) + ', ' + label : label);
       }
     }
@@ -470,9 +475,10 @@
     $('#job-form-title').textContent = job ? `Edit job #${job.id}` : 'New job';
     for (const [k, v] of Object.entries(data)) {
       const input = form.elements[k];
-      if (!input || k === 'job_type' || k === 'details' || !('value' in input)) continue;
+      if (!input || k === 'job_type' || k === 'details' || k === 'first_thing' || !('value' in input)) continue;
       input.value = v ?? '';
     }
+    form.elements.first_thing.checked = Boolean(data.first_thing);
     if (data.contact_phone) form.elements.contact_phone.value = prettyPhone(data.contact_phone);
     if (data.customer_phone) form.elements.customer_phone.value = prettyPhone(data.customer_phone);
     $$('input[name=job_type]', form).forEach((r) => { r.checked = r.value === data.job_type; });
@@ -495,6 +501,7 @@
     const fd = new FormData(form);
     const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.')));
     body.details = collectDetails();
+    body.first_thing = form.elements.first_thing.checked;
     body.assignments = [...formAssignments].map(([driver_id, truck_id]) => ({ driver_id, truck_id }));
     body.send_now = sendNow;
     if (sendNow && !body.assignments.length) {
@@ -518,7 +525,37 @@
   const KIND = window.FORMS.TRUCK_KINDS;
   $('#truck-kind').innerHTML = Object.entries(KIND).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
 
+  // ---------- texting setup ----------
+  function renderSmsStatus(s) {
+    const rows = [];
+    if (s.account) rows.push(`<div>Account: <b>${esc(s.account.name)}</b> (${esc(s.account.type)}, ${esc(s.account.status)})</div>`);
+    if (s.number) rows.push(`<div>Dispatch number: <b>${esc(prettyPhone(s.number.phone))}</b> · SMS ${s.number.sms ? '✔' : '✖'} · MMS (photos) ${s.number.mms ? '✔' : '✖'}</div>`);
+    rows.push(`<div>Incoming texts should go to: <code>${esc(s.webhook)}</code>${s.number ? (s.number.smsUrl === s.webhook ? ' ✔' : ` — currently <code>${esc(s.number.smsUrl || 'not set')}</code>`) : ''}</div>`);
+    for (const p of s.problems) rows.push(`<div class="error">✖ ${esc(p)}</div>`);
+    for (const w of s.warnings) rows.push(`<div class="warn-line">! ${esc(w)}</div>`);
+    if (s.configured && !s.problems.length && !s.warnings.length) rows.push('<div class="ok-line">✔ Texting is ready.</div>');
+    if (!s.configured) rows.push('<div class="muted small">Until this is set up the app is in TEST MODE: texts are printed in the server log, not sent.</div>');
+    $('#sms-status').innerHTML = rows.join('');
+    $('#sms-connect').classList.toggle('hidden', !s.number || (s.number.smsUrl === s.webhook && s.number.smsMethod === 'POST'));
+  }
+  async function loadSmsStatus() {
+    $('#sms-status').textContent = 'Checking…';
+    try { renderSmsStatus(await api('/sms/status')); } catch (err) { $('#sms-status').textContent = err.message; }
+  }
+  $('#sms-recheck').addEventListener('click', loadSmsStatus);
+  $('#sms-connect').addEventListener('click', async () => {
+    try { renderSmsStatus(await api('/sms/connect', { method: 'POST', body: {} })); toast('Number connected'); } catch (err) { toast(err.message); }
+  });
+  $('#sms-test').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const out = await api('/sms/test', { method: 'POST', body: { phone: e.target.elements.phone.value } });
+      toast(out.simulated ? 'Test mode: the text was printed in the server log, not sent' : 'Test text sent — reply OK from that phone and check the Texts tab');
+    } catch (err) { toast(err.message); }
+  });
+
   async function loadPeople() {
+    loadSmsStatus();
     const [drivers, trucks, settings] = await Promise.all([api('/drivers?all=1'), api('/trucks?all=1'), api('/settings')]);
     const sf = $('#settings-form');
     sf.elements.lineup_on.checked = Boolean(settings.lineup_time);

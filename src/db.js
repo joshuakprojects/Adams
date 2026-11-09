@@ -147,7 +147,9 @@ const ADDED_COLUMNS = {
     paper_wo: "TEXT NOT NULL DEFAULT ''",
     quoted_price: "TEXT NOT NULL DEFAULT ''",
     payment_method: "TEXT NOT NULL DEFAULT ''",
-    collect_payment: 'INTEGER NOT NULL DEFAULT 0',
+    collect_payment: 'INTEGER NOT NULL DEFAULT 0', // no longer used: payments are handled by the office
+    // "First thing" in the morning: sorts ahead of timed jobs that day.
+    first_thing: 'INTEGER NOT NULL DEFAULT 0',
     // Type-specific form fields (bin service, septic tank details, toilet types…) as JSON.
     details: "TEXT NOT NULL DEFAULT '{}'",
   },

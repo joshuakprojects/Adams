@@ -101,16 +101,31 @@ npm run add-user -- jane@adamsbros.ca "Jane" "a-good-password"
 
 ## Going live with texting (Twilio)
 
-1. Create a Twilio account and buy a Canadian local number (roughly $1–2 per month, plus about 1–2¢ per text).
-2. Put `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_FROM_NUMBER` in `.env`, and set `PUBLIC_URL`
-   to the app's real address (for example `https://dispatch.adamsbros.ca`).
-3. In Twilio, under the number's settings, set **"A message comes in"** to webhook
-   `POST https://dispatch.adamsbros.ca/sms/inbound`. Inbound texts are checked against Twilio's signature.
-   Make sure the number is **MMS-capable** so drivers can text ticket photos.
+1. Sign up at <https://www.twilio.com/try-twilio> and **upgrade** the account (add a payment method).
+   A trial account can only text numbers you've verified, and it adds a trial message to every text.
+2. Buy a **Canadian local number** with **SMS and MMS** (a 705 number is easiest for drivers to recognise):
+   Console → Phone Numbers → Buy a number → Country: Canada. Costs roughly $1–2/month plus about 1–2¢ per text.
+3. Put these in `.env` and restart:
+   ```
+   TWILIO_ACCOUNT_SID=AC...        # console home page
+   TWILIO_AUTH_TOKEN=...           # console home page (click "show")
+   TWILIO_FROM_NUMBER=+1705...     # the number you bought
+   PUBLIC_URL=https://dispatch.adamsbros.ca
+   ```
+4. Run `npm run twilio`, or open **Setup → Texting** on the dashboard. It checks the credentials, the number
+   (SMS/MMS), whether the account is still a trial, and where incoming texts go.
+5. Run `npm run twilio -- connect`, or click **Connect number to this app**. This points the number's incoming texts at
+   `PUBLIC_URL/sms/inbound`, so you don't need to set it by hand in the console. Incoming texts are verified with Twilio's signature.
+6. Run `npm run twilio -- test 705-555-1234`, or use **Send test text**, to text your own phone. Reply **OK** and check the
+   **Texts** tab: the reply should show up there.
+
+Texts go out as soon as step 3 is done, even with the app on your own computer. Driver **replies**, ticket
+photos and the job links need the app online at a public `https://` address (see Hosting).
 
 ## Hosting
 
 Any small server or VPS works (for example a $5–10/month droplet or Render/Fly.io with a persistent disk).
+A `Dockerfile` is included: mount a persistent volume at `/app/data` and set the `.env` values as environment variables.
 Run it behind HTTPS on a subdomain like `dispatch.adamsbros.ca` and set `COOKIE_SECURE=true`.
 All data is in the `data/` folder: the SQLite database (`DB_PATH`, default `data/dispatch.db`) and ticket photos
 (`UPLOAD_DIR`, default `data/uploads`). Back up that folder.

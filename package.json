@@ -10,6 +10,7 @@
     "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
     "add-user": "node --disable-warning=ExperimentalWarning scripts/add-user.js",
+    "twilio": "node --disable-warning=ExperimentalWarning scripts/twilio.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
   },
   "dependencies": {

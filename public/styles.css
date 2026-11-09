@@ -189,3 +189,15 @@ fieldset.sec legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: 
 
 .grid.sub { grid-column: 1 / -1; }
 .grid.sub:empty { display: none; }
+
+.time-row { display: flex; align-items: center; gap: 8px; }
+.time-row input[type=time] { flex: 1; min-width: 0; }
+.grid label.first-thing { flex-direction: row; align-items: center; gap: 4px; white-space: nowrap; font-weight: 700; color: #8a4b00; }
+.job-time.first { background: #ffe0b2; color: #8a4b00; border-radius: 5px; padding: 0 6px; text-transform: uppercase; font-size: 13px; }
+.grid .field-col { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: #444; }
+.grid .field-col input[type=time] { padding: 8px 10px; border: 1px solid #c9c9c2; border-radius: 8px; font-size: 15px; font-family: inherit; }
+
+#sms-status > div { margin: 3px 0; }
+#sms-status code { background: #f2f2ee; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+.warn-line { color: #8a4b00; }
+.ok-line { color: var(--green-2); font-weight: 700; }

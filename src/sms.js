@@ -60,6 +60,20 @@ function siteAddress(job) {
   return to ? `${to}, ${muni}` : muni;
 }
 
+/** '7:00 AM', 'FIRST THING', 'FIRST THING (7:00 AM)' or '' */
+function formatJobTime(job) {
+  const time = formatTime(job.scheduled_time);
+  if (job.first_thing) return time ? `FIRST THING (${time})` : 'FIRST THING';
+  return time;
+}
+
+/** 'Tue Nov 10 @ 7:00 AM' / 'Tue Nov 10 - FIRST THING' */
+function formatJobWhen(job) {
+  const time = formatJobTime(job);
+  if (!time) return formatDate(job.scheduled_date);
+  return `${formatDate(job.scheduled_date)}${job.first_thing ? ' - ' : ' @ '}${time}`;
+}
+
 function jobLink(token) {
   return `${config.publicUrl}/j/${token}`;
 }
@@ -69,7 +83,7 @@ function buildJobText(job, assignment, { updated = false } = {}) {
   const t = jobTypeInfo(job.job_type);
   const lines = [];
   lines.push(`${config.companyName} - ${updated ? 'UPDATED ' : ''}${t.title} #${job.id}`);
-  lines.push(`${formatDate(job.scheduled_date)}${job.scheduled_time ? ' @ ' + formatTime(job.scheduled_time) : ''}`);
+  lines.push(formatJobWhen(job));
   if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
   const cargo = cargoSummary(job);
   if (cargo) lines.push(`${t.what || 'Job'}: ${cargo}`);
@@ -101,7 +115,8 @@ function buildLineupText(date, items) {
   items.forEach(({ job, assignment }, i) => {
     const t = jobTypeInfo(job.job_type);
     lines.push('');
-    lines.push(`${i + 1}) ${job.scheduled_time ? formatTime(job.scheduled_time) + ' - ' : ''}${t.name} #${job.id}`);
+    const time = formatJobTime(job);
+    lines.push(`${i + 1}) ${time ? time + ' - ' : ''}${t.name} #${job.id}`);
     const cargo = cargoSummary(job);
     if (cargo) lines.push(cargo);
     if (t.from && job.from_location) lines.push(`${t.from}: ${job.from_location}`);
@@ -206,6 +221,8 @@ module.exports = {
   prettyPhone,
   formatDate,
   formatTime,
+  formatJobTime,
+  formatJobWhen,
   jobTypeInfo,
   siteAddress,
   cargoSummary,

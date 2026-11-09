@@ -45,6 +45,18 @@
 
   <!-- DRIVERS & TRUCKS -->
   <section id="tab-people" class="tab hidden">
+    <div class="panel settings" id="sms-panel">
+      <h2>Texting (Twilio)</h2>
+      <div id="sms-status" class="muted">Checking…</div>
+      <div class="inline-form" style="margin-top:10px">
+        <button class="btn" id="sms-recheck" type="button">Check again</button>
+        <button class="btn primary" id="sms-connect" type="button">Connect number to this app</button>
+        <form id="sms-test" class="inline-form" style="margin:0">
+          <input name="phone" placeholder="Your cell (705-555-1234)" required>
+          <button class="btn" type="submit">Send test text</button>
+        </form>
+      </div>
+    </div>
     <div class="panel settings">
       <h2>Evening text: tomorrow's jobs</h2>
       <form id="settings-form" class="inline-form">
@@ -118,7 +130,8 @@
         <legend>When</legend>
         <div class="grid">
           <label><span data-label="date">Delivery date</span> <input type="date" name="scheduled_date" required></label>
-          <label>Time <input type="time" name="scheduled_time"></label>
+          <div class="field-col"><label for="f-time">Time</label><span class="time-row"><input type="time" name="scheduled_time" id="f-time">
+            <label class="first-thing" title="First job of the morning — goes to the top of the driver's day"><input type="checkbox" name="first_thing"> First thing</label></span></div>
           <label>Paper W.O. # <input name="paper_wo" placeholder="if written on paper"></label>
         </div>
       </fieldset>

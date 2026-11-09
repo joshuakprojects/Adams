@@ -96,7 +96,7 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
   const others = otherJobs.length ? `
     <h2>Your other jobs</h2>
     <ul class="others">${otherJobs.map((o) => `
-      <li><a href="/j/${esc(o.token)}">${esc(sms.jobTypeInfo(o.job_type).name)} #${o.job_id} · ${esc(sms.formatDate(o.scheduled_date))} ${esc(sms.formatTime(o.scheduled_time))}
+      <li><a href="/j/${esc(o.token)}">${esc(sms.jobTypeInfo(o.job_type).name)} #${o.job_id} · ${esc(sms.formatDate(o.scheduled_date))} ${esc(sms.formatJobTime(o))}
         <span>${esc(o.material || o.to_location || '')}</span></a></li>`).join('')}
     </ul>` : '';
 
@@ -111,7 +111,7 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
 <main>
   <div class="form-title">${esc(t.title)}</div>
   <div class="status s-${esc(cancelled ? 'cancelled' : a.status)}">${esc(cancelled ? STATUS_TEXT.cancelled : STATUS_TEXT[a.status] || a.status)}</div>
-  <div class="when">${esc(sms.formatDate(job.scheduled_date))}${job.scheduled_time ? ` @ ${esc(sms.formatTime(job.scheduled_time))}` : ''}</div>
+  <div class="when">${esc(sms.formatJobWhen(job))}</div>
   <div class="card">
     ${row(t.what || 'Job', sms.cargoSummary(job))}
     ${t.from ? row(t.from, job.from_location, job.from_location ? `<a class="map" href="${mapsUrl(job.from_location)}">Map ➜</a>` : '') : ''}

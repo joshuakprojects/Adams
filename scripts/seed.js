@@ -60,8 +60,8 @@ d.saveJob({
   assignments: [{ driver_id: pete, truck_id: trucks.P1 }],
 });
 d.saveJob({
-  job_type: 'haul', scheduled_date: addDays(today, 1), scheduled_time: '07:00', customer: 'R. McDougall', material: 'Sand fill', loads_planned: 1,
-  details: { truck: 'Tandem' }, quoted_price: 'Quoted', payment_method: 'Visa/MC', notes: 'First thing.',
+  job_type: 'haul', scheduled_date: addDays(today, 1), first_thing: true, customer: 'R. McDougall', material: 'Sand fill', loads_planned: 1,
+  details: { truck: 'Tandem' }, quoted_price: 'Quoted', payment_method: 'Visa/MC',
   from_location: 'Adams pit', to_location: '310 Hwy 124', municipality: 'McDougall',
   assignments: [{ driver_id: dave, truck_id: trucks.T1 }],
 });

@@ -7,6 +7,7 @@ const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
 const { renderPrintPage } = require('./printPage');
+const twilio = require('./twilio');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
 async function fetchTwilioMedia(url) {
@@ -194,6 +195,18 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
     dispatch.markMessagesSeen(req.body.ids);
     res.json({ ok: true });
   });
+  // Texting setup (Setup tab).
+  api.get('/sms/status', wrap(async (_req, res) => res.json(await twilio.checkSetup())));
+  api.post('/sms/connect', wrap(async (_req, res) => {
+    if (!config.smsEnabled) throw new ValidationError('Add the Twilio settings to .env first');
+    res.json(await twilio.connectWebhook());
+  }));
+  api.post('/sms/test', wrap(async (req, res) => {
+    const to = sms.normalizePhone(req.body?.phone);
+    if (!to) throw new ValidationError('Enter a 10-digit cell number');
+    const r = await sms.sendSms(to, `${config.companyName} dispatch: test text. Reply OK to check replies reach the office.`);
+    res.json({ ok: true, simulated: Boolean(r.simulated) });
+  }));
   // Try a driver reply without a real phone (only when texting isn't hooked up yet).
   api.post('/simulate-reply', (req, res) => {
     if (config.smsEnabled) return res.status(400).json({ error: 'Texting is live; reply from a real phone.' });

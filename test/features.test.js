@@ -158,3 +158,15 @@ test('aggregates work order: two aggregate lines, yards, truck type', () => {
   assert.equal(yards.unit, 'yards', 'aggregates are always in yards');
   assert.throws(() => d.saveJob({ ...job, id: job.id, details: { truck: 'Pickup' } }), /Circle one/);
 });
+
+test('"first thing" jobs sort first and say FIRST THING', async () => {
+  const { d, sent, dave } = setup();
+  d.saveJob(job({ scheduled_time: '06:30', assignments: [{ driver_id: dave.id }] }));
+  const first = d.saveJob(job({ scheduled_time: '', first_thing: true, material: 'Sand fill', assignments: [{ driver_id: dave.id }] })).job;
+  assert.equal(first.first_thing, 1);
+  assert.deepEqual(d.listJobs({ from: '2026-11-11', to: '2026-11-11' }).map((j) => j.id), [first.id, 1001]);
+  await d.sendJob(first.id);
+  assert.match(sent.at(-1).body, /Wed Nov 11 - FIRST THING/);
+  await d.sendLineup('2026-11-11');
+  assert.match(sent.at(-1).body, /1\) FIRST THING - Aggregate #1002[\s\S]*2\) 6:30 AM - Aggregate #1001/);
+});

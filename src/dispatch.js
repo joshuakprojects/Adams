@@ -160,7 +160,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   function listJobs({ from, to }) {
     return q(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
-              ORDER BY scheduled_date, (scheduled_time = ''), scheduled_time, id`).all(from, to).map(hydrate);
+              ORDER BY scheduled_date, first_thing DESC, (scheduled_time = ''), scheduled_time, id`).all(from, to).map(hydrate);
   }
 
   function cleanJob(data) {
@@ -200,12 +200,13 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       contact_phone: sms.normalizePhone(contactRaw) || contactRaw,
       scheduled_date,
       scheduled_time,
+      first_thing: data.first_thing === true || data.first_thing === 1 || data.first_thing === '1' || data.first_thing === 'on' ? 1 : 0,
       notes: str(data.notes, 1000),
     };
   }
 
   const JOB_FIELDS = ['job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
-    'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'notes',
+    'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'first_thing', 'notes',
     'customer_phone', 'customer_email', 'billing_address', 'po_number', 'municipality', 'paper_wo',
     'quoted_price', 'payment_method', 'details'];
   // Office-only fields (drivers never see them; payments are handled by the office): changing these doesn't need a new text.
@@ -376,7 +377,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     if (job.job_type === 'toilet') details.trip = 'Pick up';
     else details.service = 'Empty & no return';
     return saveJob({
-      ...job, id: null, scheduled_date: when, scheduled_time: '', paper_wo: '', details,
+      ...job, id: null, scheduled_date: when, scheduled_time: '', first_thing: 0, paper_wo: '', details,
       notes: [`Pick-up for job #${job.id}.`, job.notes].filter(Boolean).join(' '), assignments: [],
     }, userId).job;
   }
@@ -410,11 +411,11 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   /** Other upcoming jobs for the same driver, so the job page can link between them. */
   function otherJobsForDriver(driverId, excludeAssignmentId) {
-    return q(`SELECT a.token, a.status, j.id AS job_id, j.job_type, j.scheduled_date, j.scheduled_time, j.material, j.to_location
+    return q(`SELECT a.token, a.status, j.id AS job_id, j.job_type, j.scheduled_date, j.scheduled_time, j.first_thing, j.material, j.to_location
               FROM assignments a JOIN jobs j ON j.id = a.job_id
               WHERE a.driver_id = ? AND a.id != ? AND j.status = 'open' AND j.scheduled_date >= ?
                 AND a.status IN ('sent','acknowledged','in_progress')
-              ORDER BY j.scheduled_date, j.scheduled_time LIMIT 10`).all(driverId, excludeAssignmentId, today());
+              ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time LIMIT 10`).all(driverId, excludeAssignmentId, today());
   }
 
   /**
@@ -475,7 +476,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       .run(driver.id, assignmentId, driver.phone, body);
   }
 
-  const jobLabel = (a) => `#${a.job_id} (${sms.formatDate(a.scheduled_date)}${a.scheduled_time ? ' ' + sms.formatTime(a.scheduled_time) : ''})`;
+  const jobLabel = (a) => `#${a.job_id} (${sms.formatJobWhen(a).replace(' @ ', ' ')})`;
 
   /**
    * A driver texted us. Understands OK / DONE (optionally with a job number); anything else is
@@ -491,10 +492,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     }
 
     const { action, jobId } = sms.parseReply(body);
-    const open = q(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time')}
+    const open = q(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing')}
                     JOIN jobs j ON j.id = a.job_id
                     WHERE a.driver_id = ? AND j.status = 'open' AND a.status IN ('sent','acknowledged','in_progress')
-                    ORDER BY j.scheduled_date, (j.scheduled_time = ''), j.scheduled_time, j.id`).all(driver.id);
+                    ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time, j.id`).all(driver.id);
     const first = driver.name.split(' ')[0];
     const finish = (reply, assignmentId, handled = true) => {
       logInbound(phone, body || '[photo]', driver.id, assignmentId, handled);
