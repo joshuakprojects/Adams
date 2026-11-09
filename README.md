@@ -122,6 +122,33 @@ npm run add-user -- jane@adamsbros.ca "Jane" "a-good-password"
 Texts go out as soon as step 3 is done, even with the app on your own computer. Driver **replies**, ticket
 photos and the job links need the app online at a public `https://` address (see Hosting).
 
+## Hosting on Replit (e.g. a demo at dispatch.joshtemp.site)
+
+Run the dispatch app as its own Replit project, next to the website, on a subdomain.
+
+1. In Replit: **Create → Import from GitHub** → `joshuakprojects/Adams` (use the branch with the dispatch app).
+   The included `.replit` file sets up Node 22.
+2. Open **Secrets** (the padlock) and add:
+
+   | Secret | Value |
+   |---|---|
+   | `PUBLIC_URL` | `https://dispatch.joshtemp.site` |
+   | `COOKIE_SECURE` | `true` |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | the first office login |
+   | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | from Twilio (`+12497014820`) |
+   | `DEMO_DATA` | `true` for a demo: fills an empty board with sample jobs (remove for real use) |
+
+3. Click **Run** to try it in Replit's preview, then **Deploy → Reserved VM**. Choose Reserved VM rather than Autoscale so the app
+   stays awake for the 5 PM "tomorrow's jobs" text and for driver replies.
+4. In the deployment's **Settings → Link a domain**, enter `dispatch.joshtemp.site`. Replit shows the DNS records to add
+   wherever joshtemp.site's DNS is managed. The main website isn't affected.
+5. Log in at `https://dispatch.joshtemp.site`, go to **Setup → Texting**, and click **Connect number to this app**.
+   Driver replies and ticket photos now come in.
+
+For the demo, add yourself (and your boss) as drivers with your real cell numbers and assign them a job; the sample drivers
+have made-up 555 numbers that never receive texts. Replit deployments don't keep files written at runtime across redeploys,
+so treat the demo data as temporary. Before real use, move the database to Replit's PostgreSQL or another host with a persistent disk.
+
 ## Hosting
 
 Any small server or VPS works (for example a $5–10/month droplet or Render/Fly.io with a persistent disk).

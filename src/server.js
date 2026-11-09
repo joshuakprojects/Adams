@@ -237,6 +237,8 @@ if (require.main === module) {
   const db = openDb(config.dbPath);
   auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
+  // DEMO_DATA=true: fill an empty database with sample jobs (for showing the app off).
+  if (process.env.DEMO_DATA === 'true' && require('./demo').seedDemo(dispatch)) console.log('Loaded demo data.');
   createApp({ db, dispatch }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
