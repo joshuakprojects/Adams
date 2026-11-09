@@ -2,7 +2,6 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config');
-const { tx } = require('./db');
 const sms = require('./sms');
 const FORMS = require('../public/forms');
 
@@ -85,15 +84,14 @@ const ASSIGNMENT_SELECT = `
  * All dispatch business logic. `send(to, body)` is injectable so tests don't hit Twilio.
  */
 function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHmIn, uploadDir = config.uploadDir } = {}) {
-  const q = (sql) => db.prepare(sql);
 
   // ---------- drivers & trucks ----------
 
-  function listTrucks({ includeInactive = false } = {}) {
-    return q(`SELECT * FROM trucks ${includeInactive ? '' : 'WHERE active = 1'} ORDER BY unit COLLATE NOCASE`).all();
+  async function listTrucks({ includeInactive = false } = {}) {
+    return await db.all(`SELECT * FROM trucks ${includeInactive ? '' : 'WHERE active = 1'} ORDER BY unit COLLATE NOCASE`);
   }
 
-  function saveTruck(data) {
+  async function saveTruck(data) {
     const unit = str(data.unit, 40);
     if (!unit) throw new ValidationError('Truck unit number is required');
     const kind = TRUCK_KINDS.includes(data.kind) ? data.kind : 'haul';
@@ -101,26 +99,25 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     const active = data.active === false || data.active === 0 ? 0 : 1;
     try {
       if (data.id) {
-        q('UPDATE trucks SET unit = ?, kind = ?, description = ?, active = ? WHERE id = ?')
-          .run(unit, kind, description, active, Number(data.id));
-        return q('SELECT * FROM trucks WHERE id = ?').get(Number(data.id));
+        await db.run('UPDATE trucks SET unit = ?, kind = ?, description = ?, active = ? WHERE id = ?', unit, kind, description, active, Number(data.id));
+        return await db.get('SELECT * FROM trucks WHERE id = ?', Number(data.id));
       }
-      const r = q('INSERT INTO trucks (unit, kind, description, active) VALUES (?, ?, ?, ?)').run(unit, kind, description, active);
-      return q('SELECT * FROM trucks WHERE id = ?').get(r.lastInsertRowid);
+      const r = await db.run('INSERT INTO trucks (unit, kind, description, active) VALUES (?, ?, ?, ?)', unit, kind, description, active);
+      return await db.get('SELECT * FROM trucks WHERE id = ?', r.lastInsertRowid);
     } catch (err) {
-      if (/UNIQUE/.test(err.message)) throw new ValidationError(`Truck ${unit} already exists`);
+      if (/UNIQUE|duplicate key/i.test(err.message)) throw new ValidationError(`Truck ${unit} already exists`);
       throw err;
     }
   }
 
-  function listDrivers({ includeInactive = false } = {}) {
-    return q(`SELECT d.*, t.unit AS default_truck_unit FROM drivers d
+  async function listDrivers({ includeInactive = false } = {}) {
+    return await db.all(`SELECT d.*, t.unit AS default_truck_unit FROM drivers d
               LEFT JOIN trucks t ON t.id = d.default_truck_id
               ${includeInactive ? '' : 'WHERE d.active = 1'}
-              ORDER BY d.name COLLATE NOCASE`).all();
+              ORDER BY d.name COLLATE NOCASE`);
   }
 
-  function saveDriver(data) {
+  async function saveDriver(data) {
     const name = str(data.name, 100);
     if (!name) throw new ValidationError('Driver name is required');
     const phone = sms.normalizePhone(data.phone);
@@ -130,41 +127,40 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     const notes = str(data.notes, 500);
     try {
       if (data.id) {
-        q('UPDATE drivers SET name = ?, phone = ?, default_truck_id = ?, active = ?, notes = ? WHERE id = ?')
-          .run(name, phone, truckId, active, notes, Number(data.id));
-        return q('SELECT * FROM drivers WHERE id = ?').get(Number(data.id));
+        await db.run('UPDATE drivers SET name = ?, phone = ?, default_truck_id = ?, active = ?, notes = ? WHERE id = ?', name, phone, truckId, active, notes, Number(data.id));
+        return await db.get('SELECT * FROM drivers WHERE id = ?', Number(data.id));
       }
-      const r = q('INSERT INTO drivers (name, phone, default_truck_id, active, notes) VALUES (?, ?, ?, ?, ?)')
-        .run(name, phone, truckId, active, notes);
-      return q('SELECT * FROM drivers WHERE id = ?').get(r.lastInsertRowid);
+      const r = await db.run('INSERT INTO drivers (name, phone, default_truck_id, active, notes) VALUES (?, ?, ?, ?, ?)', name, phone, truckId, active, notes);
+      return await db.get('SELECT * FROM drivers WHERE id = ?', r.lastInsertRowid);
     } catch (err) {
-      if (/UNIQUE/.test(err.message)) throw new ValidationError('Another driver already has that phone number');
+      if (/UNIQUE|duplicate key/i.test(err.message)) throw new ValidationError('Another driver already has that phone number');
       throw err;
     }
   }
 
   // ---------- jobs ----------
 
-  function assignmentsFor(jobId) {
-    return q(`${ASSIGNMENT_SELECT} WHERE a.job_id = ? ORDER BY d.name COLLATE NOCASE`).all(jobId)
+  async function assignmentsFor(jobId) {
+    return (await db.all(`${ASSIGNMENT_SELECT} WHERE a.job_id = ? ORDER BY d.name COLLATE NOCASE`, jobId))
       .map((a) => ({ ...a, report: parseJson(a.report) }));
   }
 
-  function hydrate(job) {
+  async function hydrate(job) {
     job.details = parseJson(job.details);
-    job.assignments = assignmentsFor(job.id);
-    job.tickets = ticketsFor(job.id);
+    job.assignments = await assignmentsFor(job.id);
+    job.tickets = await ticketsFor(job.id);
     return job;
   }
 
-  function getJob(id) {
-    const job = q('SELECT * FROM jobs WHERE id = ?').get(Number(id));
-    return job ? hydrate(job) : null;
+  async function getJob(id) {
+    const job = await db.get('SELECT * FROM jobs WHERE id = ?', Number(id));
+    return job ? await hydrate(job) : null;
   }
 
-  function listJobs({ from, to }) {
-    return q(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
-              ORDER BY scheduled_date, first_thing DESC, (scheduled_time = ''), scheduled_time, id`).all(from, to).map(hydrate);
+  async function listJobs({ from, to }) {
+    const rows = await db.all(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
+              ORDER BY scheduled_date, first_thing DESC, (scheduled_time = ''), scheduled_time, id`, from, to);
+    return Promise.all(rows.map(hydrate));
   }
 
   function cleanJob(data) {
@@ -216,13 +212,13 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   // Office-only fields (drivers never see them; payments are handled by the office): changing these doesn't need a new text.
   const OFFICE_ONLY = new Set(['customer_email', 'billing_address', 'po_number', 'paper_wo', 'quoted_price', 'payment_method']);
 
-  function cleanAssignments(list) {
+  async function cleanAssignments(list) {
     const seen = new Set();
     const out = [];
     for (const item of Array.isArray(list) ? list : []) {
       const driverId = Number(item.driver_id);
       if (!driverId || seen.has(driverId)) continue;
-      const driver = q('SELECT id FROM drivers WHERE id = ?').get(driverId);
+      const driver = await db.get('SELECT id FROM drivers WHERE id = ?', driverId);
       if (!driver) throw new ValidationError('Unknown driver');
       seen.add(driverId);
       out.push({ driver_id: driverId, truck_id: item.truck_id ? Number(item.truck_id) : null });
@@ -235,76 +231,73 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * Returns { job, removed } — `removed` are assignments taken off a job that had already been texted.
    * Texts go out separately via sendJob() so the office decides when drivers are notified.
    */
-  function saveJob(data, userId = null) {
+  async function saveJob(data, userId = null) {
     const fields = cleanJob(data);
-    const wanted = cleanAssignments(data.assignments);
+    const wanted = await cleanAssignments(data.assignments);
     const removed = [];
 
-    const jobId = tx(db, () => {
+    const jobId = await db.tx(async (t) => {
       let id = data.id ? Number(data.id) : null;
       if (id) {
-        const before = q('SELECT * FROM jobs WHERE id = ?').get(id);
+        const before = await t.get('SELECT * FROM jobs WHERE id = ?', id);
         if (!before) throw new ValidationError('Job not found');
         const changed = JOB_FIELDS.some((f) => !OFFICE_ONLY.has(f) && String(before[f] ?? '') !== String(fields[f] ?? ''));
-        q(`UPDATE jobs SET ${JOB_FIELDS.map((f) => `${f} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`)
-          .run(...JOB_FIELDS.map((f) => fields[f]), id);
+        const sets = JOB_FIELDS.map((f) => `${f} = ?`).join(', ');
+        await t.run(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`, ...JOB_FIELDS.map((f) => fields[f]), id);
         if (changed) {
           // Drivers who already have the old details need the update.
-          q(`UPDATE assignments SET needs_resend = 1 WHERE job_id = ? AND status IN ('sent','acknowledged','in_progress')`).run(id);
+          await t.run(`UPDATE assignments SET needs_resend = 1 WHERE job_id = ? AND status IN ('sent','acknowledged','in_progress')`, id);
         }
       } else {
-        const r = q(`INSERT INTO jobs (${JOB_FIELDS.join(', ')}, created_by) VALUES (${JOB_FIELDS.map(() => '?').join(', ')}, ?)`)
-          .run(...JOB_FIELDS.map((f) => fields[f]), userId);
+        const marks = JOB_FIELDS.map(() => '?').join(', ');
+        const r = await t.run(`INSERT INTO jobs (${JOB_FIELDS.join(', ')}, created_by) VALUES (${marks}, ?)`, ...JOB_FIELDS.map((f) => fields[f]), userId);
         id = Number(r.lastInsertRowid);
       }
 
-      const existing = q(`${ASSIGNMENT_SELECT} WHERE a.job_id = ?`).all(id);
+      const existing = await t.all(`${ASSIGNMENT_SELECT} WHERE a.job_id = ?`, id);
       const wantedIds = new Set(wanted.map((w) => w.driver_id));
       for (const a of existing) {
         if (!wantedIds.has(a.driver_id)) {
           if (a.status !== 'pending' && a.status !== 'cancelled') removed.push(a);
-          q('DELETE FROM assignments WHERE id = ?').run(a.id);
+          await t.run('DELETE FROM assignments WHERE id = ?', a.id);
         }
       }
       for (const w of wanted) {
         const cur = existing.find((a) => a.driver_id === w.driver_id);
         if (cur) {
           if ((cur.truck_id || null) !== w.truck_id) {
-            q(`UPDATE assignments SET truck_id = ?,
+            await t.run(`UPDATE assignments SET truck_id = ?,
                  needs_resend = CASE WHEN status IN ('sent','acknowledged','in_progress') THEN 1 ELSE needs_resend END
-               WHERE id = ?`).run(w.truck_id, cur.id);
+               WHERE id = ?`, w.truck_id, cur.id);
           }
         } else {
-          q('INSERT INTO assignments (job_id, driver_id, truck_id, token) VALUES (?, ?, ?, ?)')
-            .run(id, w.driver_id, w.truck_id, newToken());
+          await t.run('INSERT INTO assignments (job_id, driver_id, truck_id, token) VALUES (?, ?, ?, ?)', id, w.driver_id, w.truck_id, newToken());
         }
       }
       return id;
     });
 
-    return { job: getJob(jobId), removed };
+    return { job: await getJob(jobId), removed };
   }
 
   async function sendText(driverId, phone, body, assignmentId = null) {
     try {
       const result = await send(phone, body);
-      q(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body, provider_sid) VALUES (?, ?, 'out', ?, ?, ?)`)
-        .run(driverId, assignmentId, phone, body, result?.sid || null);
+      await db.run(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body, provider_sid) VALUES (?, ?, 'out', ?, ?, ?)`, driverId, assignmentId, phone, body, result?.sid || null);
       return { ok: true };
     } catch (err) {
-      q(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body, error) VALUES (?, ?, 'out', ?, ?, ?)`)
-        .run(driverId, assignmentId, phone, body, String(err.message || err));
+      await db.run(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body, error) VALUES (?, ?, 'out', ?, ?, ?)`, driverId, assignmentId, phone, body, String(err.message || err));
       return { ok: false, error: String(err.message || err) };
     }
   }
 
   /** After a driver is texted new or changed details: they need to confirm again, unless already working it. */
-  function markTexted(assignmentId) {
-    q(`UPDATE assignments SET needs_resend = 0, sent_at = datetime('now'),
+  async function markTexted(assignmentId) {
+    await db.run(`UPDATE assignments SET needs_resend = 0, sent_at = datetime('now'),
          status = CASE WHEN status IN ('pending','sent','acknowledged') THEN 'sent' ELSE status END,
          ack_at = CASE WHEN status IN ('pending','sent','acknowledged') THEN NULL ELSE ack_at END,
          ack_via = CASE WHEN status IN ('pending','sent','acknowledged') THEN NULL ELSE ack_via END
-       WHERE id = ?`).run(assignmentId);
+       WHERE id = ?`, assignmentId);
   }
 
   /** Tell drivers who were taken off a job. */
@@ -317,7 +310,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * Pass assignmentId to (re)send to one driver regardless.
    */
   async function sendJob(jobId, { assignmentId = null } = {}) {
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
     if (job.status === 'cancelled') throw new ValidationError('Job is cancelled');
     const targets = job.assignments.filter((a) =>
@@ -327,52 +320,52 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (a.status === 'done' && !assignmentId) continue;
       const updated = a.status !== 'pending';
       const res = await sendText(a.driver_id, a.driver_phone, sms.buildJobText(job, a, { updated }), a.id);
-      if (res.ok) markTexted(a.id);
+      if (res.ok) await markTexted(a.id);
       results.push({ assignment_id: a.id, driver: a.driver_name, ...res });
     }
-    return { job: getJob(jobId), results };
+    return { job: await getJob(jobId), results };
   }
 
   async function cancelJob(jobId) {
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
-    q(`UPDATE jobs SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`).run(job.id);
+    await db.run(`UPDATE jobs SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`, job.id);
     for (const a of job.assignments) {
       if (a.status !== 'pending' && a.status !== 'done' && a.status !== 'cancelled') {
         await sendText(a.driver_id, a.driver_phone, sms.buildCancelText(job), a.id);
       }
     }
-    q(`UPDATE assignments SET status = 'cancelled', needs_resend = 0 WHERE job_id = ? AND status != 'done'`).run(job.id);
-    return getJob(job.id);
+    await db.run(`UPDATE assignments SET status = 'cancelled', needs_resend = 0 WHERE job_id = ? AND status != 'done'`, job.id);
+    return await getJob(job.id);
   }
 
-  function setJobStatus(jobId, status) {
+  async function setJobStatus(jobId, status) {
     if (!['open', 'complete'].includes(status)) throw new ValidationError('Bad status');
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
     if (job.status === 'cancelled' && status === 'open') {
       // Reopening a cancelled job: drivers go back to "not texted yet".
-      q(`UPDATE assignments SET status = 'pending', needs_resend = 0, sent_at = NULL, ack_at = NULL WHERE job_id = ? AND status = 'cancelled'`).run(job.id);
+      await db.run(`UPDATE assignments SET status = 'pending', needs_resend = 0, sent_at = NULL, ack_at = NULL WHERE job_id = ? AND status = 'cancelled'`, job.id);
     }
-    q(`UPDATE jobs SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, job.id);
-    return getJob(job.id);
+    await db.run(`UPDATE jobs SET status = ?, updated_at = datetime('now') WHERE id = ?`, status, job.id);
+    return await getJob(job.id);
   }
 
   /** Copy a job (with the same drivers) to another date — for "same run again tomorrow". */
-  function duplicateJob(jobId, date, userId = null) {
-    const job = getJob(jobId);
+  async function duplicateJob(jobId, date, userId = null) {
+    const job = await getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
     const copy = { ...job, id: null, scheduled_date: date || job.scheduled_date, paper_wo: '' };
     copy.assignments = job.assignments.map((a) => ({ driver_id: a.driver_id, truck_id: a.truck_id }));
-    return saveJob(copy, userId).job;
+    return (await saveJob(copy, userId)).job;
   }
 
   /**
    * Book the return trip for a portable toilet or bin: same customer and address on the pick-up date,
    * no driver yet (it's usually a different day and truck).
    */
-  function bookPickup(jobId, date, userId = null) {
-    const job = getJob(jobId);
+  async function bookPickup(jobId, date, userId = null) {
+    const job = await getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
     if (!['toilet', 'bin'].includes(job.job_type)) throw new ValidationError('Pick-ups are for toilets and bins');
     const when = date || job.details.pickup_date;
@@ -380,104 +373,102 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     const details = { ...job.details };
     if (job.job_type === 'toilet') details.trip = 'Pick up';
     else details.service = 'Empty & no return';
-    return saveJob({
+    return (await saveJob({
       ...job, id: null, scheduled_date: when, scheduled_time: '', first_thing: 0, paper_wo: '', details,
       notes: [`Pick-up for job #${job.id}.`, job.notes].filter(Boolean).join(' '), assignments: [],
-    }, userId).job;
+    }, userId)).job;
   }
 
-  function deleteJob(jobId) {
-    q('DELETE FROM jobs WHERE id = ?').run(Number(jobId));
+  async function deleteJob(jobId) {
+    await db.run('DELETE FROM jobs WHERE id = ?', Number(jobId));
   }
 
   // ---------- driver side ----------
 
-  function assignmentByToken(token) {
-    const a = q(`${ASSIGNMENT_SELECT} WHERE a.token = ?`).get(String(token || ''));
+  async function assignmentByToken(token) {
+    const a = await db.get(`${ASSIGNMENT_SELECT} WHERE a.token = ?`, String(token || ''));
     if (!a) return null;
-    a.job = q('SELECT * FROM jobs WHERE id = ?').get(a.job_id);
+    a.job = await db.get('SELECT * FROM jobs WHERE id = ?', a.job_id);
     a.job.details = parseJson(a.job.details);
     a.report = parseJson(a.report);
     return a;
   }
 
   /** The driver's after-job report from their phone (septic conditions, notes). */
-  function saveReport(token, data, via = 'web') {
-    const a = assignmentByToken(token);
+  async function saveReport(token, data, via = 'web') {
+    const a = await assignmentByToken(token);
     if (!a) throw new ValidationError('Job not found');
     const report = cleanFields(reportFields(a.job.job_type), data);
-    q(`UPDATE assignments SET report = ?, report_at = datetime('now'),
+    await db.run(`UPDATE assignments SET report = ?, report_at = datetime('now'),
          ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, ?),
          status = CASE WHEN status IN ('pending','sent') THEN 'acknowledged' ELSE status END
-       WHERE id = ?`).run(JSON.stringify(report), via, a.id);
-    return assignmentByToken(token);
+       WHERE id = ?`, JSON.stringify(report), via, a.id);
+    return await assignmentByToken(token);
   }
 
   /** Other upcoming jobs for the same driver, so the job page can link between them. */
-  function otherJobsForDriver(driverId, excludeAssignmentId) {
-    return q(`SELECT a.token, a.status, j.id AS job_id, j.job_type, j.scheduled_date, j.scheduled_time, j.first_thing, j.material, j.to_location
+  async function otherJobsForDriver(driverId, excludeAssignmentId) {
+    return await db.all(`SELECT a.token, a.status, j.id AS job_id, j.job_type, j.scheduled_date, j.scheduled_time, j.first_thing, j.material, j.to_location
               FROM assignments a JOIN jobs j ON j.id = a.job_id
               WHERE a.driver_id = ? AND a.id != ? AND j.status = 'open' AND j.scheduled_date >= ?
                 AND a.status IN ('sent','acknowledged','in_progress')
-              ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time LIMIT 10`).all(driverId, excludeAssignmentId, today());
+              ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time LIMIT 10`, driverId, excludeAssignmentId, today());
   }
 
   /**
    * Button presses from the driver's job page.
    * ack: "Got it"   load: +1 load   unload: undo a load   done: finished   reopen: undo finished
    */
-  function driverAction(token, action, via = 'web') {
-    const a = assignmentByToken(token);
+  async function driverAction(token, action, via = 'web') {
+    const a = await assignmentByToken(token);
     if (!a) throw new ValidationError('Job not found');
     if (a.status === 'cancelled' || a.job.status === 'cancelled') throw new ValidationError('This job was cancelled');
     switch (action) {
       case 'ack':
         if (a.status === 'pending' || a.status === 'sent') {
-          q(`UPDATE assignments SET status = 'acknowledged', ack_at = datetime('now'), ack_via = ? WHERE id = ?`).run(via, a.id);
+          await db.run(`UPDATE assignments SET status = 'acknowledged', ack_at = datetime('now'), ack_via = ? WHERE id = ?`, via, a.id);
         }
         break;
       case 'load':
-        q(`UPDATE assignments SET loads_done = loads_done + 1,
+        await db.run(`UPDATE assignments SET loads_done = loads_done + 1,
              status = CASE WHEN status = 'done' THEN status ELSE 'in_progress' END,
              ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, ?),
              started_at = COALESCE(started_at, datetime('now'))
-           WHERE id = ?`).run(via, a.id);
+           WHERE id = ?`, via, a.id);
         break;
       case 'unload':
-        q('UPDATE assignments SET loads_done = MAX(loads_done - 1, 0) WHERE id = ?').run(a.id);
+        await db.run('UPDATE assignments SET loads_done = CASE WHEN loads_done > 0 THEN loads_done - 1 ELSE 0 END WHERE id = ?', a.id);
         break;
       case 'done':
-        q(`UPDATE assignments SET status = 'done', done_at = datetime('now'),
+        await db.run(`UPDATE assignments SET status = 'done', done_at = datetime('now'),
              ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, ?)
-           WHERE id = ?`).run(via, a.id);
-        autoCompleteJob(a.job_id);
+           WHERE id = ?`, via, a.id);
+        await autoCompleteJob(a.job_id);
         break;
       case 'reopen':
-        q(`UPDATE assignments SET status = CASE WHEN loads_done > 0 THEN 'in_progress' ELSE 'acknowledged' END, done_at = NULL WHERE id = ?`).run(a.id);
-        q(`UPDATE jobs SET status = 'open' WHERE id = ? AND status = 'complete'`).run(a.job_id);
+        await db.run(`UPDATE assignments SET status = CASE WHEN loads_done > 0 THEN 'in_progress' ELSE 'acknowledged' END, done_at = NULL WHERE id = ?`, a.id);
+        await db.run(`UPDATE jobs SET status = 'open' WHERE id = ? AND status = 'complete'`, a.job_id);
         break;
       default:
         throw new ValidationError('Unknown action');
     }
-    return assignmentByToken(token);
+    return await assignmentByToken(token);
   }
 
   /** When every driver on a job is done, the job is complete. */
-  function autoCompleteJob(jobId) {
-    const left = q(`SELECT COUNT(*) AS n FROM assignments WHERE job_id = ? AND status NOT IN ('done','cancelled')`).get(jobId).n;
-    if (left === 0) q(`UPDATE jobs SET status = 'complete', updated_at = datetime('now') WHERE id = ? AND status = 'open'`).run(jobId);
+  async function autoCompleteJob(jobId) {
+    const left = (await db.get(`SELECT COUNT(*) AS n FROM assignments WHERE job_id = ? AND status NOT IN ('done','cancelled')`, jobId)).n;
+    if (left === 0) await db.run(`UPDATE jobs SET status = 'complete', updated_at = datetime('now') WHERE id = ? AND status = 'open'`, jobId);
   }
 
   // ---------- inbound texts ----------
 
-  function logInbound(phone, body, driverId, assignmentId, handled) {
-    q(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body, handled) VALUES (?, ?, 'in', ?, ?, ?)`)
-      .run(driverId, assignmentId, phone, body, handled ? 1 : 0);
+  async function logInbound(phone, body, driverId, assignmentId, handled) {
+    await db.run(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body, handled) VALUES (?, ?, 'in', ?, ?, ?)`, driverId, assignmentId, phone, body, handled ? 1 : 0);
   }
 
-  function logAutoReply(driver, body, assignmentId = null) {
-    q(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body) VALUES (?, ?, 'out', ?, ?)`)
-      .run(driver.id, assignmentId, driver.phone, body);
+  async function logAutoReply(driver, body, assignmentId = null) {
+    await db.run(`INSERT INTO messages (driver_id, assignment_id, direction, phone, body) VALUES (?, ?, 'out', ?, ?)`, driver.id, assignmentId, driver.phone, body);
   }
 
   const jobLabel = (a) => `#${a.job_id} (${sms.formatJobWhen(a).replace(' @ ', ' ')})`;
@@ -486,24 +477,24 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * A driver texted us. Understands OK / DONE (optionally with a job number); anything else is
    * flagged on the dashboard for the office. Returns { reply } — the text to send back, if any.
    */
-  function handleInbound(fromRaw, bodyRaw, { media = [] } = {}) {
+  async function handleInbound(fromRaw, bodyRaw, { media = [] } = {}) {
     const phone = sms.normalizePhone(fromRaw) || String(fromRaw || '');
     let body = String(bodyRaw || '').trim().slice(0, 1600);
-    const driver = q('SELECT * FROM drivers WHERE phone = ?').get(phone);
+    const driver = await db.get('SELECT * FROM drivers WHERE phone = ?', phone);
     if (!driver) {
-      logInbound(phone, body || `[${media.length} photo(s)]`, null, null, false);
+      await logInbound(phone, body || `[${media.length} photo(s)]`, null, null, false);
       return { reply: null };
     }
 
     const { action, jobId } = sms.parseReply(body);
-    const open = q(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing')}
+    const open = await db.all(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing')}
                     JOIN jobs j ON j.id = a.job_id
                     WHERE a.driver_id = ? AND j.status = 'open' AND a.status IN ('sent','acknowledged','in_progress')
-                    ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time, j.id`).all(driver.id);
+                    ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time, j.id`, driver.id);
     const first = driver.name.split(' ')[0];
-    const finish = (reply, assignmentId, handled = true) => {
-      logInbound(phone, body || '[photo]', driver.id, assignmentId, handled);
-      if (reply) logAutoReply(driver, reply, assignmentId);
+    const finish = async (reply, assignmentId, handled = true) => {
+      await logInbound(phone, body || '[photo]', driver.id, assignmentId, handled);
+      if (reply) await logAutoReply(driver, reply, assignmentId);
       return { reply };
     };
 
@@ -518,7 +509,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     if (media.length) {
       const target = currentJob();
       for (const m of media) {
-        saveTicket({ driverId: driver.id, assignment: target, buffer: m.buffer, contentType: m.contentType, source: 'sms' });
+        await saveTicket({ driverId: driver.id, assignment: target, buffer: m.buffer, contentType: m.contentType, source: 'sms' });
       }
       const n = media.length === 1 ? 'ticket photo' : `${media.length} ticket photos`;
       if (!target) {
@@ -543,7 +534,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       }
       for (const a of targets) {
         if (a.status === 'sent') {
-          q(`UPDATE assignments SET status = 'acknowledged', ack_at = datetime('now'), ack_via = 'sms' WHERE id = ?`).run(a.id);
+          await db.run(`UPDATE assignments SET status = 'acknowledged', ack_at = datetime('now'), ack_via = 'sms' WHERE id = ?`, a.id);
         }
       }
       const label = targets.length === 1 ? `Job ${jobLabel(targets[0])}` : `Jobs ${targets.map(jobLabel).join(', ')}`;
@@ -556,9 +547,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
         if (jobId) return finish(`Couldn't find an open Job #${jobId} for you. Call dispatch if that's wrong.`, null, false);
         return finish(`No job today to mark done. Reply DONE and the job number, e.g. DONE ${open[0]?.job_id || 1042}`, null, false);
       }
-      q(`UPDATE assignments SET status = 'done', done_at = datetime('now'),
-           ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, 'sms') WHERE id = ?`).run(target.id);
-      autoCompleteJob(target.job_id);
+      await db.run(`UPDATE assignments SET status = 'done', done_at = datetime('now'),
+           ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, 'sms') WHERE id = ?`, target.id);
+      await autoCompleteJob(target.job_id);
       const others = open.filter((a) => a.id !== target.id && a.scheduled_date <= today()).length;
       const hint = others ? ` Wrong job? Reply DONE and the job number.` : '';
       return finish(`Thanks ${first} - Job ${jobLabel(target)} marked DONE.${hint}`, target.id);
@@ -572,88 +563,93 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   // ---------- scale tickets ----------
 
-  function ticketsFor(jobId) {
-    return q(`SELECT t.id, t.assignment_id, t.driver_id, t.source, t.created_at, d.name AS driver_name
+  async function ticketsFor(jobId) {
+    return await db.all(`SELECT t.id, t.assignment_id, t.driver_id, t.source, t.created_at, d.name AS driver_name
               FROM tickets t LEFT JOIN drivers d ON d.id = t.driver_id
-              WHERE t.job_id = ? ORDER BY t.id`).all(jobId);
+              WHERE t.job_id = ? ORDER BY t.id`, jobId);
   }
 
   /** Save a ticket photo. `assignment` may be null (photo texted with no job to match). */
-  function saveTicket({ driverId = null, assignment = null, buffer, contentType, source = 'web' }) {
+  async function saveTicket({ driverId = null, assignment = null, buffer, contentType, source = 'web' }) {
     const type = String(contentType || '').split(';')[0].trim().toLowerCase();
     const ext = IMAGE_TYPES[type];
     if (!ext) throw new ValidationError('Only photos can be uploaded');
     if (!buffer || !buffer.length) throw new ValidationError('The photo was empty');
     if (buffer.length > MAX_IMAGE_BYTES) throw new ValidationError('That photo is too big');
-    fs.mkdirSync(uploadDir, { recursive: true });
+    // Stored in the database (not on disk) so photos survive a republish on Replit.
     const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
-    fs.writeFileSync(path.join(uploadDir, filename), buffer);
-    const r = q(`INSERT INTO tickets (assignment_id, job_id, driver_id, filename, content_type, source) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(assignment?.id ?? null, assignment?.job_id ?? null, driverId ?? assignment?.driver_id ?? null, filename, type, source);
-    return getTicket(r.lastInsertRowid);
+    const r = await db.run(`INSERT INTO tickets (assignment_id, job_id, driver_id, filename, content_type, source, data) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      assignment?.id ?? null, assignment?.job_id ?? null, driverId ?? assignment?.driver_id ?? null, filename, type, source, Buffer.from(buffer));
+    return await getTicket(r.lastInsertRowid);
   }
 
-  function getTicket(id) {
-    const t = q('SELECT * FROM tickets WHERE id = ?').get(Number(id));
-    if (t) t.path = path.join(uploadDir, t.filename);
-    return t || null;
+  /** A ticket with its photo bytes in `data` (older tickets may only have a file in UPLOAD_DIR). */
+  async function getTicket(id) {
+    const t = await db.get('SELECT * FROM tickets WHERE id = ?', Number(id));
+    if (!t) return null;
+    if (t.data) t.data = Buffer.from(t.data);
+    else {
+      const file = path.join(uploadDir, t.filename);
+      t.data = fs.existsSync(file) ? fs.readFileSync(file) : null;
+    }
+    return t;
   }
 
-  function ticketsForAssignment(assignmentId) {
-    return q('SELECT id, created_at, source FROM tickets WHERE assignment_id = ? ORDER BY id').all(assignmentId);
+  async function ticketsForAssignment(assignmentId) {
+    return await db.all('SELECT id, created_at, source FROM tickets WHERE assignment_id = ? ORDER BY id', assignmentId);
   }
 
   /** Photos texted in that couldn't be matched to a job — the office attaches them by hand. */
-  function unmatchedTickets() {
-    return q(`SELECT t.id, t.created_at, t.driver_id, d.name AS driver_name FROM tickets t
-              LEFT JOIN drivers d ON d.id = t.driver_id WHERE t.job_id IS NULL ORDER BY t.id DESC LIMIT 50`).all();
+  async function unmatchedTickets() {
+    return await db.all(`SELECT t.id, t.created_at, t.driver_id, d.name AS driver_name FROM tickets t
+              LEFT JOIN drivers d ON d.id = t.driver_id WHERE t.job_id IS NULL ORDER BY t.id DESC LIMIT 50`);
   }
 
-  function attachTicket(ticketId, jobId) {
-    const t = getTicket(ticketId);
+  async function attachTicket(ticketId, jobId) {
+    const t = await getTicket(ticketId);
     if (!t) throw new ValidationError('Ticket not found');
-    const a = t.driver_id ? q('SELECT * FROM assignments WHERE job_id = ? AND driver_id = ?').get(Number(jobId), t.driver_id) : null;
-    if (!q('SELECT id FROM jobs WHERE id = ?').get(Number(jobId))) throw new ValidationError('Job not found');
-    q('UPDATE tickets SET job_id = ?, assignment_id = ? WHERE id = ?').run(Number(jobId), a?.id ?? null, t.id);
-    return getTicket(t.id);
+    const a = t.driver_id ? await db.get('SELECT * FROM assignments WHERE job_id = ? AND driver_id = ?', Number(jobId), t.driver_id) : null;
+    if (!await db.get('SELECT id FROM jobs WHERE id = ?', Number(jobId))) throw new ValidationError('Job not found');
+    await db.run('UPDATE tickets SET job_id = ?, assignment_id = ? WHERE id = ?', Number(jobId), a?.id ?? null, t.id);
+    return await getTicket(t.id);
   }
 
-  function deleteTicket(ticketId) {
-    const t = getTicket(ticketId);
+  async function deleteTicket(ticketId) {
+    const t = await getTicket(ticketId);
     if (!t) return;
-    q('DELETE FROM tickets WHERE id = ?').run(t.id);
-    fs.rmSync(t.path, { force: true });
+    await db.run('DELETE FROM tickets WHERE id = ?', t.id);
+    fs.rmSync(path.join(uploadDir, t.filename), { force: true });
   }
 
   // ---------- settings ----------
 
-  function getSetting(key, fallback = '') {
-    const row = q('SELECT value FROM settings WHERE key = ?').get(key);
+  async function getSetting(key, fallback = '') {
+    const row = await db.get('SELECT value FROM settings WHERE key = ?', key);
     return row ? row.value : fallback;
   }
 
-  function setSetting(key, value) {
-    q('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value));
+  async function setSetting(key, value) {
+    await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, String(value));
   }
 
-  function getSettings() {
-    return { lineup_time: getSetting('lineup_time', config.lineupTime || '') };
+  async function getSettings() {
+    return { lineup_time: await getSetting('lineup_time', config.lineupTime || '') };
   }
 
-  function saveSettings(data) {
+  async function saveSettings(data) {
     if ('lineup_time' in data) {
       const t = str(data.lineup_time, 5);
       if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new ValidationError('Time must look like 17:00');
-      setSetting('lineup_time', t);
+      await setSetting('lineup_time', t);
     }
-    return getSettings();
+    return await getSettings();
   }
 
   // ---------- day lineup ("tomorrow's jobs" text) ----------
 
   /** Per driver, their open jobs on `date`, in time order. */
-  function lineupFor(date) {
-    const jobs = listJobs({ from: date, to: date }).filter((j) => j.status === 'open');
+  async function lineupFor(date) {
+    const jobs = (await listJobs({ from: date, to: date })).filter((j) => j.status === 'open');
     const byDriver = new Map();
     for (const job of jobs) {
       for (const a of job.assignments) {
@@ -665,9 +661,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     return [...byDriver.values()];
   }
 
-  function lineupStatus(date) {
-    const sent = q(`SELECT driver_id, MAX(sent_at) AS sent_at FROM lineup_sends WHERE date = ? GROUP BY driver_id`).all(date);
-    const drivers = lineupFor(date);
+  async function lineupStatus(date) {
+    const sent = await db.all(`SELECT driver_id, MAX(sent_at) AS sent_at FROM lineup_sends WHERE date = ? GROUP BY driver_id`, date);
+    const drivers = await lineupFor(date);
     return {
       date,
       drivers: drivers.length,
@@ -682,9 +678,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    */
   async function sendLineup(date, { auto = false } = {}) {
     const results = [];
-    for (const d of lineupFor(date)) {
+    for (const d of await lineupFor(date)) {
       if (auto) {
-        const already = q('SELECT 1 FROM lineup_sends WHERE date = ? AND driver_id = ?').get(date, d.driver_id);
+        const already = await db.get('SELECT 1 FROM lineup_sends WHERE date = ? AND driver_id = ?', date, d.driver_id);
         const somethingNew = d.items.some(({ assignment: a }) => a.status === 'pending' || a.needs_resend);
         if (already && !somethingNew) continue;
       }
@@ -692,9 +688,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
         d.items.length === 1 ? d.items[0].assignment.id : null);
       if (res.ok) {
         for (const { assignment: a } of d.items) {
-          if (a.status === 'pending' || a.needs_resend) markTexted(a.id);
+          if (a.status === 'pending' || a.needs_resend) await markTexted(a.id);
         }
-        q('INSERT INTO lineup_sends (date, driver_id, auto) VALUES (?, ?, ?)').run(date, d.driver_id, auto ? 1 : 0);
+        await db.run('INSERT INTO lineup_sends (date, driver_id, auto) VALUES (?, ?, ?)', date, d.driver_id, auto ? 1 : 0);
       }
       results.push({ driver: d.name, jobs: d.items.length, ...res });
     }
@@ -705,33 +701,32 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * Called every minute. Once the set time has passed each day, texts everyone their jobs for tomorrow.
    */
   async function runScheduledLineup() {
-    const time = getSettings().lineup_time;
+    const time = (await getSettings()).lineup_time;
     if (!time) return null;
     const day = today();
-    if (nowHm() < time || getSetting('lineup_auto_last') === day) return null;
-    setSetting('lineup_auto_last', day);
+    if (nowHm() < time || await getSetting('lineup_auto_last') === day) return null;
+    await setSetting('lineup_auto_last', day);
     return sendLineup(addDays(day, 1), { auto: true });
   }
 
   // ---------- dashboard ----------
 
-  function listMessages({ limit = 100, unhandledOnly = false } = {}) {
-    return q(`SELECT m.*, d.name AS driver_name, a.job_id FROM messages m
+  async function listMessages({ limit = 100, unhandledOnly = false } = {}) {
+    return await db.all(`SELECT m.*, d.name AS driver_name, a.job_id FROM messages m
               LEFT JOIN drivers d ON d.id = m.driver_id
               LEFT JOIN assignments a ON a.id = m.assignment_id
               ${unhandledOnly ? "WHERE m.direction = 'in' AND m.handled = 0 AND m.seen = 0" : ''}
-              ORDER BY m.id DESC LIMIT ?`).all(limit);
+              ORDER BY m.id DESC LIMIT ?`, limit);
   }
 
-  function markMessagesSeen(ids) {
-    const stmt = q('UPDATE messages SET seen = 1 WHERE id = ?');
-    for (const id of ids || []) stmt.run(Number(id));
+  async function markMessagesSeen(ids) {
+    for (const id of ids || []) await db.run('UPDATE messages SET seen = 1 WHERE id = ?', Number(id));
   }
 
   /** Everything the dispatch board needs for one day. */
-  function board(date) {
-    const jobs = listJobs({ from: date, to: date });
-    const drivers = listDrivers().map((d) => {
+  async function board(date) {
+    const jobs = await listJobs({ from: date, to: date });
+    const drivers = (await listDrivers()).map((d) => {
       const mine = jobs.filter((j) => j.status !== 'cancelled')
         .flatMap((j) => j.assignments.filter((a) => a.driver_id === d.id).map((a) => ({ job_id: j.id, status: a.status })));
       return { ...d, jobs: mine };
@@ -741,22 +736,22 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       today: today(),
       jobs,
       drivers,
-      trucks: listTrucks(),
-      alerts: listMessages({ unhandledOnly: true, limit: 50 }),
-      unmatched_tickets: unmatchedTickets(),
-      lineup: { ...lineupStatus(date), auto_time: getSettings().lineup_time },
+      trucks: await listTrucks(),
+      alerts: await listMessages({ unhandledOnly: true, limit: 50 }),
+      unmatched_tickets: await unmatchedTickets(),
+      lineup: { ...(await lineupStatus(date)), auto_time: (await getSettings()).lineup_time },
     };
   }
 
   /** Previously used values, for autocomplete in the job form. */
-  function suggestions() {
-    const col = (c) => q(`SELECT ${c} AS v, COUNT(*) AS n FROM jobs WHERE ${c} != '' GROUP BY ${c} ORDER BY n DESC LIMIT 200`).all().map((r) => r.v);
-    const locations = [...new Set([...col('from_location'), ...col('to_location')])];
+  async function suggestions() {
+    const col = async (c) => (await db.all(`SELECT ${c} AS v, COUNT(*) AS n FROM jobs WHERE ${c} != '' GROUP BY ${c} ORDER BY n DESC LIMIT 200`)).map((r) => r.v);
+    const locations = [...new Set([...(await col('from_location')), ...(await col('to_location'))])];
     const materialsByType = {};
-    for (const r of q(`SELECT job_type, material, COUNT(*) AS n FROM jobs WHERE material != '' GROUP BY job_type, material ORDER BY n DESC LIMIT 500`).all()) {
+    for (const r of await db.all(`SELECT job_type, material, COUNT(*) AS n FROM jobs WHERE material != '' GROUP BY job_type, material ORDER BY n DESC LIMIT 500`)) {
       (materialsByType[r.job_type] ||= []).push(r.material);
     }
-    return { customers: col('customer'), materialsByType, locations, units: col('unit'), municipalities: col('municipality') };
+    return { customers: await col('customer'), materialsByType, locations, units: await col('unit'), municipalities: await col('municipality') };
   }
 
   return {

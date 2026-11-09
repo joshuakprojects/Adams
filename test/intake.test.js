@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 process.env.TWILIO_ACCOUNT_SID = '';
-const { openDb } = require('../src/db');
+const { testDb } = require('./helpers');
 const { createDispatch } = require('../src/dispatch');
 const { createUser } = require('../src/auth');
 const { createApp } = require('../src/server');
@@ -22,7 +22,7 @@ const septicOrder = {
     steep_driveway: 'yes', air_attachments: 'yes', add_pump_chamber: false, ecoethic: true },
 };
 
-test('septic order becomes a filled-in septic work order', () => {
+test('septic order becomes a filled-in septic work order', async (t) => {
   const row = { id: 7, ...normalizePayload(septicOrder) };
   assert.equal(row.phone, '+17055550199');
   assert.equal(row.estimate_total, '$447.00');
@@ -40,7 +40,7 @@ test('septic order becomes a filled-in septic work order', () => {
   assert.equal(job.request_id, 7);
 });
 
-test('other services map to their work orders, and labels from the website are understood', () => {
+test('other services map to their work orders, and labels from the website are understood', async (t) => {
   const agg = toJobPrefill({ id: 1, ...normalizePayload({ service: 'Aggregates', customer: { name: 'A' },
     details: { material: 'Sand fill', quantity: 10, unit: 'yards', fulfillment: 'pickup' } }) }, '2026-11-10');
   assert.equal(agg.job_type, 'haul');
@@ -69,8 +69,8 @@ test('other services map to their work orders, and labels from the website are u
 });
 
 test('website → intake → Requests inbox → schedule → status back to the website', async (t) => {
-  const db = openDb(':memory:');
-  createUser(db, { email: 'office@test.ca', name: 'Office', password: 'password123' });
+  const db = await testDb(t);
+  await createUser(db, { email: 'office@test.ca', name: 'Office', password: 'password123' });
   const dispatch = createDispatch(db, { send: async () => ({ sid: 'x' }) });
   const server = createApp({ db, dispatch, intakeKey: KEY }).listen(0);
   t.after(() => server.close());
@@ -114,7 +114,7 @@ test('website → intake → Requests inbox → schedule → status back to the 
 });
 
 test('intake is off without a key', async (t) => {
-  const db = openDb(':memory:');
+  const db = await testDb(t);
   const server = createApp({ db, dispatch: createDispatch(db), intakeKey: '' }).listen(0);
   t.after(() => server.close());
   const res = await fetch(`http://localhost:${server.address().port}/api/intake`, { method: 'POST',

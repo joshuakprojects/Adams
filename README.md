@@ -100,7 +100,8 @@ npm install
 cp .env.example .env      # fill in at least ADMIN_EMAIL / ADMIN_PASSWORD
 npm run seed              # optional: sample trucks, drivers and jobs
 npm start                 # http://localhost:3000
-npm test
+npm test                  # tests on SQLite
+npm run test:pg           # the same tests on PostgreSQL (set TEST_DATABASE_URL)
 ```
 
 Until Twilio is set up, the app runs in **test mode**. Texts are printed in the server log instead of sent,
@@ -159,16 +160,22 @@ Run the dispatch app as its own Replit project, next to the website, on a subdom
    Driver replies and ticket photos now come in.
 
 For the demo, add yourself (and your boss) as drivers with your real cell numbers and assign them a job; the sample drivers
-have made-up 555 numbers that never receive texts. Replit deployments don't keep files written at runtime across redeploys,
-so treat the demo data as temporary. Before real use, move the database to Replit's PostgreSQL or another host with a persistent disk.
+have made-up 555 numbers that never receive texts.
+
+### Database on Replit (keeps data permanently)
+
+Replit doesn't keep files across republishes, so on Replit the app stores everything, ticket photos included, in
+Replit's built-in **PostgreSQL** database. In the project, open **Tools → Database** and create a PostgreSQL database.
+Replit then sets `DATABASE_URL`, and the app uses it automatically; the start-up log says `Database: PostgreSQL`.
+Without `DATABASE_URL` (on a laptop, for example) it uses a local SQLite file instead.
 
 ## Hosting
 
 Any small server or VPS works (for example a $5–10/month droplet or Render/Fly.io with a persistent disk).
 A `Dockerfile` is included: mount a persistent volume at `/app/data` and set the `.env` values as environment variables.
 Run it behind HTTPS on a subdomain like `dispatch.adamsbros.ca` and set `COOKIE_SECURE=true`.
-All data is in the `data/` folder: the SQLite database (`DB_PATH`, default `data/dispatch.db`) and ticket photos
-(`UPLOAD_DIR`, default `data/uploads`). Back up that folder.
+With `DATABASE_URL` set, everything, ticket photos included, is in PostgreSQL. Back it up with your host's database backups.
+Without it, everything is in the SQLite file `data/dispatch.db` (`DB_PATH`). Back up that file.
 Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on work orders (address, phone, HST #) can be changed with the `COMPANY_*` settings in `.env`.
 
 ## Code layout
@@ -177,11 +184,12 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 |---|---|
 | `src/server.js` | Web server and routes (office API, driver job page, Twilio webhook) |
 | `src/dispatch.js` | Dispatch logic: jobs, assignments, sending, reply handling |
+| `src/intake.js` | Orders from the website: intake API, Requests inbox, filling in work orders |
 | `src/sms.js` | Text wording, reply parsing (OK / DONE), Twilio sending and signature check |
 | `public/forms.js` | The work order types and their fields, modelled on the paper forms (shared by server and dashboard) |
 | `src/driverPage.js` | The driver's job page and after-job report (works without JavaScript) |
 | `src/printPage.js` | Printable work orders laid out like the paper forms |
-| `src/db.js` | SQLite schema |
+| `src/db.js` | Database tables, and the PostgreSQL / SQLite drivers |
 | `src/auth.js` | Office logins and sessions |
 | `public/` | Office dashboard (plain HTML/CSS/JS, no build step) |
 

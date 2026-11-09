@@ -211,10 +211,9 @@ function toJobPrefill(r, today) {
 }
 
 function createIntake(db) {
-  const q = (sql) => db.prepare(sql);
 
-  function get(id) {
-    const r = q('SELECT * FROM requests WHERE id = ?').get(Number(id));
+  async function get(id) {
+    const r = await db.get('SELECT * FROM requests WHERE id = ?', Number(id));
     return r ? decorate(r) : null;
   }
 
@@ -231,56 +230,56 @@ function createIntake(db) {
   }
 
   /** Store a website order. Re-sending the same order id updates it instead of making a duplicate. */
-  function receive(body) {
+  async function receive(body) {
     const row = normalizePayload(body);
-    const existing = row.external_id ? q('SELECT * FROM requests WHERE external_id = ?').get(row.external_id) : null;
+    const existing = row.external_id ? await db.get('SELECT * FROM requests WHERE external_id = ?', row.external_id) : null;
     const cols = ['service', 'customer_name', 'phone', 'email', 'billing_address', 'address', 'municipality',
       'requested_date', 'estimate_total', 'notes', 'payload'];
     if (existing) {
-      q(`UPDATE requests SET ${cols.map((c) => `${c} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`)
-        .run(...cols.map((c) => row[c]), existing.id);
-      return { request: get(existing.id), created: false };
+      const sets = cols.map((c) => `${c} = ?`).join(', ');
+      await db.run(`UPDATE requests SET ${sets}, updated_at = datetime('now') WHERE id = ?`, ...cols.map((c) => row[c]), existing.id);
+      return { request: await get(existing.id), created: false };
     }
-    const r = q(`INSERT INTO requests (external_id, ${cols.join(', ')}) VALUES (?, ${cols.map(() => '?').join(', ')})`)
-      .run(row.external_id, ...cols.map((c) => row[c]));
-    return { request: get(r.lastInsertRowid), created: true };
+    const marks = cols.map(() => '?').join(', ');
+    const r = await db.run(`INSERT INTO requests (external_id, ${cols.join(', ')}) VALUES (?, ${marks})`, row.external_id, ...cols.map((c) => row[c]));
+    return { request: await get(r.lastInsertRowid), created: true };
   }
 
-  function list({ status } = {}) {
+  async function list({ status } = {}) {
     const where = status === 'open' ? "WHERE r.status = 'new'" : STATUSES.includes(status) ? 'WHERE r.status = ?' : '';
     const args = STATUSES.includes(status) ? [status] : [];
-    return q(`SELECT r.*, j.scheduled_date AS job_date, j.status AS job_status FROM requests r
-              LEFT JOIN jobs j ON j.id = r.job_id ${where} ORDER BY r.id DESC LIMIT 200`).all(...args).map(decorate);
+    const rows = await db.all(`SELECT r.*, j.scheduled_date AS job_date, j.status AS job_status FROM requests r
+              LEFT JOIN jobs j ON j.id = r.job_id ${where} ORDER BY r.id DESC LIMIT 200`, ...args);
+    return rows.map(decorate);
   }
 
-  function countNew() {
-    return q("SELECT COUNT(*) AS n FROM requests WHERE status = 'new'").get().n;
+  async function countNew() {
+    return (await db.get("SELECT COUNT(*) AS n FROM requests WHERE status = 'new'")).n;
   }
 
-  function setStatus(id, status, userId = null) {
+  async function setStatus(id, status, userId = null) {
     if (!STATUSES.includes(status)) throw new IntakeError('Unknown status');
-    q(`UPDATE requests SET status = ?, handled_by = ?, updated_at = datetime('now') WHERE id = ?`).run(status, userId, Number(id));
-    return get(id);
+    await db.run(`UPDATE requests SET status = ?, handled_by = ?, updated_at = datetime('now') WHERE id = ?`, status, userId, Number(id));
+    return await get(id);
   }
 
   /** The office scheduled this request as a job. */
-  function link(id, jobId, userId = null) {
-    if (!get(id)) return null;
-    q(`UPDATE requests SET status = 'scheduled', job_id = ?, handled_by = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(Number(jobId), userId, Number(id));
-    q('UPDATE jobs SET request_id = ? WHERE id = ?').run(Number(id), Number(jobId));
-    return get(id);
+  async function link(id, jobId, userId = null) {
+    if (!await get(id)) return null;
+    await db.run(`UPDATE requests SET status = 'scheduled', job_id = ?, handled_by = ?, updated_at = datetime('now') WHERE id = ?`, Number(jobId), userId, Number(id));
+    await db.run('UPDATE jobs SET request_id = ? WHERE id = ?', Number(id), Number(jobId));
+    return await get(id);
   }
 
-  function prefill(id, today) {
-    const r = q('SELECT * FROM requests WHERE id = ?').get(Number(id));
+  async function prefill(id, today) {
+    const r = await db.get('SELECT * FROM requests WHERE id = ?', Number(id));
     return r ? toJobPrefill(r, today) : null;
   }
 
   /** For the website to show "Scheduled for Tue Nov 10" in its admin. */
-  function statusFor(externalId) {
-    const r = q(`SELECT r.status, r.job_id, j.scheduled_date, j.status AS job_status FROM requests r
-                 LEFT JOIN jobs j ON j.id = r.job_id WHERE r.external_id = ?`).get(String(externalId));
+  async function statusFor(externalId) {
+    const r = await db.get(`SELECT r.status, r.job_id, j.scheduled_date, j.status AS job_status FROM requests r
+                 LEFT JOIN jobs j ON j.id = r.job_id WHERE r.external_id = ?`, String(externalId));
     if (!r) return null;
     let status = r.status;
     if (r.job_id && r.job_status === 'complete') status = 'completed';

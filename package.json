@@ -4,16 +4,20 @@
   "private": true,
   "description": "Truck dispatch for Adams Bros: office dashboard + SMS to drivers",
   "main": "src/server.js",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "start": "node --experimental-sqlite --disable-warning=ExperimentalWarning src/server.js",
     "dev": "node --experimental-sqlite --disable-warning=ExperimentalWarning --watch src/server.js",
     "seed": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/seed.js",
     "add-user": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/add-user.js",
     "twilio": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/twilio.js",
-    "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+    "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
+    "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://localhost/dispatch_test} npm test"
   },
   "dependencies": {
-    "express": "4.21.2"
+    "express": "4.21.2",
+    "pg": "8.13.1"
   }
 }

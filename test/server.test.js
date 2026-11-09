@@ -2,14 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 process.env.TWILIO_ACCOUNT_SID = '';
-const { openDb } = require('../src/db');
+const { testDb } = require('./helpers');
 const { createDispatch } = require('../src/dispatch');
 const { createUser } = require('../src/auth');
 const { createApp } = require('../src/server');
 
 test('office login, create & text a job, driver confirms by SMS and finishes on the page', async (t) => {
-  const db = openDb(':memory:');
-  createUser(db, { email: 'office@test.ca', name: 'Office', password: 'password123' });
+  const db = await testDb(t);
+  await createUser(db, { email: 'office@test.ca', name: 'Office', password: 'password123' });
   const sent = [];
   const uploadDir = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'up-'));
   const dispatch = createDispatch(db, { uploadDir, send: async (to, body) => { sent.push({ to, body }); return { sid: 'x' }; } });
