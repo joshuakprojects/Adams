@@ -55,7 +55,7 @@ Each job is one of the office's work order types. The fields come from the paper
 
 | Type | Paper form | Type-specific fields |
 |---|---|---|
-| 🪨 **Aggregate** | Aggregates Work Order (blue) | Two aggregate lines, each with: aggregate type, circle one (Tandem / Triaxle / H&G), # of loads OR # of yards |
+| 🪨 **Aggregate** | Aggregates Work Order (blue) | Deliver to site or **haul away from site** (show up empty); optionally **keep hauling until the site says stop**; two aggregate lines, each with: aggregate type, circle one (Tandem / Triaxle / H&G), # of loads OR # of yards |
 | 🗑️ **Bin** | Bin Work Order (green) | Bin size; Deliver bin / Empty & return / Empty & no return / H&G |
 | 💧 **Septic** | Septic pump-out sheet | Tank size, elevation, hose length, lids uncovered, tank type, tank location, steep driveway, back in, directions |
 | 🚻 **Toilet** | Portable toilet rental (blue) | Deliver / pick up / service, expected pick-up date, up to 3 toilet types with counts, placement, extra servicing |

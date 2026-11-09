@@ -57,16 +57,18 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
     const planned = FORMS.totalLoads(job);
     if (t.loads || planned) {
       top += `<div class="loads">Loads done: <b>${a.loads_done}</b>${planned ? ` of ${planned}` : ''}</div>`;
-      top += action('load', '+1 Load delivered', 'load');
+      top += action('load', FORMS.isHaulAway(job) ? '+1 Load hauled away' : '+1 Load delivered', 'load');
       if (a.loads_done > 0) top += action('unload', 'Undo last load', 'small');
     }
-    finish = action('done', '✔ Job finished', 'finish');
+    const untilStop = job.job_type === 'haul' && d.until_stop;
+    finish = action('done', untilStop ? '✔ Site said stop — finished' : '✔ Job finished', 'finish');
   }
 
   const callLink = (phone) => (phone && /^\+?\d+$/.test(phone) ? ` <a class="call" href="tel:${esc(phone)}">Call</a>` : '');
   const site = sms.siteAddress(job);
+  const lb = FORMS.labels(job);
   const typeRows = t.fields
-    .filter((f) => !/^toilet\d_/.test(f.key) && !/^aggregate2_/.test(f.key) && !['service', 'trip', 'truck'].includes(f.key))
+    .filter((f) => !/^toilet\d_/.test(f.key) && !/^aggregate2_/.test(f.key) && !['service', 'trip', 'truck', 'direction', 'until_stop'].includes(f.key))
     .map((f) => row(f.label, f.kind === 'date' ? sms.formatDate(d[f.key]) : d[f.key])).join('');
 
   // After-job report: the form's own questions (septic conditions) and notes. Payments are handled by the office.
@@ -112,10 +114,14 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
   <div class="form-title">${esc(t.title)}</div>
   <div class="status s-${esc(cancelled ? 'cancelled' : a.status)}">${esc(cancelled ? STATUS_TEXT.cancelled : STATUS_TEXT[a.status] || a.status)}</div>
   <div class="when">${esc(sms.formatJobWhen(job))}</div>
+  ${FORMS.driverInstructions(job).map((x) => `<div class="banner heads-up">${esc(x)}</div>`).join('')}
   <div class="card">
     ${row(t.what || 'Job', sms.cargoSummary(job))}
-    ${t.from ? row(t.from, job.from_location, job.from_location ? `<a class="map" href="${mapsUrl(job.from_location)}">Map ➜</a>` : '') : ''}
-    ${row(t.to, site, site ? `<a class="map" href="${mapsUrl(site)}">Map ➜</a>` : '')}
+    ${FORMS.isHaulAway(job) ? `
+    ${row(lb.to, site, site ? `<a class="map" href="${mapsUrl(site)}">Map ➜</a>` : '')}
+    ${row(lb.from, job.from_location, job.from_location ? `<a class="map" href="${mapsUrl(job.from_location)}">Map ➜</a>` : '')}` : `
+    ${lb.from ? row(lb.from, job.from_location, job.from_location ? `<a class="map" href="${mapsUrl(job.from_location)}">Map ➜</a>` : '') : ''}
+    ${row(lb.to, site, site ? `<a class="map" href="${mapsUrl(site)}">Map ➜</a>` : '')}`}
     ${typeRows}
     ${row('Customer', [job.customer, sms.prettyPhone(job.customer_phone)].filter(Boolean).join(' '), callLink(job.customer_phone))}
     ${row('Site contact', [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' '), callLink(job.contact_phone))}

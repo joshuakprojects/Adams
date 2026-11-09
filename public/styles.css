@@ -201,3 +201,5 @@ fieldset.sec legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: 
 #sms-status code { background: #f2f2ee; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
 .warn-line { color: #8a4b00; }
 .ok-line { color: var(--green-2); font-weight: 700; }
+.grid label.check-field { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #8a4b00; }
+.grid input:disabled { background: #f0f0ea; color: #aaa; }

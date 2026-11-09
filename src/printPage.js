@@ -18,6 +18,7 @@ function circled(label, options, value) {
 
 function renderField(f, value) {
   if (f.kind === 'choice') return circled(f.label, f.options, value);
+  if (f.kind === 'check') return `<div class="ln wide"><span class="lb">${value ? '☑' : '☐'} ${esc(f.label)}</span></div>`;
   if (f.kind === 'date') return line(f.label, value ? sms.formatDate(value) : '');
   return line(f.label, value, f.wide || f.kind === 'textarea' ? 'wide' : '');
 }
@@ -42,7 +43,9 @@ function renderPrintPage(job) {
   // Aggregates: two lines, like the paper form.
   const trucks = (t.fields.find((f) => f.key === 'truck') || {}).options || [];
   const half = (label, value) => `<div class="ln half"><span class="lb">${esc(label)}:</span><span class="val">${esc(value || '')}</span></div>`;
-  const aggregateRows = job.job_type === 'haul' ? [
+  const haulOptions = job.job_type === 'haul'
+    ? t.fields.filter((f) => f.slot === 'first').map((f) => renderField(f, d[f.key])).join('') : '';
+  const aggregateRows = job.job_type === 'haul' ? haulOptions + [
     [job.material, d.truck, job.loads_planned, job.quantity],
     [d.aggregate2_type, d.aggregate2_truck, d.aggregate2_loads, d.aggregate2_yards],
   ].map(([type, truck, loads, yards]) => half('Aggregate type', type) + circled('Circle one', trucks, truck) +
@@ -97,7 +100,7 @@ function renderPrintPage(job) {
     <div>
       ${line('Date', created)}
       ${line(job.job_type === 'septic' ? 'Pump-out date' : 'Delivery date', sms.formatJobWhen(job))}
-      ${line(t.to, job.to_location, 'wide')}
+      ${line(FORMS.labels(job).to, job.to_location, 'wide')}
       ${line('Municipality', job.municipality)}
       ${line('Site contact name / phone #', [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' / '))}
     </div>
@@ -108,7 +111,7 @@ function renderPrintPage(job) {
     ${t.what ? line(t.what, job.material) : ''}
     ${t.quantity ? `<div class="ln half"><span class="lb">Quantity:</span><span class="val">${esc([job.quantity, job.unit].filter(Boolean).join(' '))}</span></div>` : ''}
     ${t.loads ? `<div class="ln half"><span class="lb">Loads:</span><span class="val">${esc(job.loads_planned || '')}</span></div>` : ''}`}
-    ${t.from ? line(t.from, job.from_location, 'wide') : ''}
+    ${FORMS.labels(job).from ? line(FORMS.labels(job).from, job.from_location, 'wide') : ''}
     ${toilets}
     ${typeFields}
     ${line('Special instructions', job.notes, 'wide tall')}

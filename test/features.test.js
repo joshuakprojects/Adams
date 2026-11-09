@@ -170,3 +170,22 @@ test('"first thing" jobs sort first and say FIRST THING', async () => {
   await d.sendLineup('2026-11-11');
   assert.match(sent.at(-1).body, /1\) FIRST THING - Aggregate #1002[\s\S]*2\) 6:30 AM - Aggregate #1001/);
 });
+
+test('haul-away / until the site says stop', async () => {
+  const { d, sent, dave } = setup();
+  const { job } = d.saveJob({ job_type: 'haul', scheduled_date: '2026-11-10', first_thing: true, material: 'Fill', loads_planned: 5,
+    to_location: '10 Mountain Basin Rd', municipality: 'McDougall', from_location: 'Adams pit',
+    details: { direction: 'Haul away from site', until_stop: 'on', truck: 'Tandem' }, assignments: [{ driver_id: dave.id }] });
+  assert.equal(job.details.until_stop, 'Yes');
+  assert.equal(FORMS.totalLoads(job), 0);
+  assert.equal(FORMS.summary(job), 'HAUL AWAY - Fill - Tandem - until site says stop');
+  await d.sendJob(job.id);
+  const text = sent.at(-1).body;
+  assert.match(text, /Job site \(load here\): 10 Mountain Basin Rd, McDougall\nDump at: Adams pit/);
+  assert.match(text, /SHOW UP EMPTY/);
+  assert.match(text, /KEEP HAULING UNTIL THE PEOPLE ON SITE SAY STOP/);
+  assert.match(text, /Reply DONE when the site says stop/);
+  // Delivering is unchanged.
+  const del = d.saveJob({ ...job, id: null, details: { direction: 'Deliver to site' }, assignments: [] }).job;
+  assert.deepEqual(FORMS.labels(del), { from: 'From (pit / yard)', to: 'Delivery address' });
+});

@@ -59,6 +59,13 @@ function seedDemo(d) {
     from_location: 'Adams pit', to_location: '310 Hwy 124', municipality: 'McDougall',
     assignments: [{ driver_id: dave, truck_id: trucks.T1 }],
   });
+  d.saveJob({
+    job_type: 'haul', scheduled_date: today, first_thing: true, customer: 'Bayview Excavating', customer_phone: '705-555-4411',
+    material: 'Fill', details: { direction: 'Haul away from site', until_stop: 'Yes', truck: 'Triaxle' },
+    to_location: '10 Mountain Basin Rd', municipality: 'McDougall', from_location: 'Adams pit',
+    contact_name: 'Site foreman', contact_phone: '705-555-4412', notes: 'Foreman will tell you when to stop.',
+    assignments: [{ driver_id: ron, truck_id: trucks.T2 }],
+  });
   return true;
 }
 

@@ -87,17 +87,26 @@ function buildJobText(job, assignment, { updated = false } = {}) {
   if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
   const cargo = cargoSummary(job);
   if (cargo) lines.push(`${t.what || 'Job'}: ${cargo}`);
-  if (t.from && job.from_location) lines.push(`${t.from}: ${job.from_location}`);
+  const lb = FORMS.labels(job);
   const site = siteAddress(job);
-  if (site) lines.push(`${t.to}: ${site}`);
+  // For a haul-away the job site comes first: that's where the truck goes.
+  if (FORMS.isHaulAway(job)) {
+    if (site) lines.push(`${lb.to}: ${site}`);
+    if (job.from_location) lines.push(`${lb.from}: ${job.from_location}`);
+  } else {
+    if (lb.from && job.from_location) lines.push(`${lb.from}: ${job.from_location}`);
+    if (site) lines.push(`${lb.to}: ${site}`);
+  }
   for (const [label, value] of FORMS.smsLines(job)) lines.push(`${label}: ${value}`);
+  for (const line of FORMS.driverInstructions(job)) lines.push(line.toUpperCase());
   const customer = [job.customer, prettyPhone(job.customer_phone)].filter(Boolean).join(' ');
   if (customer) lines.push(`Customer: ${customer}`);
   const contact = [job.contact_name, prettyPhone(job.contact_phone)].filter(Boolean).join(' ');
   if (contact) lines.push(`Site contact: ${contact}`);
   if (job.notes) lines.push(`Notes: ${job.notes}`);
   lines.push('');
-  lines.push('Reply OK to confirm. Reply DONE when finished.');
+  const untilStop = job.job_type === 'haul' && FORMS.parseDetails(job).until_stop;
+  lines.push(untilStop ? 'Reply OK to confirm. Reply DONE when the site says stop.' : 'Reply OK to confirm. Reply DONE when finished.');
   lines.push(`Details: ${jobLink(assignment.token)}`);
   return lines.join('\n');
 }
@@ -119,9 +128,15 @@ function buildLineupText(date, items) {
     lines.push(`${i + 1}) ${time ? time + ' - ' : ''}${t.name} #${job.id}`);
     const cargo = cargoSummary(job);
     if (cargo) lines.push(cargo);
-    if (t.from && job.from_location) lines.push(`${t.from}: ${job.from_location}`);
+    const lb = FORMS.labels(job);
     const site = siteAddress(job);
-    if (site) lines.push(`${t.to}: ${site}`);
+    if (FORMS.isHaulAway(job)) {
+      if (site) lines.push(`${lb.to}: ${site}`);
+      if (job.from_location) lines.push(`${lb.from}: ${job.from_location}`);
+    } else {
+      if (lb.from && job.from_location) lines.push(`${lb.from}: ${job.from_location}`);
+      if (site) lines.push(`${lb.to}: ${site}`);
+    }
     if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
     lines.push(`Details: ${jobLink(assignment.token)}`);
   });

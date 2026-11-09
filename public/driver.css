@@ -58,3 +58,4 @@ h2 { font-size: 18px; margin: 24px 0 8px; }
 .choice input:focus-visible + span { outline: 3px solid #0b57d0; }
 .collect { background: #fff3cd; border-radius: 10px; padding: 12px; font-size: 20px; margin: 10px 0; }
 .banner.saved { background: #1d7a3d; color: #fff; font-size: 18px; padding: 10px; }
+.banner.heads-up { background: #ffe0b2; color: #6b3a00; font-size: 19px; padding: 12px; text-align: left; }

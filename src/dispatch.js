@@ -47,6 +47,10 @@ function cleanFields(fields, input) {
   for (const f of fields) {
     let v = str(src[f.key], f.kind === 'textarea' ? 1000 : 200);
     if (!v) continue;
+    if (f.kind === 'check') {
+      if (['yes', 'on', 'true', '1'].includes(v.toLowerCase())) out[f.key] = 'Yes';
+      continue;
+    }
     if (f.kind === 'choice' && !f.options.includes(v)) throw new ValidationError(`${f.label}: pick one of ${f.options.join(', ')}`);
     if (f.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new ValidationError(`${f.label} must be a date`);
     if (f.kind === 'number') {

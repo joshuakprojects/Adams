@@ -35,7 +35,10 @@
       from: 'From (pit / yard)',
       to: 'Delivery address',
       // The paper form has two aggregate lines; the first uses the main fields above.
+      // slot 'first' = above the aggregate line, 'top' = right under it.
       fields: [
+        { key: 'direction', label: 'Job', kind: 'choice', options: ['Deliver to site', 'Haul away from site'], sms: true, slot: 'first' },
+        { key: 'until_stop', label: 'Keep hauling until the site says stop', kind: 'check', sms: true, slot: 'first' },
         { key: 'truck', label: 'Circle one', kind: 'choice', options: ['Tandem', 'Triaxle', 'H&G'], sms: true, top: true },
         { key: 'aggregate2_type', label: '2nd aggregate type', kind: 'text', sms: true, top: true, suggestions: 'what' },
         { key: 'aggregate2_loads', label: '# of loads', kind: 'number', sms: true, top: true },
@@ -186,6 +189,7 @@
   /** Loads planned across both aggregate lines, for the progress bar. */
   function totalLoads(job) {
     const d = parseDetails(job);
+    if (job.job_type === 'haul' && d.until_stop) return 0; // open-ended: no target
     return (Number(job.loads_planned) || 0) + (job.job_type === 'haul' ? Number(d.aggregate2_loads) || 0 : 0);
   }
 
@@ -196,9 +200,12 @@
     const loads = job.loads_planned ? plural(job.loads_planned, 'load') : '';
     switch (job.job_type) {
       case 'haul': {
-        const first = aggregateLine(job.material, job.loads_planned, job.quantity, d.truck);
-        const second = aggregateLine(d.aggregate2_type, d.aggregate2_loads, d.aggregate2_yards, d.aggregate2_truck);
-        return [first, second].filter(Boolean).join(' + ') || t.name;
+        const stop = Boolean(d.until_stop);
+        const first = aggregateLine(job.material, stop ? '' : job.loads_planned, stop ? '' : job.quantity, d.truck);
+        const second = aggregateLine(d.aggregate2_type, stop ? '' : d.aggregate2_loads, stop ? '' : d.aggregate2_yards, d.aggregate2_truck);
+        const what = [first, second].filter(Boolean).join(' + ');
+        const parts = [isHaulAway(job) ? 'HAUL AWAY' : '', what, stop ? 'until site says stop' : ''].filter(Boolean);
+        return parts.join(' - ') || t.name;
       }
       case 'bin':
         return [d.service, job.material].filter(Boolean).join(' - ');
@@ -209,6 +216,29 @@
       default:
         return [job.material, qty, loads].filter(Boolean).join(' - ') || (t.name === 'Misc' ? '' : t.name);
     }
+  }
+
+  function isHaulAway(job) {
+    return job && job.job_type === 'haul' && parseDetails(job).direction === 'Haul away from site';
+  }
+
+  /**
+   * Address labels for a job. A haul-away flips them: the job site is where the truck loads,
+   * and the other address is where the load goes.
+   */
+  function labels(job) {
+    const t = typeInfo(job.job_type);
+    if (isHaulAway(job)) return { from: 'Dump at', to: 'Job site (load here)' };
+    return { from: t.from, to: t.to };
+  }
+
+  /** Extra instructions for the driver text, e.g. "Show up EMPTY" for a haul-away. */
+  function driverInstructions(job) {
+    const d = parseDetails(job);
+    const out = [];
+    if (isHaulAway(job)) out.push('Show up EMPTY and haul material away from the site.');
+    if (job.job_type === 'haul' && d.until_stop) out.push('Keep hauling until the people on site say stop.');
+    return out;
   }
 
   function isEmpty(v) {
@@ -223,11 +253,11 @@
     for (const f of t.fields) {
       if (!f.sms) continue;
       if (/^toilet\d_/.test(f.key)) continue;
-      if (['service', 'trip', 'tank_type', 'tank_size', 'truck'].includes(f.key) || /^aggregate2_/.test(f.key)) continue; // already in the summary line
+      if (['service', 'trip', 'tank_type', 'tank_size', 'truck', 'direction', 'until_stop'].includes(f.key) || /^aggregate2_/.test(f.key)) continue; // already in the summary line
       if (!isEmpty(d[f.key])) out.push([f.label, d[f.key]]);
     }
     return out; // toilet types & counts are already in the summary line
   }
 
-  return { TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
+  return { TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
 });
