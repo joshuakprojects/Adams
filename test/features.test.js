@@ -191,3 +191,26 @@ test('haul-away / until the site says stop', async (t) => {
   const del = (await d.saveJob({ ...job, id: null, details: { direction: 'Deliver to site' }, assignments: [] })).job;
   assert.deepEqual(FORMS.labels(del), { from: 'From (pit / yard)', to: 'Delivery address' });
 });
+
+test('unfinished jobs from earlier days show up, and can be moved to today', async (t) => {
+  const { d, sent, dave } = await setup(t); // today is 2026-11-10
+  const old = (await d.saveJob(job({ scheduled_date: '2026-11-08', assignments: [{ driver_id: dave.id }] }))).job;
+  const finished = (await d.saveJob(job({ scheduled_date: '2026-11-09', assignments: [{ driver_id: dave.id }] }))).job;
+  await d.driverAction(finished.assignments[0].token, 'done');
+  const cancelled = (await d.saveJob(job({ scheduled_date: '2026-11-09' }))).job;
+  await d.cancelJob(cancelled.id);
+  await d.saveJob(job({ scheduled_date: '2026-11-10' })); // today: not "earlier"
+
+  let board = await d.board('2026-11-10');
+  assert.deepEqual(board.stale_jobs.map((j) => j.id), [old.id]);
+
+  await d.sendJob(old.id);
+  const moved = await d.moveJob(old.id, '2026-11-10');
+  assert.equal(moved.scheduled_date, '2026-11-10');
+  assert.equal(moved.assignments[0].needs_resend, 1, 'texted driver needs the new date');
+  board = await d.board('2026-11-10');
+  assert.equal(board.stale_jobs.length, 0);
+  await assert.rejects(() => d.moveJob(finished.id, '2026-11-10'), /Only open jobs/);
+  await assert.rejects(() => d.moveJob(old.id, 'tomorrow'), /Pick a date/);
+  assert.ok(sent.length >= 1);
+});

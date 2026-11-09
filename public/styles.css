@@ -228,3 +228,19 @@ fieldset.sec legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: 
 .records-summary { font-weight: 700; margin: 6px 0 10px; }
 .table-wrap { overflow-x: auto; }
 .table.records td { vertical-align: top; font-size: 14px; }
+
+.board-filters { margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.fchip { border: 1.5px solid #c9c9c2; background: #fff; border-radius: 999px; padding: 6px 12px; font-size: 14px; font-weight: 700; cursor: pointer; color: #333; }
+.fchip span { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: #eee; font-size: 12px; text-align: center; }
+.fchip.on { background: var(--green); border-color: var(--green); color: #fff; }
+.fchip.on span { background: rgba(255,255,255,.25); color: #fff; }
+.fchip.warn:not(.on) { border-color: #e6a700; color: #7a5a00; }
+.fchip.warn:not(.on) span { background: #ffe9a8; }
+.fchip.small { padding: 4px 10px; font-size: 13px; font-weight: 600; }
+.attention { margin: 2px 14px 4px; font-size: 13px; font-weight: 700; color: #8a4b00; background: #fff3cd; border-radius: 6px; padding: 3px 8px; align-self: flex-start; }
+.stale-date { margin: 0 14px; font-size: 13px; font-weight: 700; color: var(--red); }
+.alert.stale { background: #fff8e1; border-color: #f0d58a; }
+.done-strip { grid-column: 1 / -1; padding: 6px 2px; }
+.done-strip .link { font-weight: 700; font-size: 15px; text-decoration: none; color: var(--green-2); }
+.view-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; }

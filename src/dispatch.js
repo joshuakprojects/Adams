@@ -784,7 +784,19 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       alerts: await listMessages({ unhandledOnly: true, limit: 50 }),
       unmatched_tickets: await unmatchedTickets(),
       lineup: { ...(await lineupStatus(date)), auto_time: (await getSettings()).lineup_time },
+      // Jobs from before today that were never marked done (missed DONEs, multi-day hauls).
+      stale_jobs: await findJobs({ from: '0000-01-01', to: addDays(today(), -1), status: 'open', limit: 100 }),
     };
+  }
+
+  /** Move a job to another day (e.g. an unfinished job from yesterday onto today). Texted drivers get flagged for an update. */
+  async function moveJob(jobId, date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) throw new ValidationError('Pick a date');
+    const job = await getJob(jobId);
+    if (!job) throw new ValidationError('Job not found');
+    if (job.status !== 'open') throw new ValidationError('Only open jobs can be moved');
+    const assignments = job.assignments.filter((a) => a.status !== 'cancelled').map((a) => ({ driver_id: a.driver_id, truck_id: a.truck_id }));
+    return (await saveJob({ ...job, scheduled_date: date, assignments })).job;
   }
 
   /** Previously used values, for autocomplete in the job form. */
@@ -802,7 +814,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
-    saveReport, bookPickup, reportFields, findJobs,
+    saveReport, bookPickup, reportFields, findJobs, moveJob,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
     getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,

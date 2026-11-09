@@ -136,8 +136,7 @@
     $('#lineup-status').textContent = parts.join('');
     $('#send-lineup').classList.toggle('hidden', state.date < state.today || !lu.drivers);
 
-    $('#jobs').innerHTML = jobs.length ? jobs.map(renderJob).join('') :
-      `<div class="empty">No jobs on this day yet.<br><br><button class="btn primary big" data-act="new">+ New job</button></div>`;
+    renderJobsArea(jobs);
 
     $('#driver-list').innerHTML = drivers.length ? drivers.map((d) => `
       <div class="drow">
@@ -146,7 +145,97 @@
       </div>`).join('') : '<p class="muted">Add drivers on the Setup tab.</p>';
   }
 
-  function renderJob(job) {
+  // ---------- board filters ----------
+  const VIEWS = [
+    ['active', 'Active'], ['attention', 'Needs attention'], ['done', 'Done'], ['cancelled', 'Cancelled'], ['all', 'All'],
+  ];
+  const store = {
+    get(k, d) { try { return localStorage.getItem('dispatch.' + k) || d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('dispatch.' + k, v); } catch { /* private mode */ } },
+  };
+  state.view = store.get('view', 'active');
+  state.typeFilter = store.get('type', '');
+  state.showDone = false;
+  state.showStale = false;
+
+  const minutesSince = (sqlUtc) => (sqlUtc ? (Date.now() - new Date(sqlUtc.replace(' ', 'T') + 'Z').getTime()) / 60000 : 0);
+
+  /** Why a job needs the office's attention (empty = it doesn't). */
+  function attentionReasons(job) {
+    if (job.status !== 'open') return [];
+    const out = [];
+    const live = job.assignments.filter((a) => a.status !== 'cancelled');
+    if (!live.length) out.push('No driver');
+    if (live.some((a) => a.status === 'pending')) out.push('Not texted');
+    if (live.some((a) => a.needs_resend && a.status !== 'done')) out.push('Needs update text');
+    if (live.some((a) => a.status === 'sent' && !a.needs_resend && minutesSince(a.sent_at) > 30)) out.push('No OK yet');
+    if ((state.board?.alerts || []).some((m) => m.job_id === job.id)) out.push('Driver texted');
+    return out;
+  }
+
+  function inView(job, view) {
+    if (view === 'active') return job.status === 'open';
+    if (view === 'attention') return attentionReasons(job).length > 0;
+    if (view === 'done') return job.status === 'complete';
+    if (view === 'cancelled') return job.status === 'cancelled';
+    return true;
+  }
+
+  function renderFilters(jobs) {
+    const typed = jobs.filter((j) => !state.typeFilter || j.job_type === state.typeFilter);
+    $('#status-filter').innerHTML = VIEWS.map(([k, label]) => {
+      const n = typed.filter((j) => inView(j, k)).length;
+      return `<button class="fchip ${state.view === k ? 'on' : ''} ${k === 'attention' && n ? 'warn' : ''}" data-view="${k}">${label} <span>${n}</span></button>`;
+    }).join('');
+    const counts = Object.fromEntries(TYPE_KEYS.map((k) => [k, jobs.filter((j) => j.job_type === k).length]));
+    $('#type-filter').innerHTML = `<button class="fchip small ${!state.typeFilter ? 'on' : ''}" data-type="">All types <span>${jobs.length}</span></button>` +
+      TYPE_KEYS.filter((k) => counts[k] || state.typeFilter === k).map((k) =>
+        `<button class="fchip small ${state.typeFilter === k ? 'on' : ''}" data-type="${k}">${TYPES[k].icon} ${esc(TYPES[k].name)} <span>${counts[k]}</span></button>`).join('');
+  }
+
+  function renderJobsArea(jobs) {
+    const stale = state.board.stale_jobs || [];
+    $('#stale-banner').innerHTML = stale.length && !state.showStale ? `
+      <div class="alert stale">⚠ <span class="body"><b>${stale.length} job${stale.length === 1 ? '' : 's'} from earlier days ${stale.length === 1 ? 'was' : 'were'} never marked done.</b>
+        Finish, move or cancel ${stale.length === 1 ? 'it' : 'them'} so nothing gets missed.</span>
+        <button class="btn tiny" data-act="show-stale">Review</button></div>` : '';
+
+    if (state.showStale) {
+      $('#board-filters').classList.add('hidden');
+      $('#jobs').innerHTML = `<div class="view-head"><h3>Unfinished from earlier days (${stale.length})</h3>
+          <button class="btn" data-act="hide-stale">← Back to the board</button></div>` +
+        (stale.length ? stale.map((j) => renderJob(j, { stale: true })).join('') : '<div class="empty">All caught up.</div>');
+      return;
+    }
+    $('#board-filters').classList.toggle('hidden', !jobs.length);
+    renderFilters(jobs);
+    const typed = jobs.filter((j) => !state.typeFilter || j.job_type === state.typeFilter);
+    const shown = typed.filter((j) => inView(j, state.view));
+    const doneHere = state.view === 'active' ? typed.filter((j) => j.status === 'complete') : [];
+    const emptyText = {
+      active: doneHere.length ? 'Everything on this day is done. 🎉' : 'No open jobs on this day.',
+      attention: 'Nothing needs attention. 👍', done: 'Nothing finished yet.', cancelled: 'No cancelled jobs.', all: 'No jobs.',
+    }[state.view];
+    let html = !jobs.length
+      ? `<div class="empty">No jobs on this day yet.<br><br><button class="btn primary big" data-act="new">+ New job</button></div>`
+      : shown.length ? shown.map((j) => renderJob(j)).join('') : `<div class="empty">${emptyText}</div>`;
+    if (doneHere.length) {
+      const label = state.date === state.today ? 'Completed today' : 'Completed';
+      html += `<div class="done-strip"><button class="link" data-act="toggle-done">${state.showDone ? '▾' : '▸'} ✓ ${label} (${doneHere.length})</button></div>`;
+      if (state.showDone) html += doneHere.map((j) => renderJob(j)).join('');
+    }
+    $('#jobs').innerHTML = html;
+  }
+
+  $('#board-filters').addEventListener('click', (e) => {
+    const v = e.target.closest('[data-view]');
+    const t = e.target.closest('[data-type]');
+    if (v) { state.view = v.dataset.view; store.set('view', state.view); }
+    if (t) { state.typeFilter = t.dataset.type; store.set('type', state.typeFilter); }
+    if (v || t) renderBoard();
+  });
+
+  function renderJob(job, { stale = false } = {}) {
     const t = typeInfo(job.job_type);
     const active = job.assignments.filter((a) => a.status !== 'cancelled');
     const loadsDone = job.assignments.reduce((n, a) => n + a.loads_done, 0);
@@ -186,6 +275,8 @@
         ${statusTag}
         ${job.paper_wo ? `<span class="muted small" title="Paper work order #">W.O. ${esc(job.paper_wo)}</span>` : ''}
       </div>
+      ${stale ? `<div class="stale-date">From ${esc(longDate(job.scheduled_date))}</div>` : ''}
+      ${attentionReasons(job).length ? `<div class="attention">⚠ ${attentionReasons(job).map(esc).join(' · ')}</div>` : ''}
       <div class="job-title">${esc(cargo(job) || job.customer || '(no details)')}</div>
       <div class="job-route">
         ${window.FORMS.isHaulAway(job) ? `
@@ -209,6 +300,7 @@
       <div class="job-actions">
         ${job.status === 'cancelled' ? `<button class="btn" data-act="reopen" data-job="${job.id}">Re-open</button>` : `
           ${toSend ? `<button class="btn warn" data-act="send" data-job="${job.id}">📱 Text ${toSend} driver${toSend > 1 ? 's' : ''}</button>` : ''}
+          ${stale ? `<button class="btn primary" data-act="move-today" data-job="${job.id}">Move to today</button>` : ''}
           <button class="btn" data-act="edit" data-job="${job.id}">Edit</button>
           <button class="btn" data-act="print" data-job="${job.id}" title="Printable work order">🖨 Print</button>
           <button class="btn" data-act="dup" data-job="${job.id}">Copy to…</button>
@@ -216,7 +308,7 @@
           ${job.status === 'open' ? `<button class="btn" data-act="complete" data-job="${job.id}">Mark complete</button>`
             : `<button class="btn" data-act="reopen" data-job="${job.id}">Re-open</button>`}
           <div class="spacer"></div>
-          ${active.some((a) => a.status !== 'pending')
+          ${job.status === 'complete' ? '' : active.some((a) => a.status !== 'pending')
             ? `<button class="btn danger" data-act="cancel" data-job="${job.id}">Cancel job</button>`
             : `<button class="btn danger" data-act="delete" data-job="${job.id}">Delete</button>`}`}
       </div>
@@ -263,6 +355,13 @@
       }
       if (act === 'seen') await api('/messages/seen', { method: 'POST', body: { ids: [Number(el.dataset.id)] } });
       if (act === 'tickets') return openTickets(Number(jobId));
+      if (act === 'show-stale') { state.showStale = true; return renderBoard(); }
+      if (act === 'hide-stale') { state.showStale = false; return renderBoard(); }
+      if (act === 'toggle-done') { state.showDone = !state.showDone; return renderBoard(); }
+      if (act === 'move-today') {
+        const moved = await api(`/jobs/${jobId}/move`, { method: 'POST', body: { date: state.today } });
+        toast(`Job #${moved.id} moved to today${moved.assignments.some((a) => a.needs_resend) ? ' — text the drivers the update' : ''}`);
+      }
       if (act === 'print') return window.open('/print/' + jobId, '_blank');
       if (act === 'pickup') {
         const job = state.board.jobs.find((j) => j.id === Number(jobId));
@@ -316,7 +415,7 @@
 
   // ---------- ticket photos ----------
   function openTickets(jobId) {
-    const job = state.board.jobs.find((j) => j.id === jobId);
+    const job = [...state.board.jobs, ...(state.board.stale_jobs || [])].find((j) => j.id === jobId);
     if (!job) return;
     $('#ticket-title').textContent = `Job #${job.id} — scale tickets (${job.tickets.length})`;
     $('#ticket-list').innerHTML = job.tickets.map((t) => `

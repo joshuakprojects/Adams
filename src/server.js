@@ -205,6 +205,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.post('/jobs/:id/cancel', json((req) => dispatch.cancelJob(req.params.id)));
   api.post('/jobs/:id/status', json((req) => dispatch.setJobStatus(req.params.id, req.body.status)));
   api.post('/jobs/:id/pickup', json((req) => dispatch.bookPickup(req.params.id, req.body?.date, req.user.id)));
+  api.post('/jobs/:id/move', json((req) => dispatch.moveJob(req.params.id, req.body?.date)));
   api.post('/jobs/:id/duplicate', json((req) => dispatch.duplicateJob(req.params.id, req.body.date, req.user.id)));
   api.delete('/jobs/:id', h(async (req, res) => {
     const job = await dispatch.getJob(req.params.id);

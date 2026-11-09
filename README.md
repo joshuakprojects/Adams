@@ -40,6 +40,12 @@ gets one text listing all their jobs for tomorrow, with a details link for each.
 The board also has a **📱 Text drivers their day** button to send it whenever you want. The automatic send skips
 drivers who already got their day, unless something was added or changed.
 
+**Keeping the board tidy:** the board shows one day. The filter chips switch between **Active** (the default: still to
+text, waiting, or being worked), **Needs attention** (no driver, not texted, needs an update text, no OK after 30 minutes,
+or a driver texted about it), **Done**, **Cancelled** and **All**, and by work order type. Each person's choice is remembered.
+Done jobs fold into a "✓ Completed today" strip at the bottom. If any job from an earlier day was never marked done,
+a banner says so, and **Review** lists them with **Move to today**, **Mark complete**, **Edit** or **Cancel**.
+
 Other features:
 - **Edit a job** that was already texted: the driver is flagged **Needs update**. One click sends an "UPDATED Job" text, and they confirm again.
 - **Take a driver off** a job: they automatically get a text saying so.
