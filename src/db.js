@@ -121,6 +121,29 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Orders sent in by the website. status: new | scheduled | declined | duplicate
+CREATE TABLE IF NOT EXISTS requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  external_id TEXT UNIQUE,
+  service TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'new',
+  customer_name TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  billing_address TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  municipality TEXT NOT NULL DEFAULT '',
+  requested_date TEXT NOT NULL DEFAULT '',
+  estimate_total TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL DEFAULT '{}',
+  job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+  handled_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS requests_status ON requests(status);
 `;
 
 function openDb(file) {
@@ -150,6 +173,8 @@ const ADDED_COLUMNS = {
     collect_payment: 'INTEGER NOT NULL DEFAULT 0', // no longer used: payments are handled by the office
     // "First thing" in the morning: sorts ahead of timed jobs that day.
     first_thing: 'INTEGER NOT NULL DEFAULT 0',
+    // The website request this job was scheduled from, if any.
+    request_id: 'INTEGER',
     // Type-specific form fields (bin service, septic tank details, toilet types…) as JSON.
     details: "TEXT NOT NULL DEFAULT '{}'",
   },

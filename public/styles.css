@@ -203,3 +203,20 @@ fieldset.sec legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: 
 .ok-line { color: var(--green-2); font-weight: 700; }
 .grid label.check-field { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #8a4b00; }
 .grid input:disabled { background: #f0f0ea; color: #aaa; }
+
+.request-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .request-list { grid-template-columns: 1fr; } }
+.request { background: var(--card); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); border-left: 6px solid #f0b400; display: flex; flex-direction: column; }
+.request.scheduled { border-left-color: var(--green-2); }
+.request.declined, .request.duplicate { opacity: .6; border-left-color: #999; }
+.req-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px 4px; flex-wrap: wrap; }
+.req-icon { font-size: 20px; }
+.req-est { font-weight: 800; color: #7a5a00; }
+.req-body { padding: 0 14px 8px; display: flex; flex-direction: column; gap: 3px; }
+.req-summary { font-weight: 700; font-size: 15px; }
+.req-body details { margin-top: 4px; font-size: 13px; }
+.req-body details ul { margin: 4px 0; padding-left: 18px; }
+.table.est td { padding: 3px 6px; font-size: 13px; }
+.small-seg { margin: 0 0 0 12px; }
+.small-seg span { padding: 5px 12px; font-size: 13px; }
+.from-request { background: #e8f1fd; color: #0a3f96; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-weight: 600; }

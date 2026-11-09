@@ -37,6 +37,8 @@ module.exports = {
     password: env.ADMIN_PASSWORD || '',
   },
   cookieSecure: env.COOKIE_SECURE === 'true',
+  // Shared secret the website sends with each order (Authorization: Bearer <key>). Blank = intake off.
+  intakeKey: env.INTAKE_KEY || '',
 };
 
 module.exports.smsEnabled = Boolean(

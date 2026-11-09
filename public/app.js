@@ -83,6 +83,7 @@
     $$('.tab').forEach((s) => s.classList.toggle('hidden', s.id !== 'tab-' + tab));
     if (tab === 'people') loadPeople();
     if (tab === 'messages') loadMessages();
+    if (tab === 'requests') loadRequests();
     if (tab === 'board') loadBoard();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -105,6 +106,9 @@
     $('#drivers-title').textContent = state.date === state.today ? 'Drivers today' : state.date === addDays(state.today, 1) ? 'Drivers tomorrow' : 'Drivers this day';
 
     // Alerts: driver texts the system didn't understand.
+    const rc = $('#request-count');
+    rc.textContent = state.board.new_requests || '';
+    rc.classList.toggle('hidden', !state.board.new_requests);
     const ac = $('#alert-count');
     ac.textContent = alerts.length;
     ac.classList.toggle('hidden', !alerts.length);
@@ -494,7 +498,9 @@
     if (!state.drivers.length || !state.trucks.length) await loadBoard();
     fillSuggestions().catch(() => {});
     const data = job || { job_type: 'haul', scheduled_date: state.date, assignments: [] };
-    $('#job-form-title').textContent = job ? `Edit job #${job.id}` : 'New job';
+    $('#job-form-title').textContent = job?.id ? `Edit job #${job.id}` : job?.request_id ? 'Schedule website request' : 'New job';
+    $('#from-request').classList.toggle('hidden', !data.request_id);
+    $('#from-request').textContent = data.request_id ? '🌐 Filled in from the website order. Check it, pick the drivers, then save.' : '';
     for (const [k, v] of Object.entries(data)) {
       const input = form.elements[k];
       if (!input || k === 'job_type' || k === 'details' || k === 'first_thing' || !('value' in input)) continue;
@@ -537,6 +543,8 @@
       if (sendNow) reportSend(out);
       else toast(`Job #${out.job.id} saved${out.job.assignments.length ? ' — drivers NOT texted yet' : ''}`);
       if (out.job.scheduled_date !== state.date) state.date = out.job.scheduled_date;
+      if (body.request_id) toast(`Website request scheduled as job #${out.job.id}`);
+      if (state.tab === 'requests') loadRequests();
       loadBoard();
     } catch (err) {
       $('#job-form-error').textContent = err.message;
@@ -631,6 +639,66 @@
     try {
       const out = await api('/settings', { method: 'POST', body: { lineup_time: f.lineup_on.checked ? f.lineup_time.value : '' } });
       toast(out.lineup_time ? `Drivers will get tomorrow's jobs at ${fmtTime(out.lineup_time)} each day` : 'Evening text turned off');
+    } catch (err) { toast(err.message); }
+  });
+
+  // ---------- website requests ----------
+  const SERVICE_ICON = { septic: '💧', aggregate: '🪨', bin: '🗑️', toilet: '🚻', quote: '📝', other: '🌐' };
+
+  async function loadRequests() {
+    const status = $('#request-filter input:checked').value;
+    const list = await api('/requests?status=' + status);
+    $('#request-list').innerHTML = list.map((r) => `
+      <article class="request ${r.status}">
+        <div class="req-head">
+          <span class="req-icon">${SERVICE_ICON[r.service] || '🌐'}</span>
+          <b>${esc(r.service_name)}</b>
+          <span class="muted small">${esc(fmtStamp(r.created_at))}</span>
+          ${r.status !== 'new' ? `<span class="chip ${r.status === 'scheduled' ? 'acknowledged' : 'cancelled'}">${esc(r.status)}${r.job_id ? ` · job #${r.job_id}${r.job_date ? ' · ' + esc(longDate(r.job_date)) : ''}` : ''}</span>` : '<span class="chip sent">New</span>'}
+          <div class="spacer"></div>
+          ${r.estimate_total ? `<span class="req-est">Est. ${esc(r.estimate_total)}</span>` : ''}
+        </div>
+        <div class="req-body">
+          <div><b>${esc(r.customer_name || '(no name)')}</b> ${r.phone ? `· <a href="tel:${esc(r.phone)}">${esc(prettyPhone(r.phone))}</a>` : ''} ${r.email ? `· <a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ''}</div>
+          <div>${esc([r.address, r.municipality].filter(Boolean).join(', '))}</div>
+          ${r.summary ? `<div class="req-summary">${esc(r.summary)}</div>` : ''}
+          ${r.requested_date ? `<div>Requested date: <b>${esc(longDate(r.requested_date))}</b></div>` : ''}
+          ${r.notes ? `<div class="job-notes">${esc(r.notes)}</div>` : ''}
+          <details><summary>All details</summary>
+            <ul>${r.detail_lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+            ${r.estimate_lines.length ? `<table class="table est">${r.estimate_lines.map((l) => `<tr><td>${esc(l.label || '')}</td><td>${esc(l.amount ?? '')}</td></tr>`).join('')}</table>` : ''}
+          </details>
+        </div>
+        <div class="job-actions">
+          ${r.status === 'new' ? `
+            <button class="btn primary" data-req="schedule" data-id="${r.id}">Schedule…</button>
+            <button class="btn" data-req="duplicate" data-id="${r.id}">Duplicate</button>
+            <button class="btn danger" data-req="declined" data-id="${r.id}">Decline</button>` : `
+            ${r.job_id ? `<button class="btn" data-req="open-job" data-date="${esc(r.job_date || '')}">Show on board</button>` : ''}
+            ${r.status !== 'scheduled' ? `<button class="btn" data-req="new" data-id="${r.id}">Move back to New</button>` : ''}`}
+        </div>
+      </article>`).join('') || `<div class="empty">${status === 'open' ? 'No new website requests.' : 'Nothing here yet.'}</div>`;
+  }
+
+  $('#request-filter').addEventListener('change', loadRequests);
+  $('#request-list').addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-req]');
+    if (!el) return;
+    const act = el.dataset.req;
+    try {
+      if (act === 'schedule') {
+        const prefill = await api(`/requests/${el.dataset.id}/prefill`);
+        state.date = prefill.scheduled_date || state.date;
+        await openJobForm(prefill);
+      } else if (act === 'open-job') {
+        if (el.dataset.date) state.date = el.dataset.date;
+        showTab('board');
+      } else {
+        if (act === 'declined' && !confirm('Decline this request? (It stays in the list under All.)')) return;
+        await api(`/requests/${el.dataset.id}/status`, { method: 'POST', body: { status: act } });
+        loadRequests();
+        loadBoard();
+      }
     } catch (err) { toast(err.message); }
   });
 

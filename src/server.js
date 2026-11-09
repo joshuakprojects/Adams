@@ -8,6 +8,7 @@ const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
 const { renderPrintPage } = require('./printPage');
 const twilio = require('./twilio');
+const { createIntake, validKey, IntakeError } = require('./intake');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
 async function fetchTwilioMedia(url) {
@@ -28,7 +29,8 @@ function sendImage(res, ticket) {
   res.sendFile(ticket.path, (err) => { if (err && !res.headersSent) res.status(404).send('Not found'); });
 }
 
-function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
+function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey }) {
+  const intake = createIntake(db);
   const app = express();
   app.set('trust proxy', true);
   app.disable('x-powered-by');
@@ -121,6 +123,29 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
     }
   });
 
+  // ---------- orders from the website ----------
+  // The website POSTs each order here with "Authorization: Bearer <INTAKE_KEY>". See docs/website-integration.md.
+  const intakeAuth = (req, res, next) => {
+    if (!intakeKey) return res.status(503).json({ error: 'Website intake is not set up (INTAKE_KEY missing)' });
+    const given = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '') || req.get('x-intake-key');
+    if (!validKey(given, intakeKey)) return res.status(401).json({ error: 'Bad intake key' });
+    next();
+  };
+  app.post('/api/intake', express.json({ limit: '100kb' }), intakeAuth, (req, res) => {
+    try {
+      const { request, created } = intake.receive(req.body);
+      res.status(created ? 201 : 200).json({ ok: true, request_id: request.id, status: request.status });
+    } catch (err) {
+      if (!(err instanceof IntakeError)) throw err;
+      res.status(400).json({ error: err.message });
+    }
+  });
+  app.get('/api/intake/:externalId', intakeAuth, (req, res) => {
+    const s = intake.statusFor(req.params.externalId);
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    res.json(s);
+  });
+
   // ---------- office ----------
   auth.authRoutes(app, db);
   app.use(auth.loadUser(db));
@@ -132,7 +157,19 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 
   api.get('/me', (req, res) => res.json({ user: req.user, smsEnabled: config.smsEnabled, today: dispatch.today() }));
-  api.get('/board', (req, res) => res.json(dispatch.board(String(req.query.date || dispatch.today()))));
+  api.get('/board', (req, res) => res.json({ ...dispatch.board(String(req.query.date || dispatch.today())), new_requests: intake.countNew() }));
+  api.get('/requests', (req, res) => res.json(intake.list({ status: String(req.query.status || 'open') })));
+  api.get('/requests/:id/prefill', (req, res) => {
+    const p = intake.prefill(req.params.id, dispatch.today());
+    if (!p) return res.status(404).json({ error: 'Not found' });
+    res.json(p);
+  });
+  api.post('/requests/:id/status', (req, res) => {
+    try { res.json(intake.setStatus(req.params.id, req.body?.status, req.user.id)); } catch (err) {
+      if (!(err instanceof IntakeError)) throw err;
+      res.status(400).json({ error: err.message });
+    }
+  });
   api.get('/jobs', (req, res) => {
     const from = String(req.query.from || dispatch.today());
     res.json(dispatch.listJobs({ from, to: String(req.query.to || from) }));
@@ -143,7 +180,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia }) {
     res.json(job);
   });
   api.post('/jobs', wrap(async (req, res) => {
-    const { job, removed } = dispatch.saveJob({ ...req.body, id: null }, req.user.id);
+    let { job } = dispatch.saveJob({ ...req.body, id: null }, req.user.id);
+    // Scheduled from a website request: link the two.
+    if (req.body.request_id) { intake.link(req.body.request_id, job.id, req.user.id); job = dispatch.getJob(job.id); }
     const out = req.body.send_now ? await dispatch.sendJob(job.id) : { job, results: [] };
     res.json(out);
   }));

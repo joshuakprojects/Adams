@@ -78,6 +78,19 @@ first written in a paper book, the paper W.O. # can be recorded too.
 
 Not covered yet: the **equipment rental agreement** (counter rentals with a signature). That could be added as its own type.
 
+## Orders from the website
+
+Orders placed on the website (septic pumping, aggregates, bins, portable toilets, quotes) come into dispatch
+automatically and wait in the **Requests** tab, with a count of new ones. Each shows the customer, address,
+what they ordered and the website's estimate. **Schedule…** opens the matching work order already filled in:
+septic tank type and size, lids, driveway, add-ons (in the special instructions), and the estimate as the quoted price.
+The office picks the date and drivers and saves. **Duplicate** and **Decline** clear requests you won't schedule.
+
+- Dispatch: set the `INTAKE_KEY` secret to a long random string.
+- Website: set `DISPATCH_URL` (e.g. `https://dispatch.joshtemp.site`) and `DISPATCH_INTAKE_KEY` (the same string),
+  then give the website's Replit Assistant the instructions in [`docs/website-integration.md`](docs/website-integration.md).
+- The website can also ask dispatch for an order's status (scheduled / completed, job #, date) to show in its /admin.
+
 ## Running it
 
 Requires Node.js 22.13 or newer. The only dependency is Express; the database is SQLite (built into Node).

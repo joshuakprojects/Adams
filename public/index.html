@@ -12,6 +12,7 @@
     <nav class="tabs">
       <button data-tab="board" class="active">Board</button>
       <button data-tab="people">Setup</button>
+      <button data-tab="requests">Requests <span id="request-count" class="count hidden"></span></button>
       <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
     </nav>
     <div class="spacer"></div>
@@ -100,6 +101,20 @@
     </div>
   </section>
 
+  <!-- WEBSITE REQUESTS -->
+  <section id="tab-requests" class="tab hidden">
+    <div class="toolbar">
+      <h2>Website requests</h2>
+      <div class="segmented small-seg" id="request-filter">
+        <label><input type="radio" name="rf" value="open" checked><span>New</span></label>
+        <label><input type="radio" name="rf" value="scheduled"><span>Scheduled</span></label>
+        <label><input type="radio" name="rf" value="all"><span>All</span></label>
+      </div>
+    </div>
+    <p class="muted small">Orders sent from the website. Click <b>Schedule</b> to open the work order already filled in, then pick the day and drivers.</p>
+    <div id="request-list" class="request-list"></div>
+  </section>
+
   <!-- MESSAGES -->
   <section id="tab-messages" class="tab hidden">
     <div class="panel">
@@ -123,6 +138,8 @@
         <button type="button" class="link" data-close>✕</button>
       </div>
       <input type="hidden" name="id">
+      <input type="hidden" name="request_id">
+      <div id="from-request" class="from-request hidden"></div>
       <div class="segmented types" id="job-type"></div>
       <div class="form-title" id="form-title"></div>
 
