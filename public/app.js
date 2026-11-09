@@ -104,7 +104,6 @@
     $('#board-date').value = state.date;
     const rel = state.date === state.today ? 'Today · ' : state.date === addDays(state.today, 1) ? 'Tomorrow · ' : '';
     $('#board-title').textContent = rel + longDate(state.date);
-    $('#drivers-title').textContent = state.date === state.today ? 'Drivers today' : state.date === addDays(state.today, 1) ? 'Drivers tomorrow' : 'Drivers this day';
 
     // Alerts: driver texts the system didn't understand.
     const rc = $('#request-count');
@@ -138,22 +137,39 @@
 
     renderJobsArea(jobs);
 
-    // A driver is free once none of their jobs on this day are still to do. Busy drivers first, then free ones.
-    const rows = drivers.map((d) => {
+    renderDriverStrip(drivers);
+  }
+
+  /** Drivers across the top: busy ones first (yellow if waiting on their OK), then free ones in green. */
+  function driverRows(drivers) {
+    return drivers.map((d) => {
       const todo = d.jobs.filter((j) => j.status !== 'done' && j.status !== 'cancelled');
       const done = d.jobs.filter((j) => j.status === 'done');
       return { d, todo, done };
     }).sort((a, b) => (b.todo.length > 0) - (a.todo.length > 0) || a.d.name.localeCompare(b.d.name));
-    const freeCount = rows.filter((r) => !r.todo.length).length;
-    if (drivers.length) $('#drivers-title').textContent += ` · ${freeCount} free`;
-    $('#driver-list').innerHTML = drivers.length ? rows.map(({ d, todo, done }) => `
-      <div class="drow ${todo.length ? 'busy' : 'is-free'}">
-        <span class="name">${esc(d.name)}</span>
-        ${todo.map((j) => `<span class="chip ${j.status}" title="${esc(STATUS[j.status])}">#${j.job_id}</span>`).join('')}
-        ${todo.length ? '' : '<span class="free">Free</span>'}
-        ${done.map((j) => `<span class="chip finished" title="Done">✓ #${j.job_id}</span>`).join('')}
-      </div>`).join('') : '<p class="muted">Add drivers on the Setup tab.</p>';
   }
+
+  const SHORT_STATUS = { pending: 'not texted', sent: 'waiting for OK', acknowledged: 'confirmed', in_progress: 'working' };
+
+  function renderDriverStrip(drivers) {
+    const rows = driverRows(drivers);
+    $('#driver-strip').innerHTML = drivers.length ? `<span class="strip-label">Drivers</span>` + rows.map(({ d, todo, done }) => {
+      const waiting = todo.some((j) => j.status === 'sent' || j.status === 'pending');
+      const cls = !todo.length ? 'free' : waiting ? 'waiting' : 'busy';
+      const initials = d.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+      const sub = todo.length
+        ? todo.map((j) => `#${j.job_id}`).join(', ') + ` · ${SHORT_STATUS[todo[0].status] || todo[0].status}`
+        : `Free${done.length ? ` · ${done.length} done` : ''}`;
+      return `<div class="dchip ${cls}" title="${esc(done.map((j) => `✓ #${j.job_id}`).join(' '))}">
+        <span class="davatar">${esc(initials)}</span>
+        <span class="dtext"><span class="dname">${esc(d.name)}</span><span class="dsub">${esc(sub)}</span></span>
+      </div>`;
+    }).join('') : '<span class="muted">Add drivers on the Setup tab.</span>';
+  }
+
+  document.addEventListener('click', (e) => {
+    for (const d of $$('details[open]')) if (!d.contains(e.target)) d.removeAttribute('open');
+  });
 
   // ---------- board filters ----------
   const VIEWS = [
@@ -193,14 +209,55 @@
 
   function renderFilters(jobs) {
     const typed = jobs.filter((j) => !state.typeFilter || j.job_type === state.typeFilter);
-    $('#status-filter').innerHTML = VIEWS.map(([k, label]) => {
-      const n = typed.filter((j) => inView(j, k)).length;
-      return `<button class="fchip ${state.view === k ? 'on' : ''} ${k === 'attention' && n ? 'warn' : ''}" data-view="${k}">${label} <span>${n}</span></button>`;
-    }).join('');
+    const n = (v) => typed.filter((j) => inView(j, v)).length;
+    const rows = driverRows(state.board.drivers || []);
+    const free = rows.filter((r) => !r.todo.length).length;
+    const att = n('attention');
+    const tile = (view, label, value, extra = '') =>
+      `<button class="tile ${state.view === view ? 'on' : ''} ${extra}" data-view="${view}"><span class="tl">${label}</span><span class="tv">${value}</span></button>`;
+    $('#status-filter').innerHTML =
+      tile('active', 'Active', n('active')) +
+      tile('attention', 'Needs attention', att, att ? 'alarm' : '') +
+      tile('done', state.date === state.today ? 'Done today' : 'Done', n('done')) +
+      `<div class="tile static"><span class="tl">Drivers free</span><span class="tv">${free} <small>of ${rows.length}</small></span></div>` +
+      `<button class="tile link-tile" data-act="go-requests"><span class="tl">Website requests</span><span class="tv">${state.board.new_requests || 0} <small>new →</small></span></button>`;
     const counts = Object.fromEntries(TYPE_KEYS.map((k) => [k, jobs.filter((j) => j.job_type === k).length]));
-    $('#type-filter').innerHTML = `<button class="fchip small ${!state.typeFilter ? 'on' : ''}" data-type="">All types <span>${jobs.length}</span></button>` +
+    $('#type-filter').innerHTML = `<span class="row-label">Type</span>` +
+      `<button class="fchip small ${!state.typeFilter ? 'on' : ''}" data-type="">All <span>${jobs.length}</span></button>` +
       TYPE_KEYS.filter((k) => counts[k] || state.typeFilter === k).map((k) =>
-        `<button class="fchip small ${state.typeFilter === k ? 'on' : ''}" data-type="${k}">${TYPES[k].icon} ${esc(TYPES[k].name)} <span>${counts[k]}</span></button>`).join('');
+        `<button class="fchip small ${state.typeFilter === k ? 'on' : ''}" data-type="${k}">${TYPES[k].icon} ${esc(TYPES[k].name)} <span>${counts[k]}</span></button>`).join('') +
+      `<span class="spacer"></span>` +
+      `<button class="link ${state.view === 'cancelled' ? 'on' : ''}" data-view="cancelled">Cancelled (${n('cancelled')})</button>` +
+      `<button class="link ${state.view === 'all' ? 'on' : ''}" data-view="all">All statuses (${n('all')})</button>`;
+  }
+
+  // Which lane a job sits in: still to text, waiting for the driver's OK, being worked, or done.
+  function stageOf(job) {
+    if (job.status === 'complete') return 'done';
+    if (job.status === 'cancelled') return 'cancelled';
+    const live = job.assignments.filter((a) => a.status !== 'cancelled');
+    if (!live.length || live.some((a) => a.status === 'pending')) return 'totext';
+    if (live.some((a) => a.status === 'sent' || (a.needs_resend && a.status !== 'done'))) return 'waiting';
+    return 'working';
+  }
+  const LANES = [
+    ['totext', 'To text', 'Assigned, drivers not texted yet'],
+    ['waiting', 'Waiting for OK', 'Texted, no reply yet'],
+    ['working', 'Working', 'Confirmed or loads underway'],
+    ['done', 'Done', 'Finished'],
+  ];
+  state.layout = store.get('layout', 'lanes');
+
+  function renderLanes(jobs) {
+    const lanes = state.view === 'attention' ? LANES.filter(([k]) => k !== 'done') : LANES;
+    return `<div class="lanes lanes-${lanes.length}">` + lanes.map(([k, title, hint]) => {
+      const list = jobs.filter((j) => stageOf(j) === k);
+      const label = k === 'done' && state.date === state.today ? 'Done today' : title;
+      return `<section class="lane lane-${k}">
+        <div class="lane-head"><span class="lane-dot"></span><h2>${label}</h2><span class="lane-count">${list.length}</span></div>
+        ${list.length ? list.map((j) => renderJob(j, { compact: true })).join('') : `<div class="lane-empty">${hint}</div>`}
+      </section>`;
+    }).join('') + '</div>';
   }
 
   function renderJobsArea(jobs) {
@@ -217,7 +274,7 @@
         (stale.length ? stale.map((j) => renderJob(j, { stale: true })).join('') : '<div class="empty">All caught up.</div>');
       return;
     }
-    $('#board-filters').classList.toggle('hidden', !jobs.length);
+    $('#board-filters').classList.remove('hidden');
     renderFilters(jobs);
     const typed = jobs.filter((j) => !state.typeFilter || j.job_type === state.typeFilter);
     const shown = typed.filter((j) => inView(j, state.view));
@@ -226,6 +283,15 @@
       active: doneHere.length ? 'Everything on this day is done. 🎉' : 'No open jobs on this day.',
       attention: 'Nothing needs attention. 👍', done: 'Nothing finished yet.', cancelled: 'No cancelled jobs.', all: 'No jobs.',
     }[state.view];
+    const lanes = state.layout === 'lanes' && ['active', 'attention'].includes(state.view) && jobs.length;
+    $$('.layout-toggle [data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
+    $('#jobs').classList.toggle('as-lanes', Boolean(lanes));
+    if (lanes) {
+      // In lanes, finished jobs have their own column, so the board shows open ones plus today's done.
+      const laneJobs = state.view === 'attention' ? shown : typed.filter((j) => j.status !== 'cancelled');
+      $('#jobs').innerHTML = renderLanes(laneJobs);
+      return;
+    }
     let html = !jobs.length
       ? `<div class="empty">No jobs on this day yet.<br><br><button class="btn primary big" data-act="new">+ New job</button></div>`
       : shown.length ? shown.map((j) => renderJob(j)).join('') : `<div class="empty">${emptyText}</div>`;
@@ -237,23 +303,28 @@
     $('#jobs').innerHTML = html;
   }
 
-  $('#board-filters').addEventListener('click', (e) => {
+  // Tiles, type chips, the Cancelled / All links and the Lanes / List switch.
+  $('#tab-board').addEventListener('click', (e) => {
     const v = e.target.closest('[data-view]');
     const t = e.target.closest('[data-type]');
-    if (v) { state.view = v.dataset.view; store.set('view', state.view); }
+    const l = e.target.closest('[data-layout]');
+    if (v) { state.view = state.view === v.dataset.view && v.dataset.view !== 'active' ? 'active' : v.dataset.view; store.set('view', state.view); }
     if (t) { state.typeFilter = t.dataset.type; store.set('type', state.typeFilter); }
-    if (v || t) renderBoard();
+    if (l) { state.layout = l.dataset.layout; store.set('layout', state.layout); }
+    if (v || t || l) renderBoard();
   });
 
-  function renderJob(job, { stale = false } = {}) {
+  function renderJob(job, { stale = false, compact = false } = {}) {
     const t = typeInfo(job.job_type);
     const active = job.assignments.filter((a) => a.status !== 'cancelled');
     const loadsDone = job.assignments.reduce((n, a) => n + a.loads_done, 0);
     const toSend = job.assignments.filter((a) => a.status === 'pending' || (a.needs_resend && a.status !== 'done')).length;
-    const statusTag = job.status === 'open' ? '' : `<span class="tag st-${job.status}">${job.status}</span>`;
+    const unconfirmed = active.filter((a) => a.status === 'sent' && !a.needs_resend).length;
+    const statusTag = job.status === 'open' ? '' : `<span class="tag st-${job.status}">${job.status === 'complete' ? 'Done' : 'Cancelled'}</span>`;
     const planned = window.FORMS.totalLoads(job);
-    const progress = planned || loadsDone || (job.job_type === 'haul' && job.details?.until_stop) ? `
-      <div class="progress">Loads: ${loadsDone}${planned ? ` / ${planned}` : ''}${job.job_type === 'haul' && job.details?.until_stop ? ' · until site says stop' : ''}
+    const untilStop = job.job_type === 'haul' && job.details?.until_stop;
+    const progress = planned || loadsDone || untilStop ? `
+      <div class="progress"><span>Loads</span><span>${loadsDone}${planned ? ` of ${planned}` : ''}${untilStop ? ' · until site says stop' : ''}</span>
         ${planned ? `<div class="bar"><div style="width:${Math.min(100, (loadsDone / planned) * 100)}%"></div></div>` : ''}
       </div>` : '';
 
@@ -266,7 +337,7 @@
         <span class="name">${esc(a.driver_name)}</span>
         <span class="truck">${esc(a.truck_unit || '')}</span>
         ${loads}${chip}
-        ${job.status === 'cancelled' ? '' : `<details><summary>⋯</summary><div class="menu">
+        ${job.status === 'cancelled' ? '' : `<details><summary aria-label="Driver actions">⋯</summary><div class="menu">
           <button data-act="resend" data-job="${job.id}" data-asg="${a.id}">${a.status === 'pending' ? 'Text this driver' : 'Re-send text'}</button>
           <button data-act="mark" data-token="${a.token}" data-mark="ack">Mark confirmed</button>
           <button data-act="mark" data-token="${a.token}" data-mark="load">+1 load</button>
@@ -277,16 +348,37 @@
       </div>`;
     }).join('');
 
-    return `<article class="job t-${job.job_type} ${job.status}">
+    // One clear main action per card; everything else under "More".
+    let primary;
+    if (job.status === 'cancelled') primary = ['reopen', 'Re-open'];
+    else if (stale) primary = ['move-today', 'Move to today'];
+    else if (toSend) primary = ['send', `Text ${toSend} driver${toSend > 1 ? 's' : ''}`];
+    else if (unconfirmed) primary = ['resend-unconfirmed', 'Re-send text'];
+    else if (job.status === 'open' && active.length) primary = ['complete', 'Mark complete'];
+    else if (job.status === 'complete') primary = ['print', 'Print'];
+    else primary = ['edit', 'Assign driver'];
+    const quiet = ['print', 'reopen'].includes(primary[0]) && job.status !== 'cancelled';
+    const more = [
+      primary[0] !== 'print' && ['print', 'Print work order'],
+      ['dup', 'Copy to another day…'],
+      (job.job_type === 'toilet' || job.job_type === 'bin') && job.status !== 'cancelled' && ['pickup', 'Book pick-up'],
+      stale && primary[0] !== 'move-today' && ['move-today', 'Move to today'],
+      job.status === 'open' && primary[0] !== 'complete' && ['complete', 'Mark complete'],
+      job.status === 'complete' && ['reopen', 'Re-open'],
+      job.status !== 'complete' && job.status !== 'cancelled' && (active.some((a) => a.status !== 'pending')
+        ? ['cancel', 'Cancel job…', 'danger'] : ['delete', 'Delete', 'danger']),
+    ].filter(Boolean);
+
+    return `<article class="job t-${job.job_type} ${job.status} ${compact ? 'compact' : ''}">
       <div class="job-head">
         <span class="job-num">#${job.id}</span>
         <span class="job-time ${job.first_thing ? 'first' : ''}">${esc(jobTime(job) || 'Any time')}</span>
-        <span class="tag ${job.job_type}" title="${esc(t.title)}">${t.icon} ${esc(t.name)}</span>
         ${statusTag}
-        ${job.paper_wo ? `<span class="muted small" title="Paper work order #">W.O. ${esc(job.paper_wo)}</span>` : ''}
+        <span class="spacer"></span>
+        <span class="tag type" title="${esc(t.title)}">${esc(t.name)}</span>
       </div>
       ${stale ? `<div class="stale-date">From ${esc(longDate(job.scheduled_date))}</div>` : ''}
-      ${attentionReasons(job).length ? `<div class="attention">⚠ ${attentionReasons(job).map(esc).join(' · ')}</div>` : ''}
+      ${attentionReasons(job).length ? `<div class="attention">${attentionReasons(job).map(esc).join(' · ')}</div>` : ''}
       <div class="job-title">${esc(cargo(job) || job.customer || '(no details)')}</div>
       <div class="job-route">
         ${window.FORMS.isHaulAway(job) ? `
@@ -295,32 +387,24 @@
           ${t.from && job.from_location ? `<div><b>From</b> ${esc(job.from_location)}</div>` : ''}
           ${siteAddress(job) ? `<div><b>${job.job_type === 'float' ? 'To' : 'At'}</b> ${esc(siteAddress(job))}</div>` : ''}`}
       </div>
-      <div class="job-meta">${[job.customer && 'Customer: ' + esc(job.customer + (job.customer_phone ? ' ' + prettyPhone(job.customer_phone) : '')), job.contact_name && 'Site: ' + esc(job.contact_name + ' ' + prettyPhone(job.contact_phone))].filter(Boolean).join(' · ')}</div>
+      <div class="job-meta">${[job.customer && esc(job.customer + (job.customer_phone ? ' · ' + prettyPhone(job.customer_phone) : '')), !compact && job.contact_name && 'Site: ' + esc(job.contact_name + ' ' + prettyPhone(job.contact_phone))].filter(Boolean).join(' · ')}</div>
       ${job.quoted_price || job.payment_method || job.assignments.some((a) => Object.keys(a.report || {}).length) ? `<div class="tickets-row">
-        ${job.quoted_price || job.payment_method ? `<span class="chip collect" title="Office only">💲 ${esc([job.quoted_price, job.payment_method].filter(Boolean).join(' · '))}</span>` : ''}
-        ${job.assignments.filter((a) => Object.keys(a.report || {}).length).map((a) => `<span class="chip report" data-act="print" data-job="${job.id}" title="Open the work order with the driver's report">📋 Report from ${esc(a.driver_name.split(' ')[0])}</span>`).join('')}
+        ${job.quoted_price || job.payment_method ? `<span class="chip collect" title="Office only">${esc([job.quoted_price, job.payment_method].filter(Boolean).join(' · '))}</span>` : ''}
+        ${job.assignments.filter((a) => Object.keys(a.report || {}).length).map((a) => `<button class="chip report" data-act="print" data-job="${job.id}" title="Open the work order with the driver's report">Report from ${esc(a.driver_name.split(' ')[0])}</button>`).join('')}
       </div>` : ''}
-      ${job.notes ? `<div class="job-notes">${esc(job.notes)}</div>` : ''}
+      ${job.notes && !compact ? `<div class="job-notes">${esc(job.notes)}</div>` : ''}
       ${progress}
       ${job.tickets.length ? `<div class="tickets-row">
-        <span class="lbl" data-act="tickets" data-job="${job.id}">🧾 ${job.tickets.length} ticket${job.tickets.length === 1 ? '' : 's'}</span>
-        ${job.tickets.slice(-6).map((t) => `<img src="/api/tickets/${t.id}/image" alt="" loading="lazy" data-act="tickets" data-job="${job.id}">`).join('')}
+        <button class="lbl" data-act="tickets" data-job="${job.id}">${job.tickets.length} ticket${job.tickets.length === 1 ? '' : 's'}</button>
+        ${job.tickets.slice(-4).map((tk) => `<img src="/api/tickets/${tk.id}/image" alt="Ticket photo" loading="lazy" data-act="tickets" data-job="${job.id}">`).join('')}
       </div>` : ''}
       <div class="assignments">${rows || '<div class="asg muted">No driver assigned</div>'}</div>
       <div class="job-actions">
-        ${job.status === 'cancelled' ? `<button class="btn" data-act="reopen" data-job="${job.id}">Re-open</button>` : `
-          ${toSend ? `<button class="btn warn" data-act="send" data-job="${job.id}">📱 Text ${toSend} driver${toSend > 1 ? 's' : ''}</button>` : ''}
-          ${stale ? `<button class="btn primary" data-act="move-today" data-job="${job.id}">Move to today</button>` : ''}
-          <button class="btn" data-act="edit" data-job="${job.id}">Edit</button>
-          <button class="btn" data-act="print" data-job="${job.id}" title="Printable work order">🖨 Print</button>
-          <button class="btn" data-act="dup" data-job="${job.id}">Copy to…</button>
-          ${job.job_type === 'toilet' || job.job_type === 'bin' ? `<button class="btn" data-act="pickup" data-job="${job.id}">Book pick-up</button>` : ''}
-          ${job.status === 'open' ? `<button class="btn" data-act="complete" data-job="${job.id}">Mark complete</button>`
-            : `<button class="btn" data-act="reopen" data-job="${job.id}">Re-open</button>`}
-          <div class="spacer"></div>
-          ${job.status === 'complete' ? '' : active.some((a) => a.status !== 'pending')
-            ? `<button class="btn danger" data-act="cancel" data-job="${job.id}">Cancel job</button>`
-            : `<button class="btn danger" data-act="delete" data-job="${job.id}">Delete</button>`}`}
+        <button class="btn ${quiet ? '' : 'primary'} grow" data-act="${primary[0]}" data-job="${job.id}">${primary[1]}</button>
+        ${primary[0] !== 'edit' ? `<button class="btn" data-act="edit" data-job="${job.id}">Edit</button>` : ''}
+        <details class="more"><summary class="btn">More</summary><div class="menu">
+          ${more.map(([act, label, cls]) => `<button data-act="${act}" data-job="${job.id}" class="${cls || ''}">${label}</button>`).join('')}
+        </div></details>
       </div>
     </article>`;
   }
@@ -365,6 +449,13 @@
       }
       if (act === 'seen') await api('/messages/seen', { method: 'POST', body: { ids: [Number(el.dataset.id)] } });
       if (act === 'tickets') return openTickets(Number(jobId));
+      if (act === 'go-requests') return showTab('requests');
+      if (act === 'resend-unconfirmed') {
+        const job = [...state.board.jobs, ...(state.board.stale_jobs || [])].find((j) => j.id === Number(jobId));
+        for (const a of (job?.assignments || []).filter((x) => x.status === 'sent' && !x.needs_resend)) {
+          reportSend(await api(`/jobs/${jobId}/send`, { method: 'POST', body: { assignment_id: a.id } }));
+        }
+      }
       if (act === 'show-stale') { state.showStale = true; return renderBoard(); }
       if (act === 'hide-stale') { state.showStale = false; return renderBoard(); }
       if (act === 'toggle-done') { state.showDone = !state.showDone; return renderBoard(); }
@@ -903,6 +994,7 @@
     state.today = state.date = me.today;
     state.smsEnabled = me.smsEnabled;
     $('#user-name').textContent = me.user.name;
+    $('#user-initial').textContent = (me.user.name || '?').trim()[0].toUpperCase();
     $('#test-mode').classList.toggle('hidden', me.smsEnabled);
     await loadBoard();
     // Keep the board fresh so driver confirmations show up without reloading.

@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dispatch Board</title>
+  <title>Adams Bros Dispatch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Quantico:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/brand/favicon-64.png">
@@ -11,46 +13,50 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">Dispatch</div>
-    <nav class="tabs">
+    <div class="brand">
+      <img src="/brand/adams-a.png" alt="" class="brand-a">
+      <div class="brand-text"><div class="b1">ADAMS BROS</div><div class="b2">DISPATCH</div></div>
+    </div>
+    <nav class="tabs" aria-label="Main">
       <button data-tab="board" class="active">Board</button>
-      <button data-tab="people">Setup</button>
       <button data-tab="requests">Requests <span id="request-count" class="count hidden"></span></button>
       <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
       <button data-tab="records">Records</button>
+      <button data-tab="people">Setup</button>
     </nav>
     <div class="spacer"></div>
     <span id="test-mode" class="test-mode hidden" title="Twilio isn't set up yet. Texts are printed in the server log, not sent.">TEST MODE – texts not sent</span>
-    <span id="user-name" class="muted"></span>
+    <span class="user"><span class="avatar" id="user-initial"></span><span id="user-name"></span></span>
     <button id="logout" class="link">Log out</button>
   </header>
 
   <!-- BOARD -->
   <section id="tab-board" class="tab">
-    <div class="toolbar">
-      <button class="btn" data-day="-1" aria-label="Previous day">◀</button>
-      <button class="btn" data-day="0">Today</button>
-      <button class="btn" data-day="1" aria-label="Next day">▶</button>
-      <input type="date" id="board-date">
-      <h2 id="board-title"></h2>
+    <div class="daybar">
+      <div class="daynav">
+        <button class="btn" data-day="-1" aria-label="Previous day">‹</button>
+        <button class="btn" data-day="0">Today</button>
+        <button class="btn" data-day="1" aria-label="Next day">›</button>
+      </div>
+      <input type="date" id="board-date" aria-label="Pick a day">
+      <h1 id="board-title"></h1>
       <div class="spacer"></div>
+      <div class="layout-toggle" role="group" aria-label="Board layout">
+        <button data-layout="lanes" aria-pressed="true">Lanes</button>
+        <button data-layout="list" aria-pressed="false">List</button>
+      </div>
       <span id="lineup-status" class="muted small"></span>
-      <button class="btn" id="send-lineup" title="Text each driver a list of all their jobs for this day">📱 Text drivers their day</button>
+      <button class="btn outline" id="send-lineup" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
       <button class="btn primary big" id="new-job">+ New job</button>
+    </div>
+    <div id="board-filters">
+      <div class="tiles" id="status-filter"></div>
     </div>
     <div id="alerts"></div>
     <div id="stale-banner"></div>
-    <div class="board-filters" id="board-filters">
-      <div class="filter-row" id="status-filter"></div>
-      <div class="filter-row types" id="type-filter"></div>
-    </div>
-    <div class="board">
-      <div id="jobs" class="jobs"></div>
-      <aside class="drivers-panel">
-        <h3 id="drivers-title">Drivers today</h3>
-        <div id="driver-list"></div>
-      </aside>
-    </div>
+    <div class="filter-row types" id="type-filter"></div>
+    <section class="driver-strip" id="driver-strip" aria-label="Drivers"></section>
+    <div id="jobs" class="jobs"></div>
   </section>
 
   <!-- DRIVERS & TRUCKS -->
