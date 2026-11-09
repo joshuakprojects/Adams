@@ -91,6 +91,18 @@ The office picks the date and drivers and saves. **Duplicate** and **Decline** c
   then give the website's Replit Assistant the instructions in [`docs/website-integration.md`](docs/website-integration.md).
 - The website can also ask dispatch for an order's status (scheduled / completed, job #, date) to show in its /admin.
 
+## Records and tax season
+
+Work orders are never deleted; they're kept in the database. The **Records** tab finds past work orders by
+date range (quick buttons for this year, last year, this month and last month), status, type, and a search by customer,
+address, municipality, W.O. # or phone.
+
+- **⬇ Download spreadsheet (CSV):** opens in Excel or Google Sheets, one row per work order, with W.O. #, paper W.O. #,
+  date, type, status, completed date, customer and billing details, PO #, address and municipality, the work, loads,
+  drivers, trucks, quoted price, payment method, form details, the driver's report, and ticket photo count.
+- **🖨 Print / Save as PDF:** every matching work order on its own page, laid out like the paper forms, with the
+  scale ticket photos. In the print window choose *Save as PDF* to keep a file.
+
 ## Running it
 
 Requires Node.js 22.13 or newer. The only dependency is Express; the database is SQLite (built into Node).
@@ -188,7 +200,8 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `src/sms.js` | Text wording, reply parsing (OK / DONE), Twilio sending and signature check |
 | `public/forms.js` | The work order types and their fields, modelled on the paper forms (shared by server and dashboard) |
 | `src/driverPage.js` | The driver's job page and after-job report (works without JavaScript) |
-| `src/printPage.js` | Printable work orders laid out like the paper forms |
+| `src/printPage.js` | Printable work orders laid out like the paper forms (one, or a whole date range) |
+| `src/records.js` | Spreadsheet (CSV) export of work orders |
 | `src/db.js` | Database tables, and the PostgreSQL / SQLite drivers |
 | `src/auth.js` | Office logins and sessions |
 | `public/` | Office dashboard (plain HTML/CSS/JS, no build step) |

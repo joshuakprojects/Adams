@@ -1,12 +1,18 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: #ddd; font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 13px; }
 .toolbar { text-align: center; padding: 12px; }
+.toolbar .note { margin-top: 8px; color: #333; }
+.empty-batch { text-align: center; font-size: 18px; padding: 40px; }
+.photos { gap: 10px; }
+.photos figure { margin: 0; width: calc(33% - 8px); break-inside: avoid; }
+.photos img { width: 100%; max-height: 3.2in; object-fit: contain; border: 1px solid #999; background: #fff; display: block; }
+.photos figcaption { font-size: 10px; color: #555; margin-top: 2px; }
 .toolbar button { font-size: 16px; padding: 8px 18px; border-radius: 8px; border: 1px solid #999; background: #fff; cursor: pointer; }
 .sheet { position: relative; width: 8.5in; min-height: 11in; margin: 0 auto 24px; background: #fff; padding: .45in .5in; border: 2px solid #222; }
 /* Paper colours, like the forms in the office. */
-.t-bin .sheet { background: #e3f3e2; }
-.t-toilet .sheet { background: #e1f1f4; }
-.t-haul .sheet { background: #e6f0fa; }
+.sheet.t-bin { background: #e3f3e2; }
+.sheet.t-toilet { background: #e1f1f4; }
+.sheet.t-haul { background: #e6f0fa; }
 
 header { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-items: start; border-bottom: 2px solid #222; padding-bottom: 10px; margin-bottom: 12px; }
 .logo { border: 2px solid #222; padding: 4px 10px; text-align: center; }
@@ -44,7 +50,8 @@ header { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-i
 @media print {
   body { background: #fff; }
   .no-print { display: none; }
-  .sheet { margin: 0; border: 0; width: auto; min-height: 0; padding: 0; }
+  .sheet { margin: 0; border: 0; width: auto; min-height: 0; padding: 0; break-after: page; }
+  .sheet:last-child { break-after: auto; }
   @page { size: letter; margin: .4in; }
 }
 @media (max-width: 860px) {

@@ -14,6 +14,7 @@
       <button data-tab="people">Setup</button>
       <button data-tab="requests">Requests <span id="request-count" class="count hidden"></span></button>
       <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
+      <button data-tab="records">Records</button>
     </nav>
     <div class="spacer"></div>
     <span id="test-mode" class="test-mode hidden" title="Twilio isn't set up yet. Texts are printed in the server log, not sent.">TEST MODE – texts not sent</span>
@@ -113,6 +114,41 @@
     </div>
     <p class="muted small">Orders sent from the website. Click <b>Schedule</b> to open the work order already filled in, then pick the day and drivers.</p>
     <div id="request-list" class="request-list"></div>
+  </section>
+
+  <!-- RECORDS (search & export) -->
+  <section id="tab-records" class="tab hidden">
+    <div class="panel">
+      <h2>Work order records</h2>
+      <p class="muted small">Every work order is kept permanently. Find past jobs, download them as a spreadsheet for the accountant,
+        or print them (one per page, with ticket photos) and choose <b>Save as PDF</b> to keep a file.</p>
+      <form id="records-form" class="inline-form records-form">
+        <label>From <input type="date" name="from"></label>
+        <label>To <input type="date" name="to"></label>
+        <select name="status">
+          <option value="complete">Completed</option>
+          <option value="all">All statuses</option>
+          <option value="open">Open / not finished</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select name="type"></select>
+        <input name="q" placeholder="Customer, address, W.O. #, phone…">
+        <button class="btn primary" type="submit">Search</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" id="records-csv">⬇ Download spreadsheet (CSV)</button>
+        <button class="btn" type="button" id="records-print">🖨 Print / Save as PDF</button>
+      </form>
+      <div class="records-quick muted small">Quick ranges:
+        <button class="link" data-range="year">This year</button>
+        <button class="link" data-range="lastyear">Last year</button>
+        <button class="link" data-range="month">This month</button>
+        <button class="link" data-range="lastmonth">Last month</button>
+      </div>
+      <div id="records-summary" class="records-summary"></div>
+      <div class="table-wrap"><table class="table records"><thead><tr>
+        <th>W.O. #</th><th>Date</th><th>Type</th><th>Customer</th><th>Address</th><th>Work</th><th>Loads</th><th>Quoted</th><th>Status</th><th></th>
+      </tr></thead><tbody id="records-rows"></tbody></table></div>
+    </div>
   </section>
 
   <!-- MESSAGES -->

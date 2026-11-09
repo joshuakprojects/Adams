@@ -709,6 +709,50 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     return sendLineup(addDays(day, 1), { auto: true });
   }
 
+  // ---------- records (search & export, e.g. for tax season) ----------
+
+  /**
+   * Work orders in a date range with drivers, trucks and photos attached, loaded in a few queries
+   * so a whole year exports quickly. status: complete | open | cancelled | all.
+   */
+  async function findJobs({ from, to, status = 'complete', type = '', q = '', limit = 0 } = {}) {
+    const where = ['scheduled_date BETWEEN ? AND ?'];
+    const args = [from, to];
+    if (['complete', 'open', 'cancelled'].includes(status)) { where.push('status = ?'); args.push(status); }
+    if (JOB_TYPES.includes(type)) { where.push('job_type = ?'); args.push(type); }
+    const term = str(q, 100).toLowerCase();
+    if (term) {
+      const like = `%${term}%`;
+      const digits = term.replace(/\D/g, '');
+      where.push(`(lower(customer) LIKE ? OR lower(to_location) LIKE ? OR lower(from_location) LIKE ? OR lower(municipality) LIKE ?
+        OR lower(material) LIKE ? OR lower(po_number) LIKE ? OR CAST(id AS TEXT) = ? OR paper_wo = ?${digits.length >= 4 ? ' OR customer_phone LIKE ?' : ''})`);
+      args.push(like, like, like, like, like, like, term.replace(/^#/, ''), term.replace(/^#/, ''));
+      if (digits.length >= 4) args.push(`%${digits}%`);
+    }
+    const jobs = await db.all(`SELECT * FROM jobs WHERE ${where.join(' AND ')}
+      ORDER BY scheduled_date, first_thing DESC, (scheduled_time = ''), scheduled_time, id${limit ? ` LIMIT ${Number(limit)}` : ''}`, ...args);
+    if (!jobs.length) return [];
+    const byId = new Map(jobs.map((j) => [j.id, Object.assign(j, { details: parseJson(j.details), assignments: [], tickets: [] })]));
+    const ids = [...byId.keys()];
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const marks = chunk.map(() => '?').join(', ');
+      for (const a of await db.all(`${ASSIGNMENT_SELECT} WHERE a.job_id IN (${marks}) ORDER BY d.name`, ...chunk)) {
+        byId.get(a.job_id).assignments.push({ ...a, report: parseJson(a.report) });
+      }
+      for (const t of await db.all(`SELECT t.id, t.job_id, t.assignment_id, t.driver_id, t.source, t.created_at, d.name AS driver_name
+          FROM tickets t LEFT JOIN drivers d ON d.id = t.driver_id WHERE t.job_id IN (${marks}) ORDER BY t.id`, ...chunk)) {
+        byId.get(t.job_id).tickets.push(t);
+      }
+    }
+    for (const j of jobs) {
+      // When the work was finished: the last driver's "done", else when the job was marked complete.
+      const done = j.assignments.map((a) => a.done_at).filter(Boolean).sort().pop();
+      j.completed_at = j.status === 'complete' ? done || j.updated_at : null;
+    }
+    return jobs;
+  }
+
   // ---------- dashboard ----------
 
   async function listMessages({ limit = 100, unhandledOnly = false } = {}) {
@@ -758,7 +802,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
-    saveReport, bookPickup, reportFields,
+    saveReport, bookPickup, reportFields, findJobs,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
     getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,

@@ -220,3 +220,11 @@ fieldset.sec legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: 
 .small-seg { margin: 0 0 0 12px; }
 .small-seg span { padding: 5px 12px; font-size: 13px; }
 .from-request { background: #e8f1fd; color: #0a3f96; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; font-weight: 600; }
+
+.records-form label { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.records-form input[name=q] { min-width: 220px; }
+.records-quick { margin: -4px 0 10px; }
+.records-quick .link { font-size: 13px; margin-right: 6px; }
+.records-summary { font-weight: 700; margin: 6px 0 10px; }
+.table-wrap { overflow-x: auto; }
+.table.records td { vertical-align: top; font-size: 14px; }

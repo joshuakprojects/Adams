@@ -6,7 +6,8 @@ const { createDispatch, ValidationError } = require('./dispatch');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
-const { renderPrintPage } = require('./printPage');
+const { renderPrintPage, renderPrintBatch } = require('./printPage');
+const { jobsToCsv } = require('./records');
 const twilio = require('./twilio');
 const { createIntake, validKey, IntakeError } = require('./intake');
 
@@ -151,6 +152,16 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   app.get('/login', (_req, res) => res.sendFile(path.join(pub, 'login.html')));
   app.get('/login.css', (_req, res) => res.sendFile(path.join(pub, 'styles.css')));
 
+  /** Records filters from the query string: from/to (default: this year so far), status, type, q. */
+  const recordFilters = (query) => {
+    const today = dispatch.today();
+    const ymd = (v, fallback) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : fallback);
+    const from = ymd(query.from, `${today.slice(0, 4)}-01-01`);
+    const to = ymd(query.to, today);
+    if (from > to) throw new ValidationError('"From" must be before "To"');
+    return { from, to, status: String(query.status || 'complete'), type: String(query.type || ''), q: String(query.q || '') };
+  };
+
   const api = express.Router();
   api.use(auth.requireUser);
   const json = (fn) => h(async (req, res) => res.json(await fn(req)));
@@ -226,6 +237,19 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return { ...a, job: undefined };
   }));
 
+  // Records: find past work orders, download a spreadsheet, print / save as PDF (tax season).
+  api.get('/records', json(async (req) => {
+    const f = recordFilters(req.query);
+    const jobs = await dispatch.findJobs({ ...f, limit: 501 });
+    return { ...f, truncated: jobs.length > 500, jobs: jobs.slice(0, 500) };
+  }));
+  api.get('/records.csv', h(async (req, res) => {
+    const f = recordFilters(req.query);
+    const jobs = await dispatch.findJobs(f);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="adams-bros-work-orders-${f.from}-to-${f.to}.csv"`);
+    res.send(jobsToCsv(jobs));
+  }));
   api.get('/drivers', json((req) => dispatch.listDrivers({ includeInactive: req.query.all === '1' })));
   api.post('/drivers', json((req) => dispatch.saveDriver(req.body)));
   api.get('/trucks', json((req) => dispatch.listTrucks({ includeInactive: req.query.all === '1' })));
@@ -256,6 +280,11 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   app.use('/api', api);
 
   app.get('/', auth.requireUser, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+  // Many work orders at once, one per page (Records tab → Print / Save as PDF).
+  app.get('/print/records', auth.requireUser, h(async (req, res) => {
+    const f = recordFilters(req.query);
+    res.send(renderPrintBatch(await dispatch.findJobs(f), f));
+  }));
   // Printable work order, laid out like the paper forms.
   app.get('/print/:id', auth.requireUser, h(async (req, res) => {
     const job = await dispatch.getJob(req.params.id);

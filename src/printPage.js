@@ -30,8 +30,8 @@ function fmtStamp(sqlUtc) {
   });
 }
 
-/** A printable work order laid out like the Adams Bros paper forms. */
-function renderPrintPage(job) {
+/** One work order sheet laid out like the Adams Bros paper forms. */
+function renderSheet(job) {
   const t = FORMS.typeInfo(job.job_type);
   const d = job.details || {};
   const c = config.company;
@@ -66,14 +66,13 @@ function renderPrintPage(job) {
   const drivers = job.assignments.filter((a) => a.status !== 'cancelled').map((a) =>
     `${esc(a.driver_name)}${a.truck_unit ? ` (${esc(a.truck_unit)})` : ''}${a.loads_done ? ` — ${a.loads_done} load${a.loads_done === 1 ? '' : 's'}` : ''}`).join(', ');
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(t.title)} #${job.id}</title>
-<link rel="stylesheet" href="/print.css">
-</head><body class="t-${esc(job.job_type)}">
-<div class="toolbar no-print"><button onclick="window.print()">🖨 Print</button> <button onclick="window.close()">Close</button></div>
-<article class="sheet">
+  // Scale tickets / job photos, so the printed record is complete.
+  const photos = (job.tickets || []).length ? `<section class="box photos">
+      <h3>${['haul', 'misc'].includes(job.job_type) ? 'Scale tickets' : 'Photos'} (${job.tickets.length})</h3>
+      ${job.tickets.map((tk) => `<figure><img src="/api/tickets/${tk.id}/image" alt="Ticket photo"><figcaption>${esc(tk.driver_name || '')} · ${esc(fmtStamp(tk.created_at))}</figcaption></figure>`).join('')}
+    </section>` : '';
+
+  return `<article class="sheet t-${esc(job.job_type)}">
   <header>
     <div class="logo"><div class="mark">ADAMS <span>BROS</span></div><div class="sub">CONSTRUCTION</div></div>
     <div class="co">
@@ -128,8 +127,34 @@ function renderPrintPage(job) {
   </section>
 
   ${t.disclaimer ? `<p class="disclaimer">${esc(t.disclaimer)}</p>` : ''}
-</article>
+  ${photos}
+</article>`;
+}
+
+function page(title, body, toolbarNote = '') {
+  return `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<link rel="stylesheet" href="/print.css">
+</head><body>
+<div class="toolbar no-print"><button onclick="window.print()">🖨 Print / Save as PDF</button> <button onclick="window.close()">Close</button>${toolbarNote ? `<div class="note">${toolbarNote}</div>` : ''}</div>
+${body}
 </body></html>`;
 }
 
-module.exports = { renderPrintPage };
+/** A printable work order laid out like the Adams Bros paper forms. */
+function renderPrintPage(job) {
+  return page(`${FORMS.typeInfo(job.job_type).title} #${job.id}`, renderSheet(job));
+}
+
+/** Many work orders, one per page: for year-end records ("Save as PDF" in the print dialog). */
+function renderPrintBatch(jobs, { from, to } = {}) {
+  const range = [from, to].filter(Boolean).map((d) => sms.formatDate(d)).join(' – ');
+  const title = `Adams Bros work orders ${range}`.trim();
+  if (!jobs.length) return page(title, '<p class="empty-batch">No work orders match those filters.</p>');
+  return page(title, jobs.map(renderSheet).join('\n'),
+    `${jobs.length} work order${jobs.length === 1 ? '' : 's'}${range ? ` · ${esc(range)}` : ''}. In the print window choose <b>Save as PDF</b> to keep a file.`);
+}
+
+module.exports = { renderPrintPage, renderPrintBatch, renderSheet };

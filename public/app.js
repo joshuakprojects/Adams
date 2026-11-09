@@ -84,6 +84,7 @@
     if (tab === 'people') loadPeople();
     if (tab === 'messages') loadMessages();
     if (tab === 'requests') loadRequests();
+    if (tab === 'records') loadRecords();
     if (tab === 'board') loadBoard();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -701,6 +702,56 @@
       }
     } catch (err) { toast(err.message); }
   });
+
+  // ---------- records (search & export) ----------
+  const rf = $('#records-form');
+  rf.elements.type.innerHTML = '<option value="">All types</option>' +
+    TYPE_KEYS.map((k) => `<option value="${k}">${esc(TYPES[k].title)}</option>`).join('');
+
+  function recordQuery() {
+    return new URLSearchParams(Object.fromEntries(new FormData(rf).entries())).toString();
+  }
+
+  function setRange(which) {
+    const t = state.today || new Date().toISOString().slice(0, 10);
+    const y = Number(t.slice(0, 4));
+    const m = Number(t.slice(5, 7));
+    const last = (yy, mm) => new Date(Date.UTC(yy, mm, 0)).toISOString().slice(0, 10);
+    const ranges = {
+      year: [`${y}-01-01`, t],
+      lastyear: [`${y - 1}-01-01`, `${y - 1}-12-31`],
+      month: [`${t.slice(0, 7)}-01`, t],
+      lastmonth: m === 1 ? [`${y - 1}-12-01`, `${y - 1}-12-31`] : [`${y}-${pad(m - 1)}-01`, last(y, m - 1)],
+    };
+    [rf.elements.from.value, rf.elements.to.value] = ranges[which];
+  }
+
+  async function loadRecords() {
+    if (!rf.elements.from.value) setRange('year');
+    try {
+      const out = await api('/records?' + recordQuery());
+      const loads = out.jobs.reduce((n, j) => n + j.assignments.reduce((m, a) => m + (a.loads_done || 0), 0), 0);
+      $('#records-summary').textContent = `${out.jobs.length}${out.truncated ? '+ (showing the first 500 — the spreadsheet and printout include all)' : ''} work order${out.jobs.length === 1 ? '' : 's'} · ${longDate(out.from)} to ${longDate(out.to)}${loads ? ` · ${loads} loads` : ''}`;
+      $('#records-rows').innerHTML = out.jobs.map((j) => `
+        <tr>
+          <td><b>#${j.id}</b>${j.paper_wo ? `<div class="muted small">W.O. ${esc(j.paper_wo)}</div>` : ''}</td>
+          <td>${esc(j.scheduled_date)}</td>
+          <td>${esc(typeInfo(j.job_type).name)}</td>
+          <td>${esc(j.customer)}${j.customer_phone ? `<div class="muted small">${esc(prettyPhone(j.customer_phone))}</div>` : ''}</td>
+          <td>${esc(siteAddress(j))}</td>
+          <td>${esc(cargo(j))}${j.tickets.length ? ` <span class="muted small">🧾 ${j.tickets.length}</span>` : ''}</td>
+          <td>${j.assignments.reduce((n, a) => n + (a.loads_done || 0), 0) || ''}</td>
+          <td>${esc(j.quoted_price)}</td>
+          <td><span class="chip ${j.status === 'complete' ? 'done' : j.status === 'cancelled' ? 'cancelled' : 'sent'}">${esc(j.status)}</span></td>
+          <td><button class="btn tiny" data-act="print" data-job="${j.id}">Print</button></td>
+        </tr>`).join('') || '<tr><td colspan="10" class="muted">No work orders match.</td></tr>';
+    } catch (err) { toast(err.message); }
+  }
+
+  rf.addEventListener('submit', (e) => { e.preventDefault(); loadRecords(); });
+  $$('[data-range]').forEach((b) => b.addEventListener('click', () => { setRange(b.dataset.range); loadRecords(); }));
+  $('#records-csv').addEventListener('click', () => { location.href = '/api/records.csv?' + recordQuery(); });
+  $('#records-print').addEventListener('click', () => window.open('/print/records?' + recordQuery(), '_blank'));
 
   // ---------- messages ----------
   async function loadMessages() {
