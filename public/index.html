@@ -139,9 +139,10 @@
         <div class="grid">
           <label class="wide" data-when="what"><span data-label="what">Material</span>
             <input name="material" list="dl-what" autocomplete="off"></label>
-          <label data-when="quantity">Quantity <input name="quantity" placeholder="e.g. 200"></label>
-          <label data-when="quantity">Unit <input name="unit" list="dl-units" placeholder="tonnes / yards"></label>
-          <label data-when="loads">Number of loads <input type="number" name="loads_planned" min="0" max="999"></label>
+          <label data-when="loads"><span data-label="loads">Number of loads</span> <input type="number" name="loads_planned" min="0" max="999"></label>
+          <label data-when="quantity"><span data-label="qty">Quantity</span> <input name="quantity" placeholder="e.g. 200"></label>
+          <label data-when="unit">Unit <input name="unit" list="dl-units" placeholder="tonnes / yards"></label>
+          <div class="grid sub" id="type-fields-top"></div>
           <label class="wide" data-when="from"><span data-label="from">From</span>
             <input name="from_location" list="dl-locations" autocomplete="off"></label>
           <label class="span2"><span data-label="to">Delivery address</span>
@@ -161,7 +162,7 @@
         <div class="grid">
           <label>Quoted price <input name="quoted_price" placeholder="$"></label>
           <label>Payment method <select name="payment_method"></select></label>
-          <label class="check-row"><input type="checkbox" name="collect_payment"> Driver collects payment on site</label>
+          <p class="muted small office-note">Office only — drivers don't see the price.</p>
         </div>
       </fieldset>
 

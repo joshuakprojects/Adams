@@ -56,7 +56,7 @@ test('office login, create & text a job, driver confirms by SMS and finishes on 
   // Driver opens the link and taps buttons (no login).
   res = await fetch(base + '/j/' + token);
   const html = await res.text();
-  assert.match(html, /Aggregate Work Order/);
+  assert.match(html, /Aggregates Work Order/);
   assert.match(html, /#1001/);
   assert.match(html, /Topsoil/);
   res = await fetch(`${base}/j/${token}/report`, { method: 'POST', redirect: 'manual',

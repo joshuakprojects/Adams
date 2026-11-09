@@ -59,12 +59,10 @@ function cleanFields(fields, input) {
   return out;
 }
 
-/** What the driver can fill in after a job: the form's report fields, plus payment and notes for any job. */
+/** What the driver can fill in after a job: the form's report fields, plus notes for any job. (Payments are handled by the office.) */
 function reportFields(jobType) {
   return [
     ...FORMS.typeInfo(jobType).report,
-    { key: 'payment_collected', label: 'Payment collected', kind: 'choice', options: FORMS.COLLECTED },
-    { key: 'amount_collected', label: 'Amount collected', kind: 'text' },
     { key: 'driver_notes', label: 'Notes for the office', kind: 'textarea' },
   ];
 }
@@ -191,11 +189,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       paper_wo: str(data.paper_wo, 30),
       quoted_price: str(data.quoted_price, 200),
       payment_method: paymentMethod,
-      collect_payment: data.collect_payment === true || data.collect_payment === 1 || data.collect_payment === '1' || data.collect_payment === 'on' ? 1 : 0,
       details: JSON.stringify(cleanFields(t.fields, data.details)),
       material: str(data.material, 200),
       quantity: str(data.quantity, 40),
-      unit: str(data.unit, 40),
+      unit: t.fixedUnit ? (str(data.quantity, 40) ? t.fixedUnit : '') : str(data.unit, 40),
       loads_planned: loads || null,
       from_location: str(data.from_location, 300),
       to_location: str(data.to_location, 300),
@@ -210,9 +207,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   const JOB_FIELDS = ['job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
     'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'notes',
     'customer_phone', 'customer_email', 'billing_address', 'po_number', 'municipality', 'paper_wo',
-    'quoted_price', 'payment_method', 'collect_payment', 'details'];
-  // Office-only fields: changing these doesn't mean drivers need a new text.
-  const OFFICE_ONLY = new Set(['customer_email', 'billing_address', 'po_number', 'paper_wo']);
+    'quoted_price', 'payment_method', 'details'];
+  // Office-only fields (drivers never see them; payments are handled by the office): changing these doesn't need a new text.
+  const OFFICE_ONLY = new Set(['customer_email', 'billing_address', 'po_number', 'paper_wo', 'quoted_price', 'payment_method']);
 
   function cleanAssignments(list) {
     const seen = new Set();
@@ -379,7 +376,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     if (job.job_type === 'toilet') details.trip = 'Pick up';
     else details.service = 'Empty & no return';
     return saveJob({
-      ...job, id: null, scheduled_date: when, scheduled_time: '', paper_wo: '', collect_payment: 0, details,
+      ...job, id: null, scheduled_date: when, scheduled_time: '', paper_wo: '', details,
       notes: [`Pick-up for job #${job.id}.`, job.notes].filter(Boolean).join(' '), assignments: [],
     }, userId).job;
   }
@@ -399,7 +396,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     return a;
   }
 
-  /** The driver's after-job report from their phone (septic conditions, payment collected, notes). */
+  /** The driver's after-job report from their phone (septic conditions, notes). */
   function saveReport(token, data, via = 'web') {
     const a = assignmentByToken(token);
     if (!a) throw new ValidationError('Job not found');

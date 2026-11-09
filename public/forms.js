@@ -21,16 +21,27 @@
   const TYPES = {
     haul: {
       name: 'Aggregate',
-      title: 'Aggregate Work Order',
+      title: 'Aggregates Work Order',
       icon: '🪨',
       what: 'Aggregate type',
       whatSuggestions: ['Sand fill', 'Sand', '2" minus', '6" minus', '3/4" clear', '2" clear', '3/4" crush', 'Pit run',
         'Gravel', 'Topsoil', 'Screened topsoil', 'Fill', 'Asphalt', 'Recycled asphalt', 'Rip rap', 'Washed rock'],
+      // Like the paper form: "# of Loads ___ OR # of Yards ___", always in yards.
       quantity: true,
+      quantityLabel: 'OR # of yards',
+      fixedUnit: 'yards',
       loads: true,
+      loadsLabel: '# of loads',
       from: 'From (pit / yard)',
       to: 'Delivery address',
-      fields: [],
+      // The paper form has two aggregate lines; the first uses the main fields above.
+      fields: [
+        { key: 'truck', label: 'Circle one', kind: 'choice', options: ['Tandem', 'Triaxle', 'H&G'], sms: true, top: true },
+        { key: 'aggregate2_type', label: '2nd aggregate type', kind: 'text', sms: true, top: true, suggestions: 'what' },
+        { key: 'aggregate2_loads', label: '# of loads', kind: 'number', sms: true, top: true },
+        { key: 'aggregate2_yards', label: 'OR # of yards', kind: 'number', sms: true, top: true },
+        { key: 'aggregate2_truck', label: 'Circle one', kind: 'choice', options: ['Tandem', 'Triaxle', 'H&G'], sms: true, top: true },
+      ],
       report: [],
     },
     bin: {
@@ -141,7 +152,6 @@
   const TYPE_KEYS = Object.keys(TYPES);
   const TOILET_TYPES = ['Standard', 'Deluxe', 'Wheelchair accessible', 'Hand wash station', 'Flushing'];
   const PAYMENT_METHODS = ['Cash', 'Debit', 'Visa/MC', 'Cheque', 'On account'];
-  const COLLECTED = ['Cash', 'Cheque', 'Debit', 'Visa/MC', 'E-transfer', 'Not paid'];
   // Truck kinds, so drivers whose usual truck fits the job type are listed first.
   const TRUCK_KINDS = { haul: 'Gravel / end dump', float: 'Float / lowbed', septic: 'Septic vac', bin: 'Bin truck', toilet: 'Toilet service', other: 'Other' };
 
@@ -166,12 +176,30 @@
   }
 
   /** One-line description of the work, for cards, texts and lists. */
+  const plural = (n, word) => `${n} ${word}${Number(n) === 1 ? '' : 's'}`;
+
+  /** "Sand fill - 1 load - Tandem" for one aggregate line. */
+  function aggregateLine(type, loads, yards, truck) {
+    return [type, loads ? plural(loads, 'load') : '', yards ? `${yards} yards` : '', truck].filter(Boolean).join(' - ');
+  }
+
+  /** Loads planned across both aggregate lines, for the progress bar. */
+  function totalLoads(job) {
+    const d = parseDetails(job);
+    return (Number(job.loads_planned) || 0) + (job.job_type === 'haul' ? Number(d.aggregate2_loads) || 0 : 0);
+  }
+
   function summary(job) {
     const t = typeInfo(job.job_type);
     const d = parseDetails(job);
     const qty = [job.quantity, job.unit].filter(Boolean).join(' ');
-    const loads = job.loads_planned ? `${job.loads_planned} load${job.loads_planned === 1 ? '' : 's'}` : '';
+    const loads = job.loads_planned ? plural(job.loads_planned, 'load') : '';
     switch (job.job_type) {
+      case 'haul': {
+        const first = aggregateLine(job.material, job.loads_planned, job.quantity, d.truck);
+        const second = aggregateLine(d.aggregate2_type, d.aggregate2_loads, d.aggregate2_yards, d.aggregate2_truck);
+        return [first, second].filter(Boolean).join(' + ') || t.name;
+      }
       case 'bin':
         return [d.service, job.material].filter(Boolean).join(' - ');
       case 'septic':
@@ -195,11 +223,11 @@
     for (const f of t.fields) {
       if (!f.sms) continue;
       if (/^toilet\d_/.test(f.key)) continue;
-      if (['service', 'trip', 'tank_type', 'tank_size'].includes(f.key)) continue; // already in the summary line
+      if (['service', 'trip', 'tank_type', 'tank_size', 'truck'].includes(f.key) || /^aggregate2_/.test(f.key)) continue; // already in the summary line
       if (!isEmpty(d[f.key])) out.push([f.label, d[f.key]]);
     }
     return out; // toilet types & counts are already in the summary line
   }
 
-  return { TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, COLLECTED, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
+  return { TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
 });

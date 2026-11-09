@@ -142,9 +142,10 @@
     const loadsDone = job.assignments.reduce((n, a) => n + a.loads_done, 0);
     const toSend = job.assignments.filter((a) => a.status === 'pending' || (a.needs_resend && a.status !== 'done')).length;
     const statusTag = job.status === 'open' ? '' : `<span class="tag st-${job.status}">${job.status}</span>`;
-    const progress = job.loads_planned || loadsDone ? `
-      <div class="progress">Loads: ${loadsDone}${job.loads_planned ? ` / ${job.loads_planned}` : ''}
-        ${job.loads_planned ? `<div class="bar"><div style="width:${Math.min(100, (loadsDone / job.loads_planned) * 100)}%"></div></div>` : ''}
+    const planned = window.FORMS.totalLoads(job);
+    const progress = planned || loadsDone ? `
+      <div class="progress">Loads: ${loadsDone}${planned ? ` / ${planned}` : ''}
+        ${planned ? `<div class="bar"><div style="width:${Math.min(100, (loadsDone / planned) * 100)}%"></div></div>` : ''}
       </div>` : '';
 
     const rows = job.assignments.map((a) => {
@@ -181,9 +182,9 @@
         ${siteAddress(job) ? `<div><b>${job.job_type === 'float' ? 'To' : 'At'}</b> ${esc(siteAddress(job))}</div>` : ''}
       </div>
       <div class="job-meta">${[job.customer && 'Customer: ' + esc(job.customer + (job.customer_phone ? ' ' + prettyPhone(job.customer_phone) : '')), job.contact_name && 'Site: ' + esc(job.contact_name + ' ' + prettyPhone(job.contact_phone))].filter(Boolean).join(' · ')}</div>
-      ${job.collect_payment || job.assignments.some((a) => Object.keys(a.report || {}).length) ? `<div class="tickets-row">
-        ${job.collect_payment ? `<span class="chip collect">💵 Driver collects ${esc(job.quoted_price || '')}${job.payment_method ? ' · ' + esc(job.payment_method) : ''}</span>` : ''}
-        ${job.assignments.filter((a) => Object.keys(a.report || {}).length).map((a) => `<span class="chip report" data-act="print" data-job="${job.id}" title="Open the work order with the driver's report">📋 Report from ${esc(a.driver_name.split(' ')[0])}${a.report.payment_collected ? ' · ' + esc(a.report.payment_collected) + (a.report.amount_collected ? ' ' + esc(a.report.amount_collected) : '') : ''}</span>`).join('')}
+      ${job.quoted_price || job.payment_method || job.assignments.some((a) => Object.keys(a.report || {}).length) ? `<div class="tickets-row">
+        ${job.quoted_price || job.payment_method ? `<span class="chip collect" title="Office only">💲 ${esc([job.quoted_price, job.payment_method].filter(Boolean).join(' · '))}</span>` : ''}
+        ${job.assignments.filter((a) => Object.keys(a.report || {}).length).map((a) => `<span class="chip report" data-act="print" data-job="${job.id}" title="Open the work order with the driver's report">📋 Report from ${esc(a.driver_name.split(' ')[0])}</span>`).join('')}
       </div>` : ''}
       ${job.notes ? `<div class="job-notes">${esc(job.notes)}</div>` : ''}
       ${progress}
@@ -351,7 +352,7 @@
   /** The type-specific part of the form (bin service, septic tank details, toilet types…). */
   function renderTypeFields(type, values = {}) {
     const t = typeInfo(type);
-    $('#type-fields').innerHTML = t.fields.map((f) => {
+    const html = (f) => {
       const name = 'd.' + f.key;
       const v = values[f.key] ?? '';
       if (f.kind === 'choice') {
@@ -362,25 +363,27 @@
         return `<label class="wide">${esc(f.label)}<textarea name="${name}" rows="2">${esc(v)}</textarea></label>`;
       }
       const type = f.kind === 'date' ? 'date' : f.kind === 'number' ? 'number' : 'text';
-      const list = f.suggestions === 'toilets' ? 'list="dl-toilets"' : '';
-      const cls = f.wide ? 'wide' : /_type$/.test(f.key) ? 'span2' : '';
+      const list = f.suggestions === 'toilets' ? 'list="dl-toilets"' : f.suggestions === 'what' ? 'list="dl-what"' : '';
+      const cls = f.wide ? 'wide' : f.suggestions === 'toilets' ? 'span2' : '';
       return `<label class="${cls}">${esc(f.label)}<input type="${type}" name="${name}" value="${esc(v)}" ${list} ${type === 'number' ? 'min="0"' : ''}></label>`;
-    }).join('');
+    };
+    $('#type-fields-top').innerHTML = t.fields.filter((f) => f.top).map(html).join('');
+    $('#type-fields').innerHTML = t.fields.filter((f) => !f.top).map(html).join('');
   }
 
   // Click a selected pill again to clear it.
-  $('#type-fields').addEventListener('pointerdown', (e) => {
+  form.addEventListener('pointerdown', (e) => {
     const input = e.target.closest('.pill')?.querySelector('input');
     if (input) input.dataset.was = input.checked ? '1' : '';
   });
-  $('#type-fields').addEventListener('click', (e) => {
+  form.addEventListener('click', (e) => {
     const input = e.target.matches('.pill input') ? e.target : null;
     if (input && input.dataset.was === '1') { input.checked = false; input.dataset.was = ''; }
   });
 
   function collectDetails() {
     const out = {};
-    for (const el of $$('#type-fields [name]')) {
+    for (const el of $$('#type-fields [name], #type-fields-top [name]')) {
       const key = el.name.slice(2);
       if (el.type === 'radio') { if (el.checked) out[key] = el.value; } else if (el.value.trim()) out[key] = el.value.trim();
     }
@@ -394,7 +397,12 @@
     $('[data-label=from]', form).textContent = t.from || 'From';
     $('[data-label=to]', form).textContent = t.to;
     $('[data-label=date]', form).textContent = type === 'septic' ? 'Pump-out date' : 'Delivery date';
-    $$('[data-when]', form).forEach((el) => el.classList.toggle('hidden', !t[el.dataset.when]));
+    $('[data-label=loads]', form).textContent = t.loadsLabel || 'Number of loads';
+    $('[data-label=qty]', form).textContent = t.quantityLabel || 'Quantity';
+    const show = { ...t, unit: t.quantity && !t.fixedUnit };
+    $$('[data-when]', form).forEach((el) => el.classList.toggle('hidden', !show[el.dataset.when]));
+    // Aggregates: type, loads and yards on one line, like the paper form.
+    $('[data-when=what]', form).classList.toggle('wide', !t.fixedUnit);
     // Keep what was typed in the type-specific fields when switching back and forth.
     renderTypeFields(type, details || collectDetails());
     fillWhatList(type);
@@ -462,10 +470,9 @@
     $('#job-form-title').textContent = job ? `Edit job #${job.id}` : 'New job';
     for (const [k, v] of Object.entries(data)) {
       const input = form.elements[k];
-      if (!input || k === 'job_type' || k === 'collect_payment' || k === 'details' || !('value' in input)) continue;
+      if (!input || k === 'job_type' || k === 'details' || !('value' in input)) continue;
       input.value = v ?? '';
     }
-    form.elements.collect_payment.checked = Boolean(data.collect_payment);
     if (data.contact_phone) form.elements.contact_phone.value = prettyPhone(data.contact_phone);
     if (data.customer_phone) form.elements.customer_phone.value = prettyPhone(data.customer_phone);
     $$('input[name=job_type]', form).forEach((r) => { r.checked = r.value === data.job_type; });
@@ -488,7 +495,6 @@
     const fd = new FormData(form);
     const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.')));
     body.details = collectDetails();
-    body.collect_payment = form.elements.collect_payment.checked;
     body.assignments = [...formAssignments].map(([driver_id, truck_id]) => ({ driver_id, truck_id }));
     body.send_now = sendNow;
     if (sendNow && !body.assignments.length) {

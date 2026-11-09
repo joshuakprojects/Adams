@@ -55,7 +55,7 @@ Each job is one of the office's work order types. The fields come from the paper
 
 | Type | Paper form | Type-specific fields |
 |---|---|---|
-| 🪨 **Aggregate** | Aggregate work order | Aggregate type (sand fill, 2" minus, 3/4" clear…), quantity, loads, pit |
+| 🪨 **Aggregate** | Aggregates Work Order (blue) | Two aggregate lines, each with: aggregate type, circle one (Tandem / Triaxle / H&G), # of loads OR # of yards |
 | 🗑️ **Bin** | Bin Work Order (green) | Bin size; Deliver bin / Empty & return / Empty & no return / H&G |
 | 💧 **Septic** | Septic pump-out sheet | Tank size, elevation, hose length, lids uncovered, tank type, tank location, steep driveway, back in, directions |
 | 🚻 **Toilet** | Portable toilet rental (blue) | Deliver / pick up / service, expected pick-up date, up to 3 toilet types with counts, placement, extra servicing |
@@ -67,8 +67,9 @@ PO #, delivery address, municipality, site contact, delivery date, quoted price 
 first written in a paper book, the paper W.O. # can be recorded too.
 
 - **Driver reports:** for septic, the driver fills in the *observed conditions of tanks* half of the sheet on their
-  phone (baffles, liquid level, filter, lids…) with big tap buttons. If "Driver collects payment on site" is ticked,
-  the text says **COLLECT PAYMENT** with the amount, and the driver records what they collected. Any driver can leave notes for the office.
+  phone (baffles, liquid level, filter, lids…) with big tap buttons. Any driver can leave notes for the office.
+- **Payments are handled by the office.** Quoted price and payment method are office-only: they're never in the
+  driver's text or on their page, and changing them doesn't re-text anyone.
 - **🖨 Print** opens the job laid out like the paper form, with the chosen options circled, the driver's report filled in,
   and the company header and HST #. A septic sheet with no report yet prints the conditions section blank so it can be filled in by hand.
 - **Book pick-up** on a toilet or bin job creates the return trip on the pick-up date.

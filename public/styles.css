@@ -186,3 +186,6 @@ fieldset.sec legend { font-weight: 800; font-size: 13px; padding: 0 6px; color: 
 .job.t-misc { border-left-color: #7e57c2; }
 .chip.report { background: #e8eaf6; color: #283593; }
 .chip.collect { background: #fff3cd; color: #7a5a00; }
+
+.grid.sub { grid-column: 1 / -1; }
+.grid.sub:empty { display: none; }

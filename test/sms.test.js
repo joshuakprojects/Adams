@@ -39,7 +39,7 @@ test('job text has the details a driver needs', () => {
     customer: 'Smith', customer_phone: '+17055550100', contact_name: 'Mike', contact_phone: '+14035551234', notes: 'Back of lot', details: '{}',
   };
   const text = sms.buildJobText(job, { token: 'abc', truck_unit: 'T1' });
-  assert.match(text, /^ADAMS BROS - Aggregate Work Order #1042/);
+  assert.match(text, /^ADAMS BROS - Aggregates Work Order #1042/);
   assert.match(text, /Tue Nov 10 @ 7:00 AM/);
   assert.match(text, /Truck: T1/);
   assert.match(text, /Aggregate type: 2" minus - 20 loads/);
@@ -54,7 +54,7 @@ test('job text has the details a driver needs', () => {
 
 test('job text per form type', () => {
   const base = { id: 7, scheduled_date: '2026-11-10', scheduled_time: '', to_location: '12 Bay St', municipality: 'McDougall' };
-  const septic = sms.buildJobText({ ...base, job_type: 'septic', collect_payment: 1, quoted_price: '$350', payment_method: 'Cash',
+  const septic = sms.buildJobText({ ...base, job_type: 'septic', quoted_price: '$350', payment_method: 'Cash',
     details: { tank_type: 'Holding', tank_size: '1000 gal', hose_length: '150 ft', lids_uncovered: 'No', steep_driveway: 'Yes', tank_location: 'Under the deck' } }, { token: 'x' });
   assert.match(septic, /Septic Pump-out #7/);
   assert.match(septic, /Job: Pump-out - holding tank - 1000 gal/);
@@ -63,7 +63,14 @@ test('job text per form type', () => {
   assert.match(septic, /Lids uncovered: No/);
   assert.match(septic, /Steep driveway: Yes/);
   assert.match(septic, /Tank location: Under the deck/);
-  assert.match(septic, /COLLECT PAYMENT: \$350 - Cash/);
+  // Payments are handled by the office: drivers never see the price.
+  assert.doesNotMatch(septic, /\$350|COLLECT/);
+
+  const agg = sms.buildJobText({ ...base, job_type: 'haul', material: 'Sand fill', loads_planned: 1,
+    details: { truck: 'Tandem', aggregate2_type: '2" minus', aggregate2_yards: '30', aggregate2_truck: 'Triaxle' } }, { token: 'x' });
+  assert.match(agg, /Aggregates Work Order #7/);
+  assert.match(agg, /Aggregate type: Sand fill - 1 load - Tandem \+ 2" minus - 30 yards - Triaxle/);
+  assert.doesNotMatch(agg, /Circle one/);
 
   const bin = sms.buildJobText({ ...base, job_type: 'bin', material: '20 yd', details: { service: 'Empty & return' } }, { token: 'x' });
   assert.match(bin, /Bin Work Order #7/);

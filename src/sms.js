@@ -81,7 +81,6 @@ function buildJobText(job, assignment, { updated = false } = {}) {
   if (customer) lines.push(`Customer: ${customer}`);
   const contact = [job.contact_name, prettyPhone(job.contact_phone)].filter(Boolean).join(' ');
   if (contact) lines.push(`Site contact: ${contact}`);
-  if (job.collect_payment) lines.push(`COLLECT PAYMENT: ${[job.quoted_price, job.payment_method].filter(Boolean).join(' - ') || 'see office'}`);
   if (job.notes) lines.push(`Notes: ${job.notes}`);
   lines.push('');
   lines.push('Reply OK to confirm. Reply DONE when finished.');
@@ -109,7 +108,6 @@ function buildLineupText(date, items) {
     const site = siteAddress(job);
     if (site) lines.push(`${t.to}: ${site}`);
     if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
-    if (job.collect_payment) lines.push('COLLECT PAYMENT');
     lines.push(`Details: ${jobLink(assignment.token)}`);
   });
   lines.push('');

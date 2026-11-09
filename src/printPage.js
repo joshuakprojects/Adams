@@ -38,7 +38,15 @@ function renderPrintPage(job) {
   const toilets = job.job_type === 'toilet' ? [1, 2, 3].map((i) => `
       <div class="ln half"><span class="lb">Type of toilet:</span><span class="val">${esc(d[`toilet${i}_type`])}</span></div>
       <div class="ln half"><span class="lb">How many:</span><span class="val">${esc(d[`toilet${i}_qty`])}</span></div>`).join('') : '';
-  const typeFields = t.fields.filter((f) => !/^toilet\d_/.test(f.key)).map((f) => renderField(f, d[f.key])).join('');
+  const typeFields = job.job_type === 'haul' ? '' : t.fields.filter((f) => !/^toilet\d_/.test(f.key)).map((f) => renderField(f, d[f.key])).join('');
+  // Aggregates: two lines, like the paper form.
+  const trucks = (t.fields.find((f) => f.key === 'truck') || {}).options || [];
+  const half = (label, value) => `<div class="ln half"><span class="lb">${esc(label)}:</span><span class="val">${esc(value || '')}</span></div>`;
+  const aggregateRows = job.job_type === 'haul' ? [
+    [job.material, d.truck, job.loads_planned, job.quantity],
+    [d.aggregate2_type, d.aggregate2_truck, d.aggregate2_loads, d.aggregate2_yards],
+  ].map(([type, truck, loads, yards]) => half('Aggregate type', type) + circled('Circle one', trucks, truck) +
+    half('# of loads', loads) + half('OR # of yards', yards)).join('<div class="sep"></div>') : '';
 
   const reports = job.assignments.filter((a) => a.report && Object.keys(a.report).length);
   const reportHtml = reports.map((a) => {
@@ -54,7 +62,6 @@ function renderPrintPage(job) {
 
   const drivers = job.assignments.filter((a) => a.status !== 'cancelled').map((a) =>
     `${esc(a.driver_name)}${a.truck_unit ? ` (${esc(a.truck_unit)})` : ''}${a.loads_done ? ` — ${a.loads_done} load${a.loads_done === 1 ? '' : 's'}` : ''}`).join(', ');
-  const collected = reports.map((a) => a.report.payment_collected && `${a.report.payment_collected}${a.report.amount_collected ? ' ' + a.report.amount_collected : ''}`).filter(Boolean).join(', ');
 
   return `<!doctype html>
 <html lang="en"><head>
@@ -97,9 +104,10 @@ function renderPrintPage(job) {
   </section>
 
   <section class="box">
+    ${aggregateRows || `
     ${t.what ? line(t.what, job.material) : ''}
     ${t.quantity ? `<div class="ln half"><span class="lb">Quantity:</span><span class="val">${esc([job.quantity, job.unit].filter(Boolean).join(' '))}</span></div>` : ''}
-    ${t.loads ? `<div class="ln half"><span class="lb">Loads:</span><span class="val">${esc(job.loads_planned || '')}</span></div>` : ''}
+    ${t.loads ? `<div class="ln half"><span class="lb">Loads:</span><span class="val">${esc(job.loads_planned || '')}</span></div>` : ''}`}
     ${t.from ? line(t.from, job.from_location, 'wide') : ''}
     ${toilets}
     ${typeFields}
@@ -114,7 +122,6 @@ function renderPrintPage(job) {
     <div class="ln"><span class="lb">HST # ${esc(c.hst)}</span><span class="val"></span></div>
     <div class="ln total"><span class="lb">TOTAL:</span><span class="val"></span></div>
     ${circled('Payment', FORMS.PAYMENT_METHODS, job.payment_method)}
-    ${collected ? line('Collected by driver', collected) : ''}
   </section>
 
   ${t.disclaimer ? `<p class="disclaimer">${esc(t.disclaimer)}</p>` : ''}

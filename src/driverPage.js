@@ -54,8 +54,9 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
     finish = action('reopen', 'Oops — not finished yet', 'small');
   } else {
     if (a.status === 'pending' || a.status === 'sent') top += action('ack', '👍 Got it', 'primary');
-    if (t.loads || job.loads_planned) {
-      top += `<div class="loads">Loads done: <b>${a.loads_done}</b>${job.loads_planned ? ` of ${job.loads_planned}` : ''}</div>`;
+    const planned = FORMS.totalLoads(job);
+    if (t.loads || planned) {
+      top += `<div class="loads">Loads done: <b>${a.loads_done}</b>${planned ? ` of ${planned}` : ''}</div>`;
       top += action('load', '+1 Load delivered', 'load');
       if (a.loads_done > 0) top += action('unload', 'Undo last load', 'small');
     }
@@ -65,19 +66,17 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
   const callLink = (phone) => (phone && /^\+?\d+$/.test(phone) ? ` <a class="call" href="tel:${esc(phone)}">Call</a>` : '');
   const site = sms.siteAddress(job);
   const typeRows = t.fields
-    .filter((f) => !/^toilet\d_/.test(f.key) && f.key !== 'service' && f.key !== 'trip')
+    .filter((f) => !/^toilet\d_/.test(f.key) && !/^aggregate2_/.test(f.key) && !['service', 'trip', 'truck'].includes(f.key))
     .map((f) => row(f.label, f.kind === 'date' ? sms.formatDate(d[f.key]) : d[f.key])).join('');
 
-  // After-job report: the form's own questions (septic conditions), payment if the driver collects it, notes.
-  const fields = reportFields(job.job_type).filter((f) =>
-    !['payment_collected', 'amount_collected'].includes(f.key) || job.collect_payment);
+  // After-job report: the form's own questions (septic conditions) and notes. Payments are handled by the office.
+  const fields = reportFields(job.job_type);
   const typeReport = t.report.length > 0;
   const r = a.report || {};
   const reportForm = cancelled ? '' : `
-    <form method="post" action="/j/${esc(a.token)}/report" id="report" class="report ${typeReport || job.collect_payment ? '' : 'compact'}">
-      <h2>${esc(t.reportTitle || (job.collect_payment ? 'Payment & notes' : 'Notes for the office'))}</h2>
+    <form method="post" action="/j/${esc(a.token)}/report" id="report" class="report ${typeReport ? '' : 'compact'}">
+      <h2>${esc(t.reportTitle || 'Notes for the office')}</h2>
       ${saved ? '<div class="banner saved">✔ Saved — thanks!</div>' : ''}
-      ${job.collect_payment ? `<div class="collect">Collect: <b>${esc(job.quoted_price || 'see office')}</b>${job.payment_method ? ` (${esc(job.payment_method)})` : ''}</div>` : ''}
       ${fields.map((f) => fieldInput(f, r[f.key])).join('')}
       <button class="btn primary" type="submit">Save${typeReport ? ' report' : ''}</button>
     </form>`;

@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { openDb } = require('../src/db');
 const { createDispatch } = require('../src/dispatch');
+const FORMS = require('../public/forms');
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
 
@@ -38,7 +39,7 @@ test('lineup: one text per driver listing all their jobs, and it counts as texti
   assert.match(toDave, /2\) 1:00 PM - Aggregate #1002/);
   assert.match(toDave, /Reply OK to confirm all/);
   const toRon = sent.find((m) => m.to === '+14035550102').body;
-  assert.match(toRon, /Your job for Wed Nov 11:\nADAMS BROS - Aggregate Work Order #1001/);
+  assert.match(toRon, /Your job for Wed Nov 11:\nADAMS BROS - Aggregates Work Order #1001/);
   assert.ok(d.getJob(1001).assignments.every((a) => a.status === 'sent'));
   // One OK confirms both of Dave's jobs.
   assert.match(d.handleInbound('+14035550101', 'ok').reply, /Jobs #1001 .*#1002/);
@@ -108,27 +109,27 @@ test('septic job: office details, driver report, and the customer/billing fields
   const { job } = d.saveJob({
     job_type: 'septic', scheduled_date: '2026-11-10', to_location: '12 Bay St', municipality: 'McDougall',
     customer: 'J. Larson', customer_phone: '705-555-0199', customer_email: 'j@example.com', billing_address: 'PO Box 1',
-    quoted_price: '$350', payment_method: 'Cash', collect_payment: true, paper_wo: '9440',
+    quoted_price: '$350', payment_method: 'Cash', paper_wo: '9440',
     details: { tank_type: 'Holding', tank_size: '1000 gal', lids_uncovered: 'At grade', bogus: 'dropped' },
     assignments: [{ driver_id: dave.id }],
   });
   assert.deepEqual(job.details, { lids_uncovered: 'At grade', tank_type: 'Holding', tank_size: '1000 gal' });
   assert.equal(job.customer_phone, '+17055550199');
-  assert.equal(job.collect_payment, 1);
   assert.throws(() => d.saveJob({ ...job, id: job.id, details: { tank_type: 'Swimming pool' } }), /Type of tank/);
 
   await d.sendJob(job.id);
-  // Office-only changes (billing address) don't ask drivers to re-confirm; a tank detail change does.
-  d.saveJob({ ...job, id: job.id, billing_address: 'PO Box 2', assignments: [{ driver_id: dave.id }] });
+  // Office-only changes (billing address, price) don't ask drivers to re-confirm; a tank detail change does.
+  d.saveJob({ ...job, id: job.id, billing_address: 'PO Box 2', quoted_price: '$375', assignments: [{ driver_id: dave.id }] });
   assert.equal(d.getJob(job.id).assignments[0].needs_resend, 0);
   d.saveJob({ ...job, id: job.id, details: { ...job.details, hose_length: '200 ft' }, assignments: [{ driver_id: dave.id }] });
   assert.equal(d.getJob(job.id).assignments[0].needs_resend, 1);
 
   const token = job.assignments[0].token;
   const a = d.saveReport(token, { outlet_baffle: 'Recommend replacement', liquid_level: 'High', lids_broken: 'No',
-    payment_collected: 'Cash', amount_collected: '$350', comments: 'Baffle cracked', junk: 'x' });
+    payment_collected: 'Cash', comments: 'Baffle cracked', junk: 'x' });
+  // Payment fields are not part of the driver's report (the office collects payments).
   assert.deepEqual(a.report, { outlet_baffle: 'Recommend replacement', liquid_level: 'High', lids_broken: 'No',
-    comments: 'Baffle cracked', payment_collected: 'Cash', amount_collected: '$350' });
+    comments: 'Baffle cracked' });
   assert.equal(a.status, 'acknowledged');
   assert.throws(() => d.saveReport(token, { liquid_level: 'Full' }), /Liquid level/);
 });
@@ -143,4 +144,17 @@ test('book the pick-up for a portable toilet', () => {
   assert.equal(pickup.details.toilet1_qty, '2');
   assert.equal(pickup.assignments.length, 0);
   assert.match(pickup.notes, /Pick-up for job #1001/);
+});
+
+test('aggregates work order: two aggregate lines, yards, truck type', () => {
+  const { d, dave } = setup();
+  const { job } = d.saveJob({ job_type: 'haul', scheduled_date: '2026-11-10', material: 'Sand fill', loads_planned: 1, quantity: '',
+    details: { truck: 'Tandem', aggregate2_type: '2" minus', aggregate2_loads: '20', aggregate2_truck: 'Triaxle' },
+    assignments: [{ driver_id: dave.id }] });
+  assert.equal(job.unit, '');
+  assert.equal(FORMS.totalLoads(job), 21);
+  assert.equal(FORMS.summary(job), 'Sand fill - 1 load - Tandem + 2" minus - 20 loads - Triaxle');
+  const yards = d.saveJob({ job_type: 'haul', scheduled_date: '2026-11-10', material: 'Topsoil', quantity: '30', unit: 'tonnes' }).job;
+  assert.equal(yards.unit, 'yards', 'aggregates are always in yards');
+  assert.throws(() => d.saveJob({ ...job, id: job.id, details: { truck: 'Pickup' } }), /Circle one/);
 });
