@@ -33,12 +33,12 @@ function webhookUrl() {
 async function checkSetup() {
   const { accountSid, authToken, fromNumber } = config.twilio;
   const out = { configured: config.smsEnabled, webhook: webhookUrl(), problems: [], warnings: [] };
-  if (!accountSid || !authToken || !fromNumber) {
-    out.problems.push('Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER to .env, then restart.');
+  if (!accountSid || !authToken) {
+    out.problems.push('Add TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN (and TWILIO_FROM_NUMBER) to .env, then restart.');
     return out;
   }
   if (!/^AC[0-9a-f]{32}$/i.test(accountSid)) out.problems.push('TWILIO_ACCOUNT_SID should start with "AC" (copy it from the Twilio console home page).');
-  if (!/^\+1\d{10}$/.test(fromNumber)) out.problems.push('TWILIO_FROM_NUMBER should look like +17055551234.');
+  if (fromNumber && !/^\+1\d{10}$/.test(fromNumber)) out.problems.push('TWILIO_FROM_NUMBER should look like +17055551234.');
   if (/localhost|127\.0\.0\.1/.test(config.publicUrl)) {
     out.warnings.push('PUBLIC_URL is localhost. Texts will send, but driver replies (OK / DONE / photos) and job links only work once the app is online at a public address.');
   } else if (!config.publicUrl.startsWith('https://')) {
@@ -56,6 +56,22 @@ async function checkSetup() {
     out.problems.push(err.status === 401
       ? 'Twilio rejected the Account SID / Auth Token. Copy both again from the console home page.'
       : `Couldn't reach Twilio: ${err.message}`);
+    return out;
+  }
+
+  if (!fromNumber) {
+    // Logged in fine but no number chosen yet: list what the account has.
+    try {
+      const all = await twilioRequest('/IncomingPhoneNumbers.json?PageSize=20');
+      out.availableNumbers = (all.incoming_phone_numbers || []).map((n) => ({
+        phone: n.phone_number, sms: Boolean(n.capabilities?.sms), mms: Boolean(n.capabilities?.mms),
+      }));
+    } catch (err) {
+      out.availableNumbers = [];
+    }
+    out.problems.push(out.availableNumbers.length
+      ? `Set TWILIO_FROM_NUMBER to one of this account's numbers: ${out.availableNumbers.map((n) => n.phone).join(', ')}.`
+      : 'This account has no phone number yet. In the Twilio console, get a number (trial accounts can claim one free), then set TWILIO_FROM_NUMBER.');
     return out;
   }
 
