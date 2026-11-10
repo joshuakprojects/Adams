@@ -351,6 +351,32 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     if (!backups) return res.status(400).json({ error: 'Backups are off' });
     res.json(await backups.run({ reason: 'by hand' }));
   }));
+  // Restore (owner only): a stored copy, or an uploaded "Download a copy" zip. A safety copy is made first.
+  api.get('/backups/stored', needOwner, json(async () => (backups ? backups.stored() : [])));
+  const afterRestore = async (req, out) => {
+    // Logins came back from the backup: everyone signs in again.
+    console.log(`Restored by ${req.user.email}: backup made ${out.created_at}, safety copy ${out.safety || '(none)'}`);
+    return { ok: true, ...out };
+  };
+  api.post('/backups/restore', needOwner, json(async (req) => {
+    if (!backups) throw new ValidationError('Backups are off');
+    if (req.body?.confirm !== 'RESTORE') throw new ValidationError('Type RESTORE to confirm');
+    return afterRestore(req, await backups.restoreNow({ target: req.body.target, name: req.body.name }));
+  }));
+  api.post('/backups/restore-upload', needOwner, h(async (req, res) => {
+    if (!backups) throw new ValidationError('Backups are off');
+    if (req.query.confirm !== 'RESTORE') throw new ValidationError('Type RESTORE to confirm');
+    const os = require('node:os');
+    const fs = require('node:fs');
+    const { pipeline } = require('node:stream/promises');
+    const file = path.join(os.tmpdir(), `restore-${Date.now()}-${process.pid}.zip`);
+    try {
+      await pipeline(req, fs.createWriteStream(file)); // streamed to disk: the zip can be large
+      res.json(await afterRestore(req, await backups.restoreNow({ zipFile: file })));
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  }));
   // Download a copy: a .zip with the database and every ticket photo in a folder per work order (?only=database: just the database).
   api.get('/backups/download', need('admin'), h(async (req, res) => {
     const b = backups || createBackups(db, { storage: null, server: null, today: dispatch.today,

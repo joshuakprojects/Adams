@@ -161,8 +161,25 @@
         <a class="link small" href="/api/backups/download?only=database">database only</a>
       </div>
       <p class="muted small">For the office hard drive: press <b>Download a copy</b> each evening and move the .zip onto the drive.
-        It holds everything — <code>npm run restore -- the-file.zip</code> puts it all back, photos included.</p>
+        It holds everything; <b>Restore</b> (below, owner only) puts it all back, photos included.</p>
       <table class="table compact"><thead><tr><th>When</th><th>Where</th><th>Copy</th><th>Size</th><th>New photos</th><th></th></tr></thead><tbody id="backup-rows"></tbody></table>
+      <div class="restore-box" data-need="owner">
+        <h3>Restore</h3>
+        <p class="small">Puts the whole app back the way it was at a backup: work orders, customers, drivers, prices, logins and photos.
+          <b>Everything entered since that backup is replaced.</b> A safety copy of how things are right now is saved first
+          (it shows in this list as "safety"), so a restore can be undone. Everyone has to log in again afterwards.
+          Only you can see this.</p>
+        <div class="inline-form">
+          <select id="restore-pick" aria-label="Backup to restore"><option value="">Pick a backup…</option></select>
+          <button class="btn danger" type="button" id="restore-go">Restore this backup…</button>
+        </div>
+        <div class="inline-form">
+          <label class="small">Or a downloaded copy (.zip, e.g. from the office hard drive):
+            <input type="file" id="restore-file" accept=".zip,application/zip"></label>
+          <button class="btn danger" type="button" id="restore-upload">Restore from this file…</button>
+        </div>
+        <p class="small" id="restore-status"></p>
+      </div>
     </div>
     <div class="two-col">
       <div class="panel">

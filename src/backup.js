@@ -13,7 +13,9 @@ const config = require('./config');
 const FORMAT = 'adams-dispatch-backup';
 // Restore order: parents before children (foreign keys).
 const TABLES = ['users', 'trucks', 'drivers', 'customers', 'jobs', 'assignments', 'messages', 'tickets',
-  'lineup_sends', 'settings', 'requests', 'job_history'];
+  'lineup_sends', 'settings', 'requests', 'job_history', 'price_items', 'price_changes', 'job_lines', 'faq', 'qbo_sync'];
+// Tables without an "id" counter (PostgreSQL counters are reset after a restore).
+const NO_ID = new Set(['settings', 'qbo_sync']);
 const KEEP_DAYS = 30;
 const DB_PREFIX = 'db/';
 const PHOTO_PREFIX = 'photos/';
@@ -145,13 +147,15 @@ async function restore(db, backup, { photoFor = null, force = false } = {}) {
   }
   const counts = {};
   let photos = 0;
+  // Tables in this backup are replaced. (Older backups don't have the newer tables, such as the price book:
+  // those are left as they are rather than emptied.)
+  const inBackup = TABLES.filter((n) => Array.isArray(backup.tables[n]));
   await db.tx(async (t) => {
-    if (force) for (const name of [...TABLES].reverse()) await t.run(`DELETE FROM ${name}`);
-    // The login the app made at start-up and default settings would clash with the backed-up ones.
+    if (force) for (const name of [...TABLES].reverse()) if (inBackup.includes(name)) await t.run(`DELETE FROM ${name}`);
+    // What the app made by itself at start-up (the first login, default settings, the price book) would clash.
     await t.run('DELETE FROM sessions');
-    await t.run('DELETE FROM users');
-    await t.run('DELETE FROM settings');
-    for (const name of TABLES) {
+    for (const name of [...inBackup].reverse()) await t.run(`DELETE FROM ${name}`);
+    for (const name of inBackup) {
       const rows = backup.tables[name] || [];
       for (const row of rows) {
         const cols = Object.keys(row);
@@ -168,7 +172,7 @@ async function restore(db, backup, { photoFor = null, force = false } = {}) {
     }
   }
   if (db.kind === 'pg') {
-    for (const name of TABLES.filter((n) => n !== 'settings')) {
+    for (const name of inBackup.filter((n) => !NO_ID.has(n))) {
       await db.get(`SELECT setval(pg_get_serial_sequence('${name}', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM ${name}), 0), 1))`);
     }
   }
@@ -352,7 +356,71 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
     return { photos, bytes: z.size };
   }
 
-  return { run, runScheduled, prune, status, download, downloadZip, storage, server, targets };
+  // ---------- restore (Setup → Backups, owner only) ----------
+  const SAFETY_PREFIX = 'safety/';
+  /** Copies that can be restored, newest first: [{ target, label, name, kind, stamp }]. */
+  async function stored() {
+    const out = [];
+    for (const t of targets) {
+      let names = [];
+      try { names = [...await t.list(DB_PREFIX), ...await t.list(HOURLY_PREFIX), ...await t.list(SAFETY_PREFIX)]; } catch { continue; }
+      for (const name of names) {
+        const m = /(\d{4}-\d{2}-\d{2})(?:-(\d{2})(\d{2})?(\d{2})?)?(?:-\d+)?\.json\.gz$/.exec(name);
+        if (!m) continue;
+        const kind = name.startsWith(HOURLY_PREFIX) ? 'hourly' : name.startsWith(SAFETY_PREFIX) ? 'safety' : 'nightly';
+        // Nightly copies (and "Back up now") are one per day: shown by date. Hourly and safety copies by time.
+        const stamp = kind === 'nightly' ? m[1] : `${m[1]} ${m[2] || '00'}:${m[3] || '00'}${m[4] ? ':' + m[4] : ''}`;
+        out.push({ target: t.kind, label: t.label, name, kind, stamp, sort: kind === 'nightly' ? `${m[1]} 02:00` : stamp });
+      }
+    }
+    return out.sort((a, b) => b.sort.localeCompare(a.sort) || b.name.localeCompare(a.name)).slice(0, 200);
+  }
+
+  let restoring = false;
+  /** A copy of things as they are right now, before a restore replaces them. */
+  async function safetyCopy() {
+    const t = targets[0];
+    if (!t) return null;
+    const hms = nowHm().replace(':', '') + String(new Date().getSeconds()).padStart(2, '0');
+    let name = `${SAFETY_PREFIX}${today()}-${hms}.json.gz`;
+    for (let n = 2; await t.exists(name).catch(() => false); n++) name = `${SAFETY_PREFIX}${today()}-${hms}-${n}.json.gz`; // never overwrite one
+    const r = await runOn(t, name, gzipJson(await dump(db)));
+    if (!r.ok) throw new Error(`Couldn't make the safety copy first, so nothing was restored: ${r.error}`);
+    return name;
+  }
+
+  /** Replace the live data with a stored copy (or a "Download a copy" zip): a safety copy is made first. */
+  async function restoreNow({ target: kind, name, zipFile } = {}) {
+    if (restoring) throw Object.assign(new Error('A restore is already running'), { status: 400 });
+    restoring = true;
+    try {
+      let backup;
+      let photoFor;
+      let zip = null;
+      if (zipFile) {
+        zip = loadZipBackup(zipFile);
+        backup = zip.backup;
+        photoFor = zip.photoFor;
+      } else {
+        const t = targets.find((x) => x.kind === kind);
+        if (!t) throw Object.assign(new Error('That backup place is not set up'), { status: 400 });
+        if (!/^(db|hourly|safety)\/[\w-]+\.json\.gz$/.test(String(name))) throw Object.assign(new Error('Pick a backup from the list'), { status: 400 });
+        backup = gunzipJson(await t.get(name));
+        photoFor = async (id) => ((await t.exists(PHOTO_PREFIX + id)) ? t.get(PHOTO_PREFIX + id) : null);
+      }
+      try {
+        const safety = await safetyCopy();
+        const out = await restore(db, backup, { photoFor, force: true });
+        return { ...out, safety, created_at: backup.created_at };
+      } finally {
+        zip?.close();
+      }
+    } finally {
+      restoring = false;
+    }
+  }
+
+  return { run, runScheduled, prune, status, download, downloadZip, stored, restoreNow, storage, server, targets };
 }
 
 module.exports = { createBackups, dump, restore, gzipJson, gunzipJson, localStorageAt, replitStorage, chooseStorage, loadZipBackup, TABLES, DB_PREFIX, PHOTO_PREFIX, HOURLY_PREFIX };
