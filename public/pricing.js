@@ -219,10 +219,10 @@
     return { lines, notes };
   }
 
-  /** Recalculated lines replace the automatic ones; lines the office added or changed by hand stay. */
-  function merge(current, auto) {
+  /** Recalculated lines replace the automatic ones; lines the office added, changed or removed by hand stay that way. */
+  function merge(current, auto, removedSlots = []) {
     const manual = (current || []).filter((l) => !Number(l.auto));
-    const taken = new Set(manual.map((l) => l.slot).filter(Boolean));
+    const taken = new Set([...manual.map((l) => l.slot).filter(Boolean), ...removedSlots]);
     return [...auto.filter((l) => !taken.has(l.slot)), ...manual];
   }
 

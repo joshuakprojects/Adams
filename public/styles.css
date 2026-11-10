@@ -482,3 +482,74 @@ tr.clickable:hover td, tr.clickable:focus td { background: #FFFBEA; }
 #backup-panel .row-actions { margin-top: 8px; }
 .map-alert { background: #FFF6CC; border: 1px solid #E8C200; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; line-height: 1.5; }
 .map-place { margin: 0 6px 8px 26px; }
+
+/* Roles: hide what this login can't use */
+body:not(.can-dispatch) [data-need="dispatch"], body:not(.can-admin) [data-need="admin"], body:not(.is-owner) [data-need="owner"] { display: none !important; }
+body.can-dispatch [data-hide-for="dispatch"] { display: none !important; }
+
+/* Prices tab */
+.prices-layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; margin-bottom: 16px; }
+.quote-panel { flex: 1 1 380px; max-width: 520px; position: sticky; top: 12px; }
+.quote-panel h3, .price-cat h3, .faq-topic { font-family: var(--head); margin: 0 0 10px; }
+.price-lists { flex: 999 1 560px; min-width: 0; }
+.quote-form, .q-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.quote-form .wide, .q-fields .wide { grid-column: 1 / -1; }
+.quote-form label, .q-fields label, .price-opts label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: #444; }
+.quote-form input, .quote-form select, .price-opts input, .price-opts select { padding: 8px 10px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; font-size: 14px; }
+.q-fields .check-field, .price-opts .check-field { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+.q-fields .cl { font-size: 13px; font-weight: 600; color: #444; display: block; margin-bottom: 4px; }
+.price-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+.price-head .search-input { flex: 1 1 260px; }
+.price-cat { margin-top: 18px; }
+.cat-note { margin: 0 0 8px; max-width: 900px; }
+.price-table { font-size: 14px; }
+.price-table td, .price-table th { padding: 6px 8px; }
+.num { text-align: right; white-space: nowrap; }
+.price-in { width: 92px; text-align: right; padding: 5px 7px; border: 1px solid #c9c9c2; border-radius: 6px; font: inherit; font-size: 14px; }
+.price-in.changed { background: #FFF6CC; border-color: #E8C200; }
+tr.inactive td { opacity: .5; }
+.price-save { position: sticky; bottom: 0; background: #fff; padding: 10px 0; border-top: 1px solid var(--line); justify-content: flex-end; align-items: center; }
+
+/* Price panel (job form + calculator) */
+.dist-box { background: #F6F6F1; border-radius: 10px; padding: 10px 12px; margin: 8px 0 10px; font-size: 14px; }
+.dist-acts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-size: 13px; }
+.dist-error { color: #B3261E; margin-top: 4px; font-size: 13px; }
+.price-opts { margin-bottom: 8px; }
+.lines-table { font-size: 14px; margin-top: 6px; }
+.lines-table td { vertical-align: middle; padding: 6px 6px; }
+.lines-table input { width: 84px; text-align: right; padding: 5px 7px; border: 1px solid #c9c9c2; border-radius: 6px; font: inherit; font-size: 14px; }
+.lines-table tr.manual td:first-child { border-left: 3px solid #E8C200; }
+.badge-edit { font-size: 11px; background: #FFF6CC; border-radius: 4px; padding: 1px 5px; color: #6b5a00; }
+.need-price { color: #B3261E; font-weight: 600; }
+.totals { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; margin: 8px 4px; font-size: 14px; }
+.totals div { display: flex; gap: 16px; min-width: 240px; justify-content: space-between; }
+.totals .grand { font-size: 18px; border-top: 2px solid #111; padding-top: 4px; margin-top: 2px; }
+.totals .deposit { color: #6b5a00; }
+.totals .warn { color: #B3261E; font-weight: 600; }
+.price-notes { margin: 6px 0; padding: 8px 12px 8px 28px; background: #FFF6CC; border-radius: 8px; font-size: 13px; }
+.add-line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0 12px; }
+.add-line input { flex: 1 1 260px; padding: 8px 10px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; font-size: 14px; }
+.quote-acts { align-items: center; margin-top: 8px; }
+.pin-map { height: min(60vh, 520px); border-radius: 10px; overflow: hidden; background: #e9e9e4; }
+#pin-dialog { width: min(900px, 96vw); }
+
+/* Customer questions */
+.faq-list { display: flex; flex-direction: column; gap: 10px; max-width: 900px; }
+.faq-topic { margin-top: 14px; }
+.faq-item .faq-q { font-weight: 700; font-size: 16px; }
+.faq-item .faq-a { white-space: pre-wrap; margin-top: 6px; line-height: 1.5; }
+.faq-acts { margin-top: 8px; align-items: center; justify-content: flex-end; }
+.faq-edit { display: flex; flex-direction: column; gap: 10px; }
+.faq-edit label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: #444; }
+.faq-edit input, .faq-edit textarea { padding: 8px 10px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; font-size: 14px; }
+#user-rows input, #user-rows select { padding: 5px 8px; border: 1px solid #c9c9c2; border-radius: 6px; font: inherit; font-size: 14px; }
+#users-panel .inline-form { margin-top: 10px; flex-wrap: wrap; }
+@media (max-width: 700px) { .quote-form, .q-fields { grid-template-columns: 1fr; } .quote-panel { position: static; } }
+.lines-table td:nth-child(2), .lines-table th:nth-child(2) { text-align: left; }
+.lines-table td:nth-child(2) .small { display: inline-block; min-width: 70px; }
+.quote-form > *, .q-fields > *, .q-fields .grid > * { min-width: 0; }
+.quote-form input, .quote-form select { width: 100%; box-sizing: border-box; }
+.q-fields .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.q-fields .grid .check-field { grid-column: 1 / -1; }
+.quote-form input[type="checkbox"], .quote-form input[type="radio"] { width: auto; }
+.q-fields .check-field { justify-content: flex-start; }

@@ -21,9 +21,11 @@
       <button data-tab="board" class="active">Board</button>
       <button data-tab="requests">Requests <span id="request-count" class="count hidden"></span></button>
       <button data-tab="customers">Customers <span id="due-count" class="count hidden"></span></button>
-      <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
-      <button data-tab="records">Records</button>
-      <button data-tab="people">Setup</button>
+      <button data-tab="prices">Prices</button>
+      <button data-tab="faq">Questions</button>
+      <button data-tab="messages" data-need="dispatch">Texts <span id="alert-count" class="count hidden"></span></button>
+      <button data-tab="records" data-need="dispatch">Records</button>
+      <button data-tab="people" data-need="admin">Setup</button>
     </nav>
     <div class="spacer"></div>
     <span id="test-mode" class="test-mode hidden" title="Twilio isn't set up yet. Texts are printed in the server log, not sent.">TEST MODE – texts not sent</span>
@@ -48,7 +50,7 @@
         <button data-layout="map" aria-pressed="false">Map</button>
       </div>
       <span id="lineup-status" class="muted small"></span>
-      <button class="btn outline" id="send-lineup" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
+      <button class="btn outline" id="send-lineup" data-need="dispatch" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
       <button class="btn primary big" id="new-job">+ New job</button>
     </div>
     <div id="board-filters">
@@ -76,6 +78,20 @@
 
   <!-- DRIVERS & TRUCKS -->
   <section id="tab-people" class="tab hidden">
+    <div class="panel settings" data-need="owner" id="users-panel">
+      <h2>Logins</h2>
+      <p class="muted small"><b>Office</b>: work orders (without texting drivers), customers, prices and questions.
+        <b>Dispatcher</b>: also assigns and texts drivers, Texts and Records. <b>Admin</b>: everything, including Setup and changing prices.
+        Only you can see this panel.</p>
+      <table class="table compact"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody id="user-rows"></tbody></table>
+      <form id="user-form" class="inline-form" autocomplete="off">
+        <input name="name" placeholder="Name" required>
+        <input name="email" type="email" placeholder="Email (their login)" required>
+        <select name="role"><option value="office">Office</option><option value="dispatcher">Dispatcher</option><option value="admin">Admin</option></select>
+        <input name="password" type="text" placeholder="Starting password (8+ characters)" minlength="8" required autocomplete="new-password">
+        <button class="btn primary" type="submit">Add login</button>
+      </form>
+    </div>
     <div class="panel settings" id="sms-panel">
       <h2>Texting (Twilio)</h2>
       <div id="sms-status" class="muted">Checking…</div>
@@ -181,6 +197,79 @@
       <div class="panel cust-list"><table class="table"><thead id="cust-head"></thead><tbody id="cust-rows"></tbody></table></div>
       <div class="panel cust-detail hidden" id="cust-detail"></div>
     </div>
+  </section>
+
+  <!-- PRICES -->
+  <section id="tab-prices" class="tab hidden">
+    <div class="toolbar">
+      <h2>Prices</h2>
+      <span class="muted small" id="price-who"></span>
+    </div>
+    <div class="prices-layout">
+      <div class="panel quote-panel" id="quote-panel">
+        <h3>Price a job</h3>
+        <div class="segmented small-seg" id="q-type">
+          <label><input type="radio" name="qt" value="haul" checked><span>🪨 Aggregate</span></label>
+          <label><input type="radio" name="qt" value="bin"><span>🗑️ Bin</span></label>
+          <label><input type="radio" name="qt" value="septic"><span>💧 Septic</span></label>
+          <label><input type="radio" name="qt" value="toilet"><span>🚻 Toilet</span></label>
+        </div>
+        <form id="quote-form" class="quote-form" autocomplete="off" onsubmit="return false">
+          <label class="wide">Address <input name="to_location" placeholder="Street address, e.g. 45 Bay Rd" list="dl-locations"></label>
+          <label>Municipality <input name="municipality" list="dl-municipalities"></label>
+          <div class="wide dist-box" id="q-dist"></div>
+          <div class="wide grid q-fields" id="q-fields"></div>
+        </form>
+        <div id="q-result"></div>
+      </div>
+      <div class="panel price-lists">
+        <div class="price-head">
+          <input id="price-search" class="search-input" placeholder="Search prices… e.g. topsoil, 30 km, baffle" aria-label="Search prices">
+          <div class="filter-row" id="price-cats"></div>
+        </div>
+        <div id="price-tables"></div>
+        <div class="row-actions price-save hidden" id="price-save-bar">
+          <span id="price-dirty" class="muted"></span>
+          <button class="btn" type="button" id="price-undo">Undo</button>
+          <button class="btn primary" type="button" id="price-save">Save price changes</button>
+        </div>
+      </div>
+    </div>
+    <div class="two-col" data-need="admin">
+      <div class="panel settings">
+        <h2>Pricing settings</h2>
+        <form id="price-settings" class="cust-form">
+          <label>Starting address for delivery distances <input name="start_address" required></label>
+          <label>HST % <input name="hst_rate" type="number" step="0.01" min="0" max="30" style="max-width:120px"></label>
+          <label>Lagoon member municipalities (one per line) <textarea name="members" rows="4"></textarea></label>
+          <div class="row-actions"><button class="btn primary" type="submit">Save settings</button></div>
+        </form>
+        <h3>Add a price</h3>
+        <form id="price-add" class="inline-form">
+          <select name="category" id="price-add-cat"></select>
+          <input name="name" placeholder="Name" required>
+          <input name="unit" placeholder="Unit (each, hour…)" style="max-width:140px">
+          <input name="price" placeholder="$" style="max-width:100px">
+          <button class="btn" type="submit">Add</button>
+        </form>
+      </div>
+      <div class="panel settings">
+        <h2>Price changes</h2>
+        <ol class="history-list" id="price-changes"></ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- CUSTOMER QUESTIONS -->
+  <section id="tab-faq" class="tab hidden">
+    <div class="toolbar">
+      <h2>Customer questions</h2>
+      <input id="faq-search" class="search-input" placeholder="Search questions and answers…" aria-label="Search questions">
+      <div class="spacer"></div>
+      <button class="btn primary" id="faq-new" data-need="admin">+ Add a question</button>
+    </div>
+    <p class="muted small">The standard answers to give customers, so everyone answers the same way.</p>
+    <div id="faq-list" class="faq-list"></div>
   </section>
 
   <section id="tab-records" class="tab hidden">
@@ -298,27 +387,53 @@
 
       <fieldset class="sec">
         <legend>Price &amp; payment</legend>
+        <p class="muted small office-note">Office only — drivers never see prices.</p>
+        <div class="dist-box" id="f-dist"></div>
+        <input type="hidden" name="distance_km"><input type="hidden" name="distance_from"><input type="hidden" name="distance_mode">
+        <input type="hidden" name="in_town"><input type="hidden" name="pin_lat"><input type="hidden" name="pin_lng">
+        <input type="hidden" name="quoted_price">
+        <div class="grid price-opts" id="f-price-opts"></div>
+        <div id="f-lines"></div>
         <div class="grid">
-          <label>Quoted price <input name="quoted_price" placeholder="$"></label>
           <label>Payment method <select name="payment_method"></select></label>
-          <p class="muted small office-note">Office only — drivers never see these.</p>
           <label>Invoice # <input name="invoice_number" placeholder="once billed"></label>
           <label>Amount billed <input name="amount_billed" placeholder="$ incl. HST"></label>
         </div>
       </fieldset>
 
-      <h3>Drivers</h3>
-      <p class="muted small">Tick everyone on this job. Pick the truck each one is taking.</p>
-      <div id="assign-list" class="assign-list"></div>
+      <div data-need="dispatch">
+        <h3>Drivers</h3>
+        <p class="muted small">Tick everyone on this job. Pick the truck each one is taking.</p>
+        <div id="assign-list" class="assign-list"></div>
+      </div>
+      <p class="muted small" data-hide-for="dispatch">Dispatch will assign the drivers and text them.</p>
 
       <div id="job-form-error" class="error"></div>
       <div class="dialog-foot">
         <button type="button" class="btn" data-close>Close</button>
         <div class="spacer"></div>
         <button type="submit" class="btn" value="save">Save only</button>
-        <button type="submit" class="btn primary big" value="send">Save &amp; text drivers</button>
+        <button type="submit" class="btn primary big" value="send" data-need="dispatch">Save &amp; text drivers</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- DROP A PIN (lots with no address yet) -->
+  <dialog id="pin-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2>Drop a pin where the job is</h2>
+        <button type="button" class="link" data-close-pin aria-label="Close">✕</button>
+      </div>
+      <p class="muted small" id="pin-help">Click the map where the job is (zoom in with the mouse wheel). The delivery fee uses the driving distance to that spot.</p>
+      <div id="pin-map" class="pin-map"></div>
+      <div class="dialog-foot">
+        <span id="pin-status" class="muted"></span>
+        <div class="spacer"></div>
+        <button type="button" class="btn" data-close-pin>Cancel</button>
+        <button type="button" class="btn primary" id="pin-use" disabled>Use this spot</button>
+      </div>
+    </div>
   </dialog>
 
   <!-- JOB HISTORY -->
@@ -349,9 +464,12 @@
   <datalist id="dl-toilets"></datalist>
   <datalist id="dl-locations"></datalist>
   <datalist id="dl-units"></datalist>
+  <datalist id="dl-prices"></datalist>
 
   <div id="toast" class="toast hidden"></div>
   <script src="/forms.js"></script>
+  <script src="/pricing.js"></script>
   <script src="/app.js"></script>
+  <script src="/pricing-ui.js"></script>
 </body>
 </html>

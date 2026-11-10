@@ -235,6 +235,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     if (src.period === 'month' || src.period === 'week') out.period = src.period;
     if (['yes', 'no', 'auto'].includes(src.member)) out.member = src.member;
     if (['mixed', 'concrete', 'asbestos', 'metal'].includes(src.waste)) out.waste = src.waste;
+    if (Array.isArray(src.removed_slots)) out.removed_slots = src.removed_slots.map((x) => str(x, 60)).filter(Boolean).slice(0, 30);
     for (const k of ['off_schedule', 'pump_chamber_too']) if (src[k]) out[k] = true;
     for (const k of ['tons', 'extra_weeks']) {
       const n = Number(src[k]);
@@ -443,6 +444,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       return id;
     });
 
+    // A pin dropped in the form (a lot with no address yet) puts the job on the map there.
+    if (data.pin_lat !== undefined && data.pin_lat !== '' && validPoint(data.pin_lat, data.pin_lng)) {
+      await setJobLocation(jobId, data.pin_lat, data.pin_lng, { manual: true });
+    }
     await pinFromCustomer(jobId);
     const job = await getJob(jobId);
     if (isNew) {
