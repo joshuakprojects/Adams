@@ -122,6 +122,56 @@ address, municipality, W.O. # or phone.
 - **History:** a job's **More → History** shows who did what and when: office edits (field by field, by login), texts sent,
   driver replies and job-page taps, ticket photos, and completion.
 
+## Logins and roles
+
+Everyone has their own login. Only the owner (`OWNER_EMAIL`, default **josh@adamsbros.ca**) sees **Setup → Logins**, where
+logins are added, changed (name, role, new password) and removed.
+
+| Role | Can |
+|---|---|
+| **Office** | Board (open and save work orders, but not assign or text drivers), Requests, Customers, Prices, Questions |
+| **Dispatcher** | Everything Office can, plus assigning and texting drivers, Texts and Records |
+| **Admin** | Everything, including Setup and changing prices and questions |
+
+The server checks the role on every action, not just what the screen shows. Logins that existed before roles were added
+are Admins. To create the owner login the first time, in the Replit Shell:
+`npm run add-user -- josh@adamsbros.ca "Josh" "a-good-password" admin`
+
+## Prices
+
+The **Prices** tab is the office price sheets (2025 Aggregate, Delivery Fees, 2025 Septic, Roll-off, Toilet & Water).
+Everyone can look prices up; **admins** edit a price in the table and press **Save**. Every change is listed under
+*Price changes*. A work order keeps the price it was booked at, so changing the price book never changes old jobs.
+
+**Price a job** (left side of the Prices tab) works out a quote from the address and a few choices, and
+**Turn into a work order** opens the job form with everything filled in.
+
+In the job form, **Price & payment** prices the work order automatically as it's filled in:
+- **Distance:** the delivery address is looked up and the **driving distance** from the starting point (116 William St,
+  changeable per job or in *Pricing settings*) picks the delivery fee. Inside the Town of Parry Sound boundary = the town price.
+  No address yet? **Drop a pin** on the map. Google not set up? **Type the km**.
+- **Aggregate:** material per tandem/triaxle load (or per yard) + delivery fee per load + $10 per delivery + $10 per triaxle load.
+- **Bins and toilets:** delivery and pick-up are each charged; bin deposits are shown separately. Bin disposal is per ton
+  from the scale ticket.
+- **Septic:** up to 1000 gal flat; larger tanks per gallon; non-members of the lagoon (by municipality) pay the non-member
+  disposal rate. Off-schedule +$100.
+- Lines can be changed or added by hand (from the price book or free text); those are kept when the price is worked out again.
+  **Reset to price book** undoes hand changes. Totals include HST (13%; water is exempt).
+
+### Google keys for distances
+
+Distances are worked out by the server, so they need a **second** Google key (Google doesn't accept the website-restricted
+map key from a server):
+1. Google Cloud console → **APIs & Services → Library**: enable **Geocoding API** and **Routes API**.
+2. **Credentials → Create credentials → API key**. Name it "dispatch server". *Application restrictions*: None.
+   *API restrictions*: Restrict key → tick **Geocoding API** and **Routes API**.
+3. On Replit add it as the secret **`GOOGLE_MAPS_SERVER_KEY`** and republish.
+
+## Customer questions
+
+The **Questions** tab holds the standard answers to customer questions, so everyone answers the same way. Admins add,
+edit and delete them; everyone can search them.
+
 ## Map
 
 The board has a **Map** layout next to Lanes and List: each job is a pin coloured by stage (to text, waiting for OK,
@@ -256,6 +306,11 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `src/customers.js` | Address book and septic pump-out reminders |
 | `src/geo.js` | Map pin lookups cache |
 | `src/backup.js` | Nightly backups and restore (`scripts/restore.js`) |
+| `src/prices.js`, `src/priceSeed.js` | Price book (starting prices copied from the price sheets) |
+| `public/pricing.js` | The pricing rules: works out a work order's price lines (shared by the server and the dashboard) |
+| `src/distance.js` | Driving distance (Google Geocoding + Routes) and the Parry Sound town boundary check |
+| `src/roles.js` | Office / Dispatcher / Admin permissions |
+| `public/pricing-ui.js` | Prices tab, job-form price panel, Questions, Logins |
 | `src/db.js` | Database tables, and the PostgreSQL / SQLite drivers |
 | `src/auth.js` | Office logins and sessions |
 | `public/` | Office dashboard (plain HTML/CSS/JS, no build step) |

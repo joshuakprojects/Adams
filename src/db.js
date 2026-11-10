@@ -202,6 +202,67 @@ CREATE TABLE IF NOT EXISTS backups (
   error TEXT NOT NULL DEFAULT '',
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Price book (from the office price sheets). Admins edit prices; jobs keep the price they were booked at (job_lines).
+-- key: used by the automatic pricing (e.g. delivery.30, agg.a-gravel-3-4.triaxle); grp: groups a material's prices.
+CREATE TABLE IF NOT EXISTS price_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  category TEXT NOT NULL,
+  grp TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL,
+  unit TEXT NOT NULL DEFAULT '',
+  price REAL,
+  taxable INTEGER NOT NULL DEFAULT 1,
+  max_km REAL,
+  notes TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS price_changes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER,
+  item_name TEXT NOT NULL DEFAULT '',
+  change TEXT NOT NULL,
+  actor TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- The priced lines of a work order, with the price at the time it was booked.
+CREATE TABLE IF NOT EXISTS job_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  item_key TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL,
+  qty REAL NOT NULL DEFAULT 1,
+  unit TEXT NOT NULL DEFAULT '',
+  unit_price REAL,
+  taxable INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'charge',
+  auto INTEGER NOT NULL DEFAULT 0,
+  slot TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS job_lines_job ON job_lines(job_id);
+
+-- Standard answers to customer questions, kept by admins, read by everyone.
+CREATE TABLE IF NOT EXISTS faq (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL DEFAULT '',
+  topic TEXT NOT NULL DEFAULT '',
+  updated_by TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Driving distances looked up with Google (kept up to 30 days).
+CREATE TABLE IF NOT EXISTS distances (
+  route_key TEXT PRIMARY KEY,
+  meters INTEGER NOT NULL,
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 // Columns added after the first version. Added to existing databases on start-up.
@@ -227,13 +288,27 @@ const ADDED_COLUMNS = {
     amount_billed: "TEXT NOT NULL DEFAULT ''",
     lat: 'REAL',
     lng: 'REAL',
+    // Pricing: driving distance used for the delivery fee, and the price-panel choices (weekly/monthly, off-schedule…).
+    distance_km: 'REAL',
+    distance_from: "TEXT NOT NULL DEFAULT ''",
+    distance_mode: "TEXT NOT NULL DEFAULT ''",
+    in_town: 'INTEGER',
+    price_options: "TEXT NOT NULL DEFAULT '{}'",
     // Type-specific form fields (bin service, septic tank details, toilet types…) as JSON.
     details: "TEXT NOT NULL DEFAULT '{}'",
+  },
+  users: {
+    // office: prices, questions, customers, work orders (no texting) · dispatcher: + texting drivers · admin: everything
+    role: "TEXT NOT NULL DEFAULT 'admin'",
+    active: 'INTEGER NOT NULL DEFAULT 1',
   },
   assignments: {
     // What the driver filled in after the job (septic conditions, payment collected, notes) as JSON.
     report: "TEXT NOT NULL DEFAULT '{}'",
     report_at: 'TEXT',
+  },
+  geocodes: {
+    municipality: "TEXT NOT NULL DEFAULT ''",
   },
   tickets: {
     // The photo itself. Older rows may have only a file in UPLOAD_DIR.

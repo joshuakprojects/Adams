@@ -86,6 +86,9 @@
     if (tab === 'requests') loadRequests();
     if (tab === 'records') loadRecords();
     if (tab === 'customers') loadCustomers();
+    if (tab === 'prices') window.PRICE_UI?.loadPrices();
+    if (tab === 'faq') window.PRICE_UI?.loadFaq();
+    if (tab === 'people' && state.can?.owner) window.PRICE_UI?.loadUsers();
     if (tab === 'board') loadBoard();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -549,7 +552,7 @@
         <span class="name">${esc(a.driver_name)}</span>
         <span class="truck">${esc(a.truck_unit || '')}</span>
         ${loads}${chip}
-        ${job.status === 'cancelled' ? '' : `<details><summary aria-label="Driver actions">⋯</summary><div class="menu">
+        ${job.status === 'cancelled' || !state.can.dispatch ? '' : `<details><summary aria-label="Driver actions">⋯</summary><div class="menu">
           <button data-act="resend" data-job="${job.id}" data-asg="${a.id}">${a.status === 'pending' ? 'Text this driver' : 'Re-send text'}</button>
           <button data-act="mark" data-token="${a.token}" data-mark="ack">Mark confirmed</button>
           <button data-act="mark" data-token="${a.token}" data-mark="load">+1 load</button>
@@ -569,6 +572,10 @@
     else if (job.status === 'open' && active.length) primary = ['complete', 'Mark complete'];
     else if (job.status === 'complete') primary = ['print', 'Print'];
     else primary = ['edit', 'Assign driver'];
+    // Office logins don't assign, text or close jobs: they open the work order.
+    const dispatchActs = ['reopen', 'move-today', 'send', 'resend-unconfirmed', 'complete', 'cancel', 'delete'];
+    if (!state.can.dispatch && dispatchActs.includes(primary[0])) primary = ['edit', 'Open work order'];
+    if (!state.can.dispatch && primary[0] === 'edit') primary = ['edit', 'Open work order'];
     const quiet = ['print', 'reopen'].includes(primary[0]) && job.status !== 'cancelled';
     const more = [
       primary[0] !== 'print' && ['print', 'Print work order'],
@@ -580,7 +587,7 @@
       job.status === 'complete' && ['reopen', 'Re-open'],
       job.status !== 'complete' && job.status !== 'cancelled' && (active.some((a) => a.status !== 'pending')
         ? ['cancel', 'Cancel job…', 'danger'] : ['delete', 'Delete', 'danger']),
-    ].filter(Boolean);
+    ].filter(Boolean).filter((m) => state.can.dispatch || !dispatchActs.includes(m[0]));
 
     return `<article class="job t-${job.job_type} ${job.status} ${compact ? 'compact' : ''}">
       <div class="job-head">
@@ -766,8 +773,12 @@
 
   function fillWhatList(type) {
     const t = typeInfo(type);
-    const past = state.suggest?.materialsByType?.[type] || [];
-    $('#dl-what').innerHTML = [...new Set([...past, ...(t.whatSuggestions || [])])].map((v) => `<option value="${esc(v)}">`).join('');
+    // Aggregates and bins: the price book names first, so the price can be worked out.
+    const priced = window.PRICE_UI?.suggestionsFor(type) || [];
+    const past = priced.length ? [] : state.suggest?.materialsByType?.[type] || [];
+    $('#dl-what').innerHTML = [...new Set([...priced, ...past, ...(priced.length ? [] : t.whatSuggestions || [])])].map((v) => `<option value="${esc(v)}">`).join('');
+    const toilets = window.PRICE_UI?.suggestionsFor('toilets') || [];
+    if (toilets.length) $('#dl-toilets').innerHTML = toilets.map((v) => `<option value="${esc(v)}">`).join('');
   }
 
   // Type buttons and payment methods come from forms.js.
@@ -931,6 +942,7 @@
     showCustomerNote(data.customer_id ? await api('/customers/' + data.customer_id).then((r) => r.customer).catch(() => null) : null);
     await computeBusy(data.scheduled_date, data.id);
     applyType(data.job_type, data.details || {});
+    window.PRICE_UI?.openForm(data);
     dialog.showModal();
   }
 
@@ -945,8 +957,9 @@
     e.preventDefault();
     const sendNow = e.submitter?.value === 'send';
     const fd = new FormData(form);
-    const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.')));
+    const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.') && !k.startsWith('po.') && !k.startsWith('ln.')));
     body.details = collectDetails();
+    Object.assign(body, window.PRICE_UI?.collect() || {});
     body.first_thing = form.elements.first_thing.checked;
     body.assignments = [...formAssignments].map(([driver_id, truck_id]) => ({ driver_id, truck_id }));
     body.send_now = sendNow;
@@ -1414,10 +1427,21 @@
     location.href = '/login';
   });
 
+  // Shared with pricing-ui.js (Prices, Questions, Logins and the job form's price panel).
+  window.APP = { api, esc, toast, $, $$, state, form, openJobForm, loadGoogleMaps, fillWhatList, currentType, collectDetails, fmtStamp, prettyPhone, showTab };
+
   (async () => {
     const me = await api('/me');
     state.today = state.date = me.today;
     state.smsEnabled = me.smsEnabled;
+    state.user = me.user;
+    // What this login can do: office / dispatcher / admin (+ owner manages logins).
+    state.can = me.can || { dispatch: true, admin: true };
+    document.body.classList.toggle('can-dispatch', Boolean(state.can.dispatch));
+    document.body.classList.toggle('can-admin', Boolean(state.can.admin));
+    document.body.classList.toggle('is-owner', Boolean(state.can.owner));
+    $('#user-name').title = state.can.role_name || '';
+    if (!state.can.dispatch) $('#job-form button[value=save]').textContent = 'Save work order';
     state.maps = me.maps || {};
     $('#user-name').textContent = me.user.name;
     $('#user-initial').textContent = (me.user.name || '?').trim()[0].toUpperCase();
