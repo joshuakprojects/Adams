@@ -598,3 +598,8 @@ body.month-view #alerts, body.month-view .board-links, body.month-view #send-lin
 .qbo-note { white-space: pre-wrap; background: #F6F6F1; border-radius: 8px; padding: 10px; font-size: 13px; font-family: inherit; }
 #qbo-dialog { width: min(900px, 96vw); }
 .ok-text { color: #1E7A45; }
+
+.backup-targets { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 10px; }
+.backup-target { flex: 1 1 280px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 14px; background: #FAFAF7; }
+.backup-target.good { border-left: 4px solid #1E9E5A; }
+.backup-target.bad { border-left: 4px solid #B3261E; background: #FDF3F2; }
