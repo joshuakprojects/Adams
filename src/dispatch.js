@@ -75,6 +75,9 @@ function reportFields(jobType) {
   ];
 }
 
+/** 'YYYY-MM-DD HH:MM:SS' (UTC, as stored) for n minutes ago. */
+const sqlMinutesAgo = (n) => new Date(Date.now() - n * 60e3).toISOString().slice(0, 19).replace('T', ' ');
+
 /** Sort order for the time of day: first thing, morning, afternoon, then any time. */
 const SLOT_ORDER = (t) => `CASE ${t}time_slot WHEN 'first' THEN 0 WHEN 'am' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END, ${t}scheduled_time`;
 
@@ -126,19 +129,20 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   }
 
   async function saveDriver(data) {
+    const kind = data.kind === 'labourer' ? 'labourer' : 'driver';
     const name = str(data.name, 100);
-    if (!name) throw new ValidationError('Driver name is required');
+    if (!name) throw new ValidationError(`${kind === 'labourer' ? 'Labourer' : 'Driver'} name is required`);
     const phone = sms.normalizePhone(data.phone);
     if (!phone) throw new ValidationError('Enter a valid 10-digit cell number');
-    const truckId = data.default_truck_id ? Number(data.default_truck_id) : null;
+    const truckId = kind === 'driver' && data.default_truck_id ? Number(data.default_truck_id) : null;
     const active = data.active === false || data.active === 0 ? 0 : 1;
     const notes = str(data.notes, 500);
     try {
       if (data.id) {
-        await db.run('UPDATE drivers SET name = ?, phone = ?, default_truck_id = ?, active = ?, notes = ? WHERE id = ?', name, phone, truckId, active, notes, Number(data.id));
+        await db.run('UPDATE drivers SET name = ?, phone = ?, default_truck_id = ?, active = ?, notes = ?, kind = ? WHERE id = ?', name, phone, truckId, active, notes, kind, Number(data.id));
         return await db.get('SELECT * FROM drivers WHERE id = ?', Number(data.id));
       }
-      const r = await db.run('INSERT INTO drivers (name, phone, default_truck_id, active, notes) VALUES (?, ?, ?, ?, ?)', name, phone, truckId, active, notes);
+      const r = await db.run('INSERT INTO drivers (name, phone, default_truck_id, active, notes, kind) VALUES (?, ?, ?, ?, ?, ?)', name, phone, truckId, active, notes, kind);
       return await db.get('SELECT * FROM drivers WHERE id = ?', r.lastInsertRowid);
     } catch (err) {
       if (/UNIQUE|duplicate key/i.test(err.message)) throw new ValidationError('Another driver already has that phone number');
@@ -751,8 +755,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       return { reply: null };
     }
 
-    const { action, jobId } = sms.parseReply(body);
-    const open = await db.all(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing, j.time_slot')}
+    const { action } = sms.parseReply(body);
+    const open = await db.all(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing, j.time_slot, j.customer, j.to_location')}
                     JOIN jobs j ON j.id = a.job_id
                     WHERE a.driver_id = ? AND j.status = 'open' AND a.status IN ('sent','acknowledged','in_progress')
                     ORDER BY j.scheduled_date, ${SLOT_ORDER('j.')}, j.id`, driver.id);
@@ -763,27 +767,50 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       return { reply };
     };
 
-    // The job a driver most likely means: the one they named, else today's job in progress, else today's first.
-    const currentJob = () => {
-      if (jobId) return open.find((a) => a.job_id === jobId) || null;
-      const current = open.filter((a) => a.scheduled_date <= today());
-      return current.find((a) => a.status === 'in_progress') || current[0] || null;
-    };
+    // Which job does the text mean? "WO 1042", "W.O. #1042", "job 1042", "#1042" always count; a plain number only when it
+    // is one of this driver's open jobs (so "1200 gallons" isn't mistaken for a job).
+    const named = sms.jobNumbers(body);
+    const mine = new Set(open.map((a) => a.job_id));
+    const jobId = named.explicit.find((n) => mine.has(n)) ?? named.plain.find((n) => mine.has(n)) ?? named.explicit[0] ?? null;
+    const today_ = today();
+    const current = open.filter((a) => a.scheduled_date <= today_);
+    const working = current.filter((a) => a.status === 'in_progress');
+    // No number: their job in progress, or their only job today. More than one: ask, don't guess.
+    const onlyJob = () => (working.length === 1 ? working[0] : current.length === 1 ? current[0] : null);
+    const named_ = jobId ? open.find((a) => a.job_id === jobId) || null : null;
+    const choices = () => current.slice(0, 4).map((a) => `${a.job_id}${a.customer ? ` (${a.customer})` : ''}`).join(', ');
 
-    // A texted photo is a scale ticket for the current job.
-    if (media.length) {
-      const target = currentJob();
-      for (const m of media) {
-        await saveTicket({ driverId: driver.id, assignment: target, buffer: m.buffer, contentType: m.contentType, source: 'sms' });
+    // A job number on its own (or with words) right after photos we couldn't place, or guessed: put them on that job.
+    if (named_ && !media.length) {
+      const recent = await db.all(`SELECT id, job_id, matched FROM tickets WHERE driver_id = ? AND source = 'sms' AND matched IN ('asked', 'only')
+        AND created_at >= ? ORDER BY id`, driver.id, sqlMinutesAgo(30));
+      const move = recent.filter((tk) => tk.matched === 'asked' || (tk.job_id !== named_.job_id && tk.matched === 'only'));
+      if (move.length) {
+        for (const tk of move) await db.run("UPDATE tickets SET job_id = ?, assignment_id = ?, matched = 'number' WHERE id = ?", named_.job_id, named_.id, tk.id);
+        await logHistory(named_.job_id, `Texted ${move.length === 1 ? 'a ticket photo' : move.length + ' ticket photos'}`, `job number sent after the photo`, driver.name);
+        if (!action) {
+          const what = move.length === 1 ? 'photo' : `${move.length} photos`;
+          return finish(`Thanks ${first} - ${what} added to Job #${named_.job_id}.`, named_.id);
+        }
       }
-      if (target) await logHistory(target.job_id, `Texted ${media.length === 1 ? 'a ticket photo' : media.length + ' ticket photos'}`, '', driver.name);
+    }
+
+    // A texted photo is a scale ticket for the job.
+    if (media.length) {
+      const target = named_ || onlyJob();
+      const how = named_ ? 'number' : target ? 'only' : 'asked';
+      for (const m of media) {
+        await saveTicket({ driverId: driver.id, assignment: target, buffer: m.buffer, contentType: m.contentType, source: 'sms', matched: how });
+      }
+      if (target) await logHistory(target.job_id, `Texted ${media.length === 1 ? 'a ticket photo' : media.length + ' ticket photos'}`, body && !action ? body : '', driver.name);
       const n = media.length === 1 ? 'ticket photo' : `${media.length} ticket photos`;
       if (!target) {
-        if (!body) body = '[photo - no job today to attach it to]';
-        return finish(`Got your ${n}, but couldn't tell which job it's for. Dispatch will sort it out.`, null, false);
+        if (!body) body = '[photo - waiting for the job number]';
+        if (!current.length) return finish(`Got your ${n}, but you have no job today to put it on. Dispatch will sort it out.`, null, false);
+        return finish(`Got your ${n}. Which job is it for? Reply with the job number: ${choices()}`, null, false);
       }
       if (!action) {
-        if (body && !sms.SMALL_TALK.test(body)) {
+        if (body && !sms.SMALL_TALK.test(body) && !/^\W*(wo|w\.o\.?|job|#)?\W*\d{3,6}\W*$/i.test(body)) {
           // Photo plus a real message: save the photo, still show the message to the office.
           return finish(`Got your ${n} for Job #${target.job_id}.`, target.id, false);
         }
@@ -809,23 +836,23 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     }
 
     if (action === 'done') {
-      const target = currentJob();
+      const target = jobId ? named_ : onlyJob();
       if (!target) {
         if (jobId) return finish(`Couldn't find an open Job #${jobId} for you. Call dispatch if that's wrong.`, null, false);
+        if (current.length > 1) return finish(`Which job is done? Reply DONE and the job number: ${choices()}`, null, false);
         return finish(`No job today to mark done. Reply DONE and the job number, e.g. DONE ${open[0]?.job_id || 1042}`, null, false);
       }
       await db.run(`UPDATE assignments SET status = 'done', done_at = datetime('now'),
            ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, 'sms') WHERE id = ?`, target.id);
       await logHistory(target.job_id, 'Texted DONE', body, driver.name);
       await autoCompleteJob(target.job_id);
-      const others = open.filter((a) => a.id !== target.id && a.scheduled_date <= today()).length;
-      const hint = others ? ` Wrong job? Reply DONE and the job number.` : '';
-      return finish(`Thanks ${first} - Job ${jobLabel(target)} marked DONE.${hint}`, target.id);
+      return finish(`Thanks ${first} - Job ${jobLabel(target)} marked DONE.`, target.id);
     }
 
-    // Not an OK/DONE: put it in front of the office.
+    // Not an OK/DONE: put it in front of the office, and on the job when we know which one.
     if (sms.SMALL_TALK.test(body)) return finish(null, open[0]?.id || null, true);
-    const linked = jobId ? open.find((a) => a.job_id === jobId) : open.length === 1 ? open[0] : null;
+    const linked = named_ || (current.length === 1 ? current[0] : open.length === 1 ? open[0] : null);
+    if (linked && body) await logHistory(linked.job_id, 'Texted a note', body, driver.name);
     return finish(null, linked?.id || null, false);
   }
 
@@ -838,7 +865,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   }
 
   /** Save a ticket photo. `assignment` may be null (photo texted with no job to match). */
-  async function saveTicket({ driverId = null, assignment = null, buffer, contentType, source = 'web' }) {
+  async function saveTicket({ driverId = null, assignment = null, buffer, contentType, source = 'web', matched = '' }) {
     const type = String(contentType || '').split(';')[0].trim().toLowerCase();
     const ext = IMAGE_TYPES[type];
     if (!ext) throw new ValidationError('Only photos can be uploaded');
@@ -846,8 +873,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     if (buffer.length > MAX_IMAGE_BYTES) throw new ValidationError('That photo is too big');
     // Stored in the database (not on disk) so photos survive a republish on Replit.
     const filename = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
-    const r = await db.run(`INSERT INTO tickets (assignment_id, job_id, driver_id, filename, content_type, source, data) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      assignment?.id ?? null, assignment?.job_id ?? null, driverId ?? assignment?.driver_id ?? null, filename, type, source, Buffer.from(buffer));
+    const r = await db.run(`INSERT INTO tickets (assignment_id, job_id, driver_id, filename, content_type, source, data, matched) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      assignment?.id ?? null, assignment?.job_id ?? null, driverId ?? assignment?.driver_id ?? null, filename, type, source, Buffer.from(buffer), matched);
     if (source === 'web' && assignment) await logHistory(assignment.job_id, 'Added a ticket photo', '', assignment.driver_name || currentActor());
     return await getTicket(r.lastInsertRowid);
   }

@@ -329,8 +329,13 @@ const ADDED_COLUMNS = {
   geocodes: {
     municipality: "TEXT NOT NULL DEFAULT ''",
   },
+  drivers: {
+    // 'driver' (drives a truck) or 'labourer' (texted their jobs the same way, no truck).
+    kind: "TEXT NOT NULL DEFAULT 'driver'",
+  },
   tickets: {
-    // The photo itself. Older rows may have only a file in UPLOAD_DIR.
+    // How a texted photo found its job: 'number' (the driver said which), 'only' (their only job), 'asked' (no job yet: we asked).
+    matched: "TEXT NOT NULL DEFAULT ''",
     data: 'BLOB',
   },
 };

@@ -285,6 +285,31 @@ Add more office logins with:
 npm run add-user -- jane@adamsbros.ca "Jane" "a-good-password"
 ```
 
+## Drivers, labourers and texts
+
+- **Labourers** are added on the Setup tab in their own column (name and cell, no truck). In the job form they're listed
+  under the drivers; they get the same texts, job page link and OK / DONE replies.
+- **Which job a text is about:** "WO 1042", "W.O. #1042", "work order 1042", "job 1042" and "#1042" always count as a job
+  number. A plain number only counts when it's one of that person's open jobs, so "pumped 1200 gallons" isn't taken for job
+  #1200.
+- **A photo with no job number:** it goes on the job they're working on, or their only job today. With more than one job
+  and none under way, the app doesn't guess: it replies *"Which job is it for? Reply with the job number: 1042 (Smith), 1043
+  (Jones)"*, and the number they send puts the photo on that job. If the number arrives as a separate text just after the
+  photo (some phones split them), the photo is moved to that job. DONE without a number works the same way.
+- **Notes** texted with a job number (or by someone with one job) are added to that job's history, and still shown to the
+  office on the board.
+- The **job page link** in each text is still the surest way to send photos: they always land on the right job.
+
+## Texting from the office (VoIP) number
+
+Texts go out through Twilio from (249) 701-4820 for now. To send from the office VoIP number instead, there are two ways
+— ask the VoIP provider which they support:
+1. **Twilio "Hosted SMS":** the number stays with the VoIP provider for calls, and Twilio handles its texts. Nothing in the
+   app changes except `TWILIO_FROM_NUMBER`. (Twilio checks the number is yours; the VoIP provider must allow it.)
+2. **The VoIP provider's own texting:** if they have a texting API with a "webhook" for incoming texts (VoIP.ms, Telnyx,
+   Bandwidth and others do), the app needs a small adapter for that provider — tell the developer the provider's name.
+   All sending is in `src/sms.js` (`sendSms`) and incoming texts arrive at `/sms/inbound` in `src/server.js`.
+
 ## Going live with texting (Twilio)
 
 1. Sign up at <https://www.twilio.com/try-twilio> and **upgrade** the account (add a payment method).
