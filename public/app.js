@@ -90,6 +90,7 @@
     if (tab === 'prices') window.PRICE_UI?.loadPrices();
     if (tab === 'faq') window.PRICE_UI?.loadFaq();
     if (tab === 'people' && state.can?.owner) window.PRICE_UI?.loadUsers();
+    if (tab === 'people') window.QBO_UI?.loadQbo().catch(() => {});
     if (tab === 'board') loadBoard();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));

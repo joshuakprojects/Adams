@@ -45,6 +45,12 @@ module.exports = {
     email: env.ADMIN_EMAIL || '',
     password: env.ADMIN_PASSWORD || '',
   },
+  // QuickBooks Online (an Intuit developer app). Nothing is sent until an admin connects and switches it on.
+  qbo: {
+    clientId: env.QBO_CLIENT_ID || '',
+    clientSecret: env.QBO_CLIENT_SECRET || '',
+    environment: env.QBO_ENVIRONMENT === 'production' ? 'production' : 'sandbox',
+  },
   // The one login allowed to add, change and remove logins.
   ownerEmail: String(env.OWNER_EMAIL || 'josh@adamsbros.ca').trim().toLowerCase(),
   cookieSecure: env.COOKIE_SECURE === 'true',

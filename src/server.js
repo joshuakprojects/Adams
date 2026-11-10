@@ -6,6 +6,7 @@ const { createDispatch, ValidationError, nowHmIn } = require('./dispatch');
 const { createBackups } = require('./backup');
 const { need, needOwner, can, permissions } = require('./roles');
 const { createDistance } = require('./distance');
+const { createQuickBooks } = require('./quickbooks');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
@@ -38,7 +39,8 @@ function sendImage(res, ticket) {
 /** Express 4 doesn't catch errors from async handlers; this passes them to the error handler. */
 const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, next)).catch(next);
 
-function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db) }) {
+function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
+  qbo = createQuickBooks(db, dispatch) }) {
   const intake = createIntake(db);
   const app = express();
   app.set('trust proxy', true);
@@ -198,6 +200,24 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     const from = String(req.body?.from || '').trim() || (await dispatch.prices.settings()).start_address;
     return distance.measure({ from, address: req.body?.address, lat: req.body?.lat, lng: req.body?.lng });
   }));
+
+  // ---------- QuickBooks Online (admins) ----------
+  const admin = need('admin');
+  api.get('/qbo', admin, json(() => qbo.status()));
+  api.get('/qbo/connect', admin, json(async () => ({ url: await qbo.authUrl() })));
+  api.post('/qbo/enabled', admin, json((req) => qbo.setEnabled(Boolean(req.body?.on))));
+  api.post('/qbo/mapping', admin, json((req) => qbo.saveMapping(req.body || {})));
+  api.get('/qbo/lists', admin, json(() => qbo.lists()));
+  api.post('/qbo/import-customers', admin, json(() => qbo.importCustomers()));
+  api.post('/qbo/sync', admin, json(() => qbo.processQueue({ limit: 100 })));
+  api.post('/qbo/queue-open', admin, json(async () => {
+    const rows = await db.all("SELECT j.id FROM jobs j JOIN job_lines l ON l.job_id = j.id WHERE j.status <> 'cancelled' GROUP BY j.id");
+    for (const r of rows) await qbo.enqueue(r.id);
+    return { queued: rows.length };
+  }));
+  api.get('/qbo/log', admin, json(() => qbo.log(100)));
+  api.get('/qbo/preview/:jobId', admin, json((req) => qbo.preview(req.params.jobId)));
+  api.post('/qbo/disconnect', admin, json(() => qbo.disconnect()));
 
   // ---------- customer questions (standard answers) ----------
   api.get('/faq', json(() => db.all('SELECT * FROM faq ORDER BY lower(topic), lower(question)')));
@@ -407,6 +427,15 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   app.use('/api', api);
 
   app.get('/', auth.requireUser, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
+  // Back from QuickBooks's sign-in page.
+  app.get('/qbo/callback', auth.requireUser, need('admin'), h(async (req, res) => {
+    try {
+      await qbo.finishConnect({ code: String(req.query.code || ''), state: String(req.query.state || ''), realmId: String(req.query.realmId || '') });
+      res.redirect('/?qbo=connected');
+    } catch (err) {
+      res.redirect('/?qbo=error&msg=' + encodeURIComponent(err.message));
+    }
+  }));
   // Many work orders at once, one per page (Records tab → Print / Save as PDF).
   app.get('/print/records', auth.requireUser, need('dispatcher'), h(async (req, res) => {
     const f = recordFilters(req.query);
@@ -450,7 +479,11 @@ async function main() {
     readPhoto: async (id) => (await dispatch.getTicket(id))?.data || null,
   });
   console.log(backups.storage ? `Nightly backups: ${backups.storage.label}` : 'Nightly backups are OFF (BACKUP_TARGET=off)');
-  createApp({ db, dispatch, backups }).listen(config.port, () => {
+  // QuickBooks: every change to a work order queues its Estimate (sent only once an admin connects and switches it on).
+  const qbo = createQuickBooks(db, dispatch);
+  dispatch.onChange((jobId, action) => { if (!/^Estimate /.test(action)) qbo.enqueue(jobId).catch(() => {}); });
+  setInterval(() => qbo.processQueue().catch((err) => console.error('QuickBooks sync:', err.message)), 5 * 60 * 1000);
+  createApp({ db, dispatch, backups, qbo }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
