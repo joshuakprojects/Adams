@@ -72,7 +72,10 @@ function replitStorage(Client = null, { bucketId = replitBucketId() } = {}) {
       r = await fn(getClient());
     } catch (err) {
       client = null;
-      throw new Error(`Object Storage ${what} failed: ${err.message}. On Replit, open the Object Storage tool and check a bucket exists.`);
+      // "fetch failed" hides the real reason in err.cause (e.g. ECONNREFUSED 127.0.0.1:1106).
+      const why = [err.message, err.cause?.code, err.cause?.message].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' — ');
+      const hint = bucketId ? `Bucket ${bucketId}.` : 'No bucket ID set: add the Secret BACKUP_BUCKET_ID (App Storage → your bucket → its ID).';
+      throw new Error(`Object Storage ${what} failed: ${why}. ${hint}`);
     }
     if (!r || !r.ok) {
       if (/initiali[sz]/i.test(String(r?.error?.message || r?.error || ''))) client = null;
@@ -82,7 +85,8 @@ function replitStorage(Client = null, { bucketId = replitBucketId() } = {}) {
   };
   return {
     kind: 'replit',
-    label: 'Replit Object Storage',
+    label: bucketId ? `Replit App Storage (bucket ${bucketId})` : 'Replit App Storage (default bucket)',
+    bucketId,
     async put(name, buf) { await call('upload', (c) => c.uploadFromBytes(name, buf)); },
     async get(name) { const v = await call('download', (c) => c.downloadAsBytes(name)); return Array.isArray(v) ? v[0] : v; },
     async exists(name) { return call('check', (c) => c.exists(name)); },

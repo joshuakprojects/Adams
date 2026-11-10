@@ -190,8 +190,9 @@ Google's monthly free allowance normally covers an office this size; addresses a
 
 Every night after 2 AM (Eastern) the app saves the whole database (jobs, customers, drivers, logins, history) as one
 compressed file, and uploads any new ticket photos. Database copies are kept 30 days; photos are kept for good.
-- **On Replit** they go to **Replit Object Storage**: open the **Object Storage** tool in the project and create a bucket
-  (once). Nothing else to set up.
+- **On Replit** they go to **Replit App Storage** (Object Storage): open **App Storage** in the project, create a bucket
+  (once), copy the bucket's ID and add it as the Secret **`BACKUP_BUCKET_ID`**, then republish. (The ID is also written to
+  `.replit`, but pulling updates from GitHub replaces that file, so the Secret is what keeps it.)
 - **Elsewhere** they go to `data/backups/` (or `BACKUP_DIR`). `BACKUP_TARGET=off` turns them off.
 
 The **Setup** tab shows recent backups, has **Back up now**, and **Download a copy** (the database, without photos; keep it somewhere safe,
