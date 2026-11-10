@@ -122,7 +122,8 @@ function renderSheet(job) {
   <section class="price">
     <div class="ln"><span class="lb">Quoted price:</span><span class="val">${esc(job.quoted_price)}</span></div>
     <div class="ln"><span class="lb">HST # ${esc(c.hst)}</span><span class="val"></span></div>
-    <div class="ln total"><span class="lb">TOTAL:</span><span class="val"></span></div>
+    <div class="ln total"><span class="lb">TOTAL:</span><span class="val">${esc(job.amount_billed)}</span></div>
+    ${job.invoice_number ? line('Invoice #', job.invoice_number) : ''}
     ${circled('Payment', FORMS.PAYMENT_METHODS, job.payment_method)}
   </section>
 

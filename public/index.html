@@ -20,6 +20,7 @@
     <nav class="tabs" aria-label="Main">
       <button data-tab="board" class="active">Board</button>
       <button data-tab="requests">Requests <span id="request-count" class="count hidden"></span></button>
+      <button data-tab="customers">Customers <span id="due-count" class="count hidden"></span></button>
       <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
       <button data-tab="records">Records</button>
       <button data-tab="people">Setup</button>
@@ -84,6 +85,15 @@
       <p class="muted small">Drivers who already got their day by text are only texted again if a job was added or changed.
         You can also send it any time with the "Text drivers their day" button on the board.</p>
     </div>
+    <div class="panel settings">
+      <h2>Septic reminders</h2>
+      <form id="septic-form" class="inline-form">
+        <label class="check">Customers show as <b>&nbsp;due for a pump-out&nbsp;</b> after
+          <select name="septic_reminder_years"><option value="1">1 year</option><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></label>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+      <p class="muted small">See them on the Customers tab under "Due for pump-out". Nothing is sent to customers automatically.</p>
+    </div>
     <div class="two-col">
       <div class="panel">
         <h2>Drivers</h2>
@@ -131,6 +141,25 @@
   </section>
 
   <!-- RECORDS (search & export) -->
+  <!-- CUSTOMERS (address book + septic reminders) -->
+  <section id="tab-customers" class="tab hidden">
+    <div class="toolbar">
+      <h2>Customers</h2>
+      <div class="segmented small-seg" id="cust-filter">
+        <label><input type="radio" name="cf" value="all" checked><span>All</span></label>
+        <label><input type="radio" name="cf" value="due"><span>Due for pump-out <b id="due-count-inline"></b></span></label>
+      </div>
+      <input id="cust-search" class="search-input" placeholder="Search name, phone or address…" aria-label="Search customers">
+      <div class="spacer"></div>
+      <button class="btn primary" id="cust-new">+ New customer</button>
+    </div>
+    <p class="muted small" id="cust-hint">Customers are added automatically from jobs and website orders. Pick one in the job form and their details fill in.</p>
+    <div class="cust-layout">
+      <div class="panel cust-list"><table class="table"><thead id="cust-head"></thead><tbody id="cust-rows"></tbody></table></div>
+      <div class="panel cust-detail hidden" id="cust-detail"></div>
+    </div>
+  </section>
+
   <section id="tab-records" class="tab hidden">
     <div class="panel">
       <h2>Work order records</h2>
@@ -160,7 +189,7 @@
       </div>
       <div id="records-summary" class="records-summary"></div>
       <div class="table-wrap"><table class="table records"><thead><tr>
-        <th>W.O. #</th><th>Date</th><th>Type</th><th>Customer</th><th>Address</th><th>Work</th><th>Loads</th><th>Quoted</th><th>Status</th><th></th>
+        <th>W.O. #</th><th>Date</th><th>Type</th><th>Customer</th><th>Address</th><th>Work</th><th>Loads</th><th>Quoted</th><th>Billed</th><th>Status</th><th></th>
       </tr></thead><tbody id="records-rows"></tbody></table></div>
     </div>
   </section>
@@ -206,12 +235,18 @@
       <fieldset class="sec">
         <legend>Customer</legend>
         <div class="grid">
-          <label class="span2">Name <input name="customer" list="dl-customers" autocomplete="off"></label>
+          <div class="span2 cust-pick">
+            <label for="f-customer">Name</label>
+            <input name="customer" id="f-customer" placeholder="Start typing to find a past customer" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cust-suggest">
+            <div id="cust-suggest" class="suggest hidden" role="listbox" aria-label="Customers"></div>
+            <input type="hidden" name="customer_id">
+          </div>
           <label>Phone # <input name="customer_phone" type="tel"></label>
           <label class="span2">Billing / mailing address <input name="billing_address"></label>
           <label>PO # <input name="po_number"></label>
           <label class="wide">Email <input name="customer_email" type="email"></label>
         </div>
+        <div id="cust-note" class="cust-note hidden"></div>
       </fieldset>
 
       <fieldset class="sec">
@@ -243,7 +278,9 @@
         <div class="grid">
           <label>Quoted price <input name="quoted_price" placeholder="$"></label>
           <label>Payment method <select name="payment_method"></select></label>
-          <p class="muted small office-note">Office only — drivers don't see the price.</p>
+          <p class="muted small office-note">Office only — drivers never see these.</p>
+          <label>Invoice # <input name="invoice_number" placeholder="once billed"></label>
+          <label>Amount billed <input name="amount_billed" placeholder="$ incl. HST"></label>
         </div>
       </fieldset>
 
@@ -259,6 +296,17 @@
         <button type="submit" class="btn primary big" value="send">Save &amp; text drivers</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- JOB HISTORY -->
+  <dialog id="history-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="history-title">History</h2>
+        <button type="button" class="link" data-close-history aria-label="Close">✕</button>
+      </div>
+      <ol id="history-list" class="history-list"></ol>
+    </div>
   </dialog>
 
   <!-- TICKET PHOTOS -->

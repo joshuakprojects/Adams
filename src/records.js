@@ -56,6 +56,8 @@ const COLUMNS = [
   ['Trucks', (j) => [...new Set(j.assignments.map((a) => a.truck_unit).filter(Boolean))].join(', ')],
   ['Quoted price', (j) => j.quoted_price],
   ['Payment method', (j) => j.payment_method],
+  ['Invoice #', (j) => j.invoice_number],
+  ['Amount billed', (j) => j.amount_billed],
   ['Site contact', (j) => [j.contact_name, sms.prettyPhone(j.contact_phone)].filter(Boolean).join(' ')],
   ['Special instructions', (j) => j.notes],
   ['Form details', detailsText],

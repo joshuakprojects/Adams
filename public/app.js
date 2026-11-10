@@ -85,6 +85,7 @@
     if (tab === 'messages') loadMessages();
     if (tab === 'requests') loadRequests();
     if (tab === 'records') loadRecords();
+    if (tab === 'customers') loadCustomers();
     if (tab === 'board') loadBoard();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
@@ -361,6 +362,7 @@
     const more = [
       primary[0] !== 'print' && ['print', 'Print work order'],
       ['dup', 'Copy to another day…'],
+      ['history', 'History'],
       (job.job_type === 'toilet' || job.job_type === 'bin') && job.status !== 'cancelled' && ['pickup', 'Book pick-up'],
       stale && primary[0] !== 'move-today' && ['move-today', 'Move to today'],
       job.status === 'open' && primary[0] !== 'complete' && ['complete', 'Mark complete'],
@@ -450,6 +452,7 @@
       if (act === 'seen') await api('/messages/seen', { method: 'POST', body: { ids: [Number(el.dataset.id)] } });
       if (act === 'tickets') return openTickets(Number(jobId));
       if (act === 'go-requests') return showTab('requests');
+      if (act === 'history') { el.closest('details')?.removeAttribute('open'); return openHistory(Number(jobId)); }
       if (act === 'resend-unconfirmed') {
         const job = [...state.board.jobs, ...(state.board.stale_jobs || [])].find((j) => j.id === Number(jobId));
         for (const a of (job?.assignments || []).filter((x) => x.status === 'sent' && !x.needs_resend)) {
@@ -696,6 +699,7 @@
 
   async function openJobForm(job = null) {
     form.reset();
+    form.elements.customer_id.value = '';
     $('#job-form-error').textContent = '';
     if (!state.drivers.length || !state.trucks.length) await loadBoard();
     fillSuggestions().catch(() => {});
@@ -713,6 +717,7 @@
     if (data.customer_phone) form.elements.customer_phone.value = prettyPhone(data.customer_phone);
     $$('input[name=job_type]', form).forEach((r) => { r.checked = r.value === data.job_type; });
     formAssignments = new Map(data.assignments.map((a) => [a.driver_id, a.truck_id]));
+    showCustomerNote(data.customer_id ? await api('/customers/' + data.customer_id).then((r) => r.customer).catch(() => null) : null);
     await computeBusy(data.scheduled_date, data.id);
     applyType(data.job_type, data.details || {});
     dialog.showModal();
@@ -792,6 +797,7 @@
     const sf = $('#settings-form');
     sf.elements.lineup_on.checked = Boolean(settings.lineup_time);
     sf.elements.lineup_time.value = settings.lineup_time || '17:00';
+    $('#septic-form').elements.septic_reminder_years.value = settings.septic_reminder_years || '2';
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
     $('#driver-rows').innerHTML = drivers.map((d) => `
@@ -943,9 +949,10 @@
           <td>${esc(cargo(j))}${j.tickets.length ? ` <span class="muted small">🧾 ${j.tickets.length}</span>` : ''}</td>
           <td>${j.assignments.reduce((n, a) => n + (a.loads_done || 0), 0) || ''}</td>
           <td>${esc(j.quoted_price)}</td>
+          <td>${esc(j.amount_billed)}${j.invoice_number ? `<div class="muted small">${esc(j.invoice_number)}</div>` : ''}</td>
           <td><span class="chip ${j.status === 'complete' ? 'done' : j.status === 'cancelled' ? 'cancelled' : 'sent'}">${esc(j.status)}</span></td>
           <td><button class="btn tiny" data-act="print" data-job="${j.id}">Print</button></td>
-        </tr>`).join('') || '<tr><td colspan="10" class="muted">No work orders match.</td></tr>';
+        </tr>`).join('') || '<tr><td colspan="11" class="muted">No work orders match.</td></tr>';
     } catch (err) { toast(err.message); }
   }
 
@@ -953,6 +960,188 @@
   $$('[data-range]').forEach((b) => b.addEventListener('click', () => { setRange(b.dataset.range); loadRecords(); }));
   $('#records-csv').addEventListener('click', () => { location.href = '/api/records.csv?' + recordQuery(); });
   $('#records-print').addEventListener('click', () => window.open('/print/records?' + recordQuery(), '_blank'));
+
+  // ---------- job history ----------
+  async function openHistory(jobId) {
+    const rows = await api(`/jobs/${jobId}/history`);
+    $('#history-title').textContent = `Job #${jobId} — history`;
+    $('#history-list').innerHTML = rows.length ? rows.map((r) => `
+      <li><span class="h-when">${esc(fmtStamp(r.at))}</span>
+        <span class="h-who">${esc(r.actor)}</span>
+        <span class="h-what"><b>${esc(r.action)}</b>${r.details ? ` — ${esc(r.details)}` : ''}</span></li>`).join('')
+      : '<li class="muted">No history recorded yet (jobs created before this feature start here).</li>';
+    $('#history-dialog').showModal();
+  }
+  $('[data-close-history]').addEventListener('click', () => $('#history-dialog').close());
+
+  // ---------- customer picker in the job form ----------
+  const custInput = form.elements.customer;
+  let custTimer;
+  let custResults = [];
+  function showCustomerNote(c) {
+    const box = $('#cust-note');
+    if (!c) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.innerHTML = `<b>Existing customer</b>${c.notes ? ` · Notes: ${esc(c.notes)}
+      <button type="button" class="link" id="cust-note-add">Add to instructions</button>` : ''}
+      <button type="button" class="link" id="cust-unlink">Not this customer</button>`;
+    $('#cust-note-add')?.addEventListener('click', () => {
+      const n = form.elements.notes;
+      if (!n.value.includes(c.notes)) n.value = [n.value, c.notes].filter(Boolean).join(' ');
+    });
+    $('#cust-unlink').addEventListener('click', () => { form.elements.customer_id.value = ''; showCustomerNote(null); });
+  }
+  function closeSuggest() { $('#cust-suggest').classList.add('hidden'); custInput.setAttribute('aria-expanded', 'false'); }
+  custInput.addEventListener('input', () => {
+    form.elements.customer_id.value = '';
+    showCustomerNote(null);
+    clearTimeout(custTimer);
+    const q = custInput.value.trim();
+    if (q.length < 2) return closeSuggest();
+    custTimer = setTimeout(async () => {
+      custResults = await api('/customers/search?q=' + encodeURIComponent(q)).catch(() => []);
+      const box = $('#cust-suggest');
+      if (!custResults.length) return closeSuggest();
+      box.innerHTML = custResults.map((c, i) => `<button type="button" role="option" data-pick="${i}">
+        <b>${esc(c.name || '(no name)')}</b> <span class="muted">${esc(prettyPhone(c.phone))}</span>
+        <span class="muted small">${esc([c.site_address, c.municipality].filter(Boolean).join(', '))}${c.last_job_date ? ` · last job ${esc(c.last_job_date)}` : ''}</span></button>`).join('');
+      box.classList.remove('hidden');
+      custInput.setAttribute('aria-expanded', 'true');
+    }, 200);
+  });
+  custInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSuggest(); });
+  $('#cust-suggest').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    const c = custResults[Number(b.dataset.pick)];
+    const f = form.elements;
+    f.customer.value = c.name;
+    f.customer_id.value = c.id;
+    if (c.phone) f.customer_phone.value = prettyPhone(c.phone);
+    if (c.email && !f.customer_email.value) f.customer_email.value = c.email;
+    if (c.billing_address && !f.billing_address.value) f.billing_address.value = c.billing_address;
+    if (c.site_address && !f.to_location.value) f.to_location.value = c.site_address;
+    if (c.municipality && !f.municipality.value) f.municipality.value = c.municipality;
+    closeSuggest();
+    showCustomerNote(c);
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.cust-pick')) closeSuggest(); });
+
+  // ---------- customers tab ----------
+  let custView = 'all';
+  async function loadCustomers() {
+    const due = await api('/customers/due');
+    const dc = $('#due-count');
+    dc.textContent = due.length || '';
+    dc.classList.toggle('hidden', !due.length);
+    $('#due-count-inline').textContent = due.length ? `(${due.length})` : '';
+    if (custView === 'due') {
+      $('#cust-head').innerHTML = '<tr><th>Customer</th><th>Property</th><th>Last pump-out</th><th>Tank</th><th></th></tr>';
+      $('#cust-rows').innerHTML = due.map((c) => `<tr>
+          <td><b>${esc(c.name)}</b><div class="muted small">${c.phone ? `<a href="tel:${esc(c.phone)}">${esc(prettyPhone(c.phone))}</a>` : ''}${c.reminder_note ? ` · ${esc(c.reminder_note)}` : ''}</div></td>
+          <td>${esc([c.address, c.job_municipality].filter(Boolean).join(', '))}</td>
+          <td>${esc(c.last_pumpout)}</td>
+          <td>${esc([c.tank_type, c.tank_size].filter(Boolean).join(' · '))}</td>
+          <td class="row-actions"><button class="btn tiny primary" data-cust-act="book" data-id="${c.id}">Book pump-out</button>
+            <button class="btn tiny" data-cust-act="contacted" data-id="${c.id}">Mark contacted</button></td>
+        </tr>`).join('') || '<tr><td colspan="5" class="muted">Nobody is due for a pump-out right now.</td></tr>';
+      return;
+    }
+    const list = await api('/customers?q=' + encodeURIComponent($('#cust-search').value.trim()));
+    $('#cust-head').innerHTML = '<tr><th>Customer</th><th>Phone</th><th>Site</th><th>Last job</th></tr>';
+    $('#cust-rows').innerHTML = list.map((c) => `<tr class="clickable" data-cust-act="open" data-id="${c.id}" tabindex="0">
+        <td><b>${esc(c.name || '(no name)')}</b>${c.notes ? `<div class="muted small">${esc(c.notes)}</div>` : ''}</td>
+        <td>${esc(prettyPhone(c.phone))}</td>
+        <td>${esc([c.site_address, c.municipality].filter(Boolean).join(', '))}</td>
+        <td>${esc(c.last_job_date || '')}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">No customers yet — they appear as you create jobs.</td></tr>';
+  }
+
+  async function openCustomer(id) {
+    const box = $('#cust-detail');
+    const out = id ? await api('/customers/' + id) : { customer: {}, jobs: [] };
+    const c = out.customer;
+    box.classList.remove('hidden');
+    box.innerHTML = `
+      <div class="dialog-head"><h2>${id ? esc(c.name || 'Customer') : 'New customer'}</h2>
+        <button type="button" class="link" data-cust-act="close" aria-label="Close">✕</button></div>
+      <form id="cust-form" class="cust-form">
+        <input type="hidden" name="id" value="${esc(c.id || '')}">
+        <label>Name <input name="name" value="${esc(c.name || '')}"></label>
+        <label>Phone <input name="phone" type="tel" value="${esc(prettyPhone(c.phone || ''))}"></label>
+        <label>Email <input name="email" type="email" value="${esc(c.email || '')}"></label>
+        <label>Billing / mailing address <input name="billing_address" value="${esc(c.billing_address || '')}"></label>
+        <label>Usual site address <input name="site_address" value="${esc(c.site_address || '')}"></label>
+        <label>Municipality <input name="municipality" value="${esc(c.municipality || '')}"></label>
+        <label>Notes (gate codes, dog in yard, where the tank is…) <textarea name="notes" rows="3">${esc(c.notes || '')}</textarea></label>
+        <div class="row-actions"><button class="btn primary" type="submit">Save customer</button>
+          ${id ? `<button class="btn" type="button" data-cust-act="newjob" data-id="${c.id}">+ New job for them</button>
+          <button class="btn" type="button" data-cust-act="book" data-id="${c.id}">Book pump-out</button>` : ''}</div>
+      </form>
+      ${id ? `<h3>Jobs (${out.jobs.length})</h3>
+      <ul class="cust-jobs">${out.jobs.map((j) => `<li>
+        <div><b>#${j.id}</b> · ${esc(j.scheduled_date)} · ${esc(typeInfo(j.job_type).name)}
+          <span class="chip ${j.status === 'complete' ? 'done' : j.status === 'cancelled' ? 'cancelled' : 'sent'}">${esc(j.status)}</span></div>
+        <div class="muted small">${esc(cargo(j))}${j.amount_billed ? ` · billed ${esc(j.amount_billed)}` : j.quoted_price ? ` · quoted ${esc(j.quoted_price)}` : ''}${j.invoice_number ? ` · ${esc(j.invoice_number)}` : ''}</div>
+        <button class="btn tiny" data-act="print" data-job="${j.id}">Print</button></li>`).join('') || '<li class="muted">No jobs yet.</li>'}</ul>` : ''}`;
+    $('#cust-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const saved = await api('/customers', { method: 'POST', body: Object.fromEntries(new FormData(e.target).entries()) });
+        toast('Customer saved');
+        loadCustomers();
+        openCustomer(saved.id);
+      } catch (err) { toast(err.message); }
+    });
+  }
+
+  $('#tab-customers').addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-cust-act]');
+    if (!el) return;
+    const id = el.dataset.id;
+    try {
+      if (el.dataset.custAct === 'open') openCustomer(id);
+      if (el.dataset.custAct === 'close') $('#cust-detail').classList.add('hidden');
+      if (el.dataset.custAct === 'book') {
+        const prefill = await api(`/customers/${id}/septic-prefill`);
+        state.date = prefill.scheduled_date || state.date;
+        await openJobForm(prefill);
+      }
+      if (el.dataset.custAct === 'newjob') {
+        const { customer: c } = await api('/customers/' + id);
+        await openJobForm({ job_type: 'haul', scheduled_date: state.date, customer_id: c.id, customer: c.name, customer_phone: c.phone,
+          customer_email: c.email, billing_address: c.billing_address, to_location: c.site_address, municipality: c.municipality, assignments: [] });
+      }
+      if (el.dataset.custAct === 'contacted') {
+        const note = prompt('Note (optional) — e.g. "Left a message", "Booking in spring"', '');
+        if (note === null) return;
+        await api(`/customers/${id}/contacted`, { method: 'POST', body: { note } });
+        toast('Marked contacted — hidden from the list for 90 days');
+        loadCustomers();
+      }
+    } catch (err) { toast(err.message); }
+  });
+  $('#tab-customers').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.matches('tr[data-cust-act=open]')) openCustomer(e.target.dataset.id);
+  });
+  $('#cust-filter').addEventListener('change', () => { custView = $('#cust-filter input:checked').value; loadCustomers(); });
+  let custSearchTimer;
+  $('#cust-search').addEventListener('input', () => {
+    clearTimeout(custSearchTimer);
+    custSearchTimer = setTimeout(() => {
+      if (custView !== 'all') { custView = 'all'; $('#cust-filter input[value=all]').checked = true; }
+      loadCustomers();
+    }, 250);
+  });
+  $('#cust-new').addEventListener('click', () => openCustomer(null));
+
+  $('#septic-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/settings', { method: 'POST', body: { septic_reminder_years: e.target.elements.septic_reminder_years.value } });
+      toast('Saved');
+    } catch (err) { toast(err.message); }
+  });
 
   // ---------- messages ----------
   async function loadMessages() {
