@@ -259,5 +259,52 @@
     return out; // toilet types & counts are already in the summary line
   }
 
-  return { TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
+  // ---------- time of day (customers aren't given exact times) ----------
+  // '' = not picked yet (shown as "Any time"); 'any' = picked "Any time" (counts when Time is a required field).
+  const TIME_SLOTS = [['first', 'First thing'], ['am', 'AM'], ['pm', 'PM'], ['any', 'Any time']];
+  function slotLabel(slot) {
+    return (TIME_SLOTS.find(([k]) => k === slot) || TIME_SLOTS[3])[1];
+  }
+
+  // ---------- required fields ----------
+  /** The fields an admin can make required for a work order type: [{ key, label }] (type fields are 'd.<key>'). */
+  function requirable(type) {
+    const t = typeInfo(type);
+    const out = [
+      { key: 'customer', label: 'Customer name' },
+      { key: 'customer_phone', label: 'Phone #' },
+      { key: 'billing_address', label: 'Billing / mailing address' },
+      { key: 'customer_email', label: 'Email' },
+      { key: 'po_number', label: 'PO #' },
+      { key: 'time_slot', label: 'Time (first thing / AM / PM)' },
+      { key: 'to_location', label: t.to || 'Delivery address' },
+      { key: 'municipality', label: 'Municipality' },
+      { key: 'contact_name', label: 'Site contact name' },
+      { key: 'contact_phone', label: 'Site contact phone #' },
+    ];
+    if (t.what) out.push({ key: 'material', label: t.what });
+    if (t.loads) out.push({ key: 'loads_planned', label: t.quantity ? `${t.loadsLabel || '# of loads'} (or yards)` : (t.loadsLabel || '# of loads') });
+    if (t.from) out.push({ key: 'from_location', label: t.from });
+    out.push({ key: 'notes', label: 'Special instructions' }, { key: 'payment_method', label: 'Payment method' }, { key: 'paper_wo', label: 'Paper W.O. #' });
+    for (const f of t.fields) if (f.kind !== 'check') out.push({ key: 'd.' + f.key, label: f.label === 'Circle one' ? `${f.label} (${f.options.join(' / ')})` : f.label });
+    return out;
+  }
+
+  /** Required fields that are still empty: [{ key, label }]. A pinned map spot counts as the address. */
+  function missingRequired(job, keys) {
+    const d = parseDetails(job);
+    const has = (k) => {
+      if (k.startsWith('d.')) return !isEmpty(d[k.slice(2)]);
+      if (k === 'time_slot') return Boolean(job.time_slot);
+      if (k === 'to_location') return !isEmpty(job.to_location) || Boolean(job.has_pin);
+      if (k === 'loads_planned') {
+        return !isEmpty(job.loads_planned) || !isEmpty(job.quantity) || (job.job_type === 'haul' && Boolean(d.until_stop));
+      }
+      return !isEmpty(job[k]);
+    };
+    const all = requirable(job.job_type);
+    return (keys || []).filter((k) => !has(k)).map((k) => all.find((f) => f.key === k) || { key: k, label: k });
+  }
+
+  return { TIME_SLOTS, slotLabel, requirable, missingRequired, TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
 });

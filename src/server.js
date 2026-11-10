@@ -253,6 +253,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     ...(await dispatch.board(String(req.query.date || dispatch.today()))),
     new_requests: await intake.countNew(),
   })));
+  api.get('/calendar', json((req) => dispatch.calendar(String(req.query.month || dispatch.today().slice(0, 7)))));
   api.get('/requests', json((req) => intake.list({ status: String(req.query.status || 'open') })));
   api.get('/requests/:id/prefill', h(async (req, res) => {
     const p = await intake.prefill(req.params.id, dispatch.today());
@@ -285,7 +286,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   };
   api.post('/jobs', json(async (req) => {
     req.body = await officeSafe(req, null);
-    let { job } = await dispatch.saveJob({ ...req.body, id: null }, req.user.id);
+    let { job } = await dispatch.saveJob({ ...req.body, id: null }, req.user.id, { enforceRequired: true });
     // Scheduled from a website request: link the two.
     if (req.body.request_id) {
       await intake.link(req.body.request_id, job.id, req.user.id);
@@ -296,7 +297,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   }));
   api.put('/jobs/:id', json(async (req) => {
     req.body = await officeSafe(req, req.params.id);
-    const { job, removed } = await dispatch.saveJob({ ...req.body, id: req.params.id }, req.user.id);
+    const { job, removed } = await dispatch.saveJob({ ...req.body, id: req.params.id }, req.user.id, { enforceRequired: true });
     await dispatch.notifyRemoved(job, removed);
     return req.body.send_now ? dispatch.sendJob(job.id) : { job, results: [] };
   }));
@@ -366,7 +367,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   // Customer address book and septic reminders.
   api.get('/customers', json((req) => dispatch.customers.list({ q: String(req.query.q || '') })));
   api.get('/customers/search', json((req) => dispatch.customers.search(String(req.query.q || ''), 8)));
-  api.get('/customers/due', json(async () => dispatch.customers.septicDue({ years: Number((await dispatch.getSettings()).septic_reminder_years) || 2 })));
+  api.get('/customers/due', json(async () => dispatch.customers.septicDue({ years: Number((await dispatch.getSettings()).septic_reminder_years) || 3 })));
   api.get('/customers/:id', h(async (req, res) => {
     const c = await dispatch.customers.get(req.params.id);
     if (!c) return res.status(404).json({ error: 'Not found' });
@@ -422,7 +423,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   app.use((err, req, res, _next) => {
     const status = err.status || err.statusCode || 500;
     if (status === 500) console.error(err);
-    if (req.originalUrl.startsWith('/api/')) return res.status(status).json({ error: status === 500 ? 'Something went wrong' : err.message });
+    if (req.originalUrl.startsWith('/api/')) {
+      return res.status(status).json({ error: status === 500 ? 'Something went wrong' : err.message, ...(err.missing ? { missing: err.missing } : {}) });
+    }
     res.status(status).send(status === 500 ? 'Something went wrong' : err.message);
   });
 

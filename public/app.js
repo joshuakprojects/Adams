@@ -24,7 +24,7 @@
     });
     if (res.status === 401) { location.href = '/login'; throw new Error('Logged out'); }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Request failed');
+    if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), data.missing ? { missing: data.missing } : {});
     return data;
   }
 
@@ -53,8 +53,9 @@
     return `${h % 12 || 12}:${pad(m)} ${h >= 12 ? 'PM' : 'AM'}`;
   }
   function jobTime(job) {
-    const t = fmtTime(job.scheduled_time);
-    if (job.first_thing) return t ? `First thing (${t})` : 'First thing';
+    if (job.time_slot) return job.time_slot === 'any' ? '' : window.FORMS.slotLabel(job.time_slot);
+    const t = fmtTime(job.scheduled_time); // jobs from before AM / PM
+    if (job.first_thing) return 'First thing';
     return t;
   }
   function fmtStamp(sqlUtc) {
@@ -194,6 +195,7 @@
   function attentionReasons(job) {
     if (job.status !== 'open') return [];
     const out = [];
+    if (Number(job.draft)) out.push('Draft — finish it');
     const live = job.assignments.filter((a) => a.status !== 'cancelled');
     if (!live.length) out.push('No driver');
     if (live.some((a) => a.status === 'pending')) out.push('Not texted');
@@ -271,6 +273,20 @@
         Finish, move or cancel ${stale.length === 1 ? 'it' : 'them'} so nothing gets missed.</span>
         <button class="btn tiny" data-act="show-stale">Review</button></div>` : '';
 
+    // Calendar: the month at a glance; click a day to open it.
+    const month = state.layout === 'month';
+    document.body.classList.toggle('month-view', month);
+    $$('.layout-toggle [data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
+    if (month) {
+      const [cy, cm] = state.date.split('-').map(Number);
+      $('#board-title').textContent = new Date(Date.UTC(cy, cm - 1, 1))
+        .toLocaleDateString('en-CA', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+      $('#jobs').classList.remove('as-lanes', 'hidden');
+      $('#map-panel').classList.add('hidden');
+      renderCalendar();
+      return;
+    }
+
     if (state.showStale) {
       $('#board-filters').classList.add('hidden');
       $('#jobs').innerHTML = `<div class="view-head"><h3>Unfinished from earlier days (${stale.length})</h3>
@@ -321,7 +337,11 @@
     const l = e.target.closest('[data-layout]');
     if (v) { state.view = state.view === v.dataset.view && v.dataset.view !== 'active' ? 'active' : v.dataset.view; store.set('view', state.view); }
     if (t) { state.typeFilter = t.dataset.type; store.set('type', state.typeFilter); }
-    if (l) { state.layout = l.dataset.layout; store.set('layout', state.layout); }
+    if (l) {
+      if (l.dataset.layout !== 'month') store.set('day-layout', l.dataset.layout);
+      state.layout = l.dataset.layout;
+      store.set('layout', state.layout);
+    }
     if (v || t || l) renderBoard();
   });
 
@@ -500,14 +520,15 @@
     const nav = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(geoQuery(siteAddress(j)))}`;
     mapState.info.setContent(`<div class="map-info"><b>#${j.id} · ${esc(typeInfo(j.job_type).name)}</b>
       <div>${esc(j.customer || '')}</div><div class="muted">${esc(siteAddress(j))}</div>
-      <div>${esc(cargo(j))}</div><div class="muted">${esc(drivers || 'No driver yet')}${j.scheduled_time ? ' · ' + esc(j.scheduled_time) : ''}</div>
+      <div>${esc(cargo(j))}</div><div class="muted">${esc(drivers || 'No driver yet')}${jobTime(j) ? ' · ' + esc(jobTime(j)) : ''}</div>
       <div class="row-actions"><button class="btn tiny primary" data-act="edit" data-job="${j.id}">Edit</button>
         <a class="btn tiny" href="${nav}" target="_blank" rel="noopener">Directions</a></div></div>`);
     mapState.info.open({ map: mapState.map, anchor: m });
   }
 
   function renderMapSide(jobs, missing) {
-    const list = jobs.slice().sort((a, b) => String(a.scheduled_time || '99').localeCompare(String(b.scheduled_time || '99')));
+    const rank = (j) => ({ first: 0, am: 1, pm: 2 }[j.time_slot] ?? 3);
+    const list = jobs.slice().sort((a, b) => rank(a) - rank(b));
     $('#map-side').innerHTML = `<h3>${jobs.length} job${jobs.length === 1 ? '' : 's'}</h3>` + (list.map((j) => `
       <button type="button" class="map-item" data-map-job="${j.id}">
         <i class="dot st-${stageOf(j)}"></i><b>#${j.id}</b> ${esc(j.customer || typeInfo(j.job_type).name)}
@@ -572,6 +593,7 @@
     else if (job.status === 'open' && active.length) primary = ['complete', 'Mark complete'];
     else if (job.status === 'complete') primary = ['print', 'Print'];
     else primary = ['edit', 'Assign driver'];
+    if (Number(job.draft) && job.status === 'open') primary = ['edit', 'Finish draft'];
     // Office logins don't assign, text or close jobs: they open the work order.
     const dispatchActs = ['reopen', 'move-today', 'send', 'resend-unconfirmed', 'complete', 'cancel', 'delete'];
     if (!state.can.dispatch && dispatchActs.includes(primary[0])) primary = ['edit', 'Open work order'];
@@ -589,10 +611,12 @@
         ? ['cancel', 'Cancel job…', 'danger'] : ['delete', 'Delete', 'danger']),
     ].filter(Boolean).filter((m) => state.can.dispatch || !dispatchActs.includes(m[0]));
 
-    return `<article class="job t-${job.job_type} ${job.status} ${compact ? 'compact' : ''}">
+    return `<article class="job t-${job.job_type} ${job.status} ${compact ? 'compact' : ''} ${Number(job.draft) ? 'is-draft' : ''}">
+      ${Number(job.draft) && job.missing?.length ? `<div class="draft-missing">Still needs: ${esc(job.missing.join(', '))}</div>` : ''}
       <div class="job-head">
         <span class="job-num">#${job.id}</span>
-        <span class="job-time ${job.first_thing ? 'first' : ''}">${esc(jobTime(job) || 'Any time')}</span>
+        <span class="job-time ${job.time_slot === 'first' || job.first_thing ? 'first' : ''}">${esc(jobTime(job) || 'Any time')}</span>
+        ${Number(job.draft) ? '<span class="tag st-draft" title="Not finished — can\'t be texted yet">DRAFT</span>' : ''}
         ${statusTag}
         <span class="spacer"></span>
         <span class="tag type" title="${esc(t.title)}">${esc(t.name)}</span>
@@ -670,6 +694,7 @@
       if (act === 'seen') await api('/messages/seen', { method: 'POST', body: { ids: [Number(el.dataset.id)] } });
       if (act === 'tickets') return openTickets(Number(jobId));
       if (act === 'go-requests') return showTab('requests');
+      if (act === 'go-texts') return showTab('messages');
       if (act === 'history') { el.closest('details')?.removeAttribute('open'); return openHistory(Number(jobId)); }
       if (act === 'resend-unconfirmed') {
         const job = [...state.board.jobs, ...(state.board.stale_jobs || [])].find((j) => j.id === Number(jobId));
@@ -716,9 +741,61 @@
 
   $$('[data-day]').forEach((b) => b.addEventListener('click', () => {
     const n = Number(b.dataset.day);
-    state.date = n === 0 ? state.today : addDays(state.date, n);
+    if (state.layout === 'month' && n !== 0) {
+      // A month at a time.
+      const [y, m] = state.date.split('-').map(Number);
+      const dt = new Date(Date.UTC(y, m - 1 + n, 1));
+      state.date = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-01`;
+    } else state.date = n === 0 ? state.today : addDays(state.date, n);
     loadBoard();
   }));
+
+  // ---------- calendar (month view) ----------
+  let calMonth = null;
+  let calData = {};
+  async function renderCalendar() {
+    const ym = state.date.slice(0, 7);
+    if (calMonth !== ym) {
+      calData = {};
+      calMonth = ym;
+      $('#jobs').innerHTML = '<div class="empty">Loading…</div>';
+    }
+    calData = await api('/calendar?month=' + ym).catch(() => calData);
+    if (state.layout !== 'month' || calMonth !== ym) return;
+    const [y, m] = ym.split('-').map(Number);
+    const first = new Date(Date.UTC(y, m - 1, 1));
+    const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const lead = (first.getUTCDay() + 6) % 7; // weeks start on Monday
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push('<div class="cal-cell blank"></div>');
+    for (let d = 1; d <= days; d++) {
+      const date = `${ym}-${pad(d)}`;
+      const c = calData[date];
+      const past = date < state.today;
+      const sub = [];
+      if (c && c.done && c.open) sub.push(`${c.done} done`);
+      if (c && c.done && !c.open) sub.push('all done ✓');
+      if (c && c.drafts) sub.push(`<span class="cal-draft">${c.drafts} draft${c.drafts > 1 ? 's' : ''}</span>`);
+      cells.push(`<button type="button" class="cal-cell ${date === state.today ? 'today' : ''} ${past ? 'past' : ''} ${c ? 'has' : ''}" data-cal-day="${date}">
+        <span class="cal-d">${d}</span>
+        ${c ? `<span class="cal-n"><b>${c.total}</b> job${c.total === 1 ? '' : 's'}</span><span class="cal-sub">${sub.join(' · ')}</span>` : ''}
+      </button>`);
+    }
+    $('#jobs').innerHTML = `<div class="cal-wrap"><div class="cal">
+      ${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((w) => `<div class="cal-w">${w}</div>`).join('')}
+      ${cells.join('')}</div>
+      <p class="muted small">Click a day to see its jobs. Book up to a month ahead with <b>+ New job</b>.</p></div>`;
+  }
+  $('#jobs').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-cal-day]');
+    if (!c) return;
+    state.date = c.dataset.calDay;
+    state.layout = store.get('day-layout', 'lanes');
+    store.set('layout', state.layout);
+    loadBoard();
+  });
+  // Requests and Texts open from the board; their pages have a way back.
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-back-board]')) showTab('board'); });
   $('#board-date').addEventListener('change', (e) => { if (e.target.value) { state.date = e.target.value; loadBoard(); } });
   $('#new-job').addEventListener('click', () => openJobForm());
 
@@ -931,10 +1008,13 @@
     $('#from-request').textContent = data.request_id ? '🌐 Filled in from the website order. Check it, pick the drivers, then save.' : '';
     for (const [k, v] of Object.entries(data)) {
       const input = form.elements[k];
-      if (!input || k === 'job_type' || k === 'details' || k === 'first_thing' || !('value' in input)) continue;
+      if (!input || k === 'job_type' || k === 'details' || k === 'time_slot' || !('value' in input)) continue;
       input.value = v ?? '';
     }
-    form.elements.first_thing.checked = Boolean(data.first_thing);
+    const slot = data.time_slot || (data.first_thing ? 'first' : data.scheduled_time ? (data.scheduled_time < '12:00' ? 'am' : 'pm') : '');
+    $$('input[name=time_slot]', form).forEach((r) => { r.checked = r.value === slot; });
+    markMissing([]);
+    $('#job-form-error').innerHTML = '';
     if (data.contact_phone) form.elements.contact_phone.value = prettyPhone(data.contact_phone);
     if (data.customer_phone) form.elements.customer_phone.value = prettyPhone(data.customer_phone);
     $$('input[name=job_type]', form).forEach((r) => { r.checked = r.value === data.job_type; });
@@ -953,31 +1033,56 @@
 
   $$('[data-close]', dialog).forEach((b) => b.addEventListener('click', () => dialog.close()));
 
+  // Required fields (Setup → Required fields): checked here first, and again by the server.
+  let requiredCache = null;
+  async function requiredFor(type) {
+    if (!requiredCache) requiredCache = (await api('/settings')).required_fields || {};
+    return requiredCache[type] || [];
+  }
+  function markMissing(keys) {
+    $$('.missing', form).forEach((el) => el.classList.remove('missing'));
+    for (const k of keys) {
+      const el = k.startsWith('d.') ? form.querySelector(`[name="${k}"]`) : k === 'time_slot' ? $('[data-req=time_slot]', form) : form.elements[k];
+      const box = el?.closest?.('label, .choice-row, .field-col, .cust-pick') || el;
+      box?.classList?.add('missing');
+    }
+  }
+  function showMissing(missing) {
+    markMissing(missing.map((m) => m.key || m));
+    $('#job-form-error').innerHTML = `Still needs: <b>${esc(missing.map((m) => m.label || m).join(', '))}</b>.
+      <button type="button" class="btn tiny" id="save-draft-instead">Save as a draft instead</button>`;
+    $('#save-draft-instead').addEventListener('click', () => form.requestSubmit(form.querySelector('button[value=draft]')));
+    form.querySelector('.missing')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const sendNow = e.submitter?.value === 'send';
+    const sendNow = false; // saving never texts drivers: text them from the board when ready
+    const asDraft = e.submitter?.value === 'draft';
     const fd = new FormData(form);
     const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.') && !k.startsWith('po.') && !k.startsWith('ln.')));
     body.details = collectDetails();
     Object.assign(body, window.PRICE_UI?.collect() || {});
-    body.first_thing = form.elements.first_thing.checked;
+    body.time_slot = $('input[name=time_slot]:checked', form)?.value || '';
     body.assignments = [...formAssignments].map(([driver_id, truck_id]) => ({ driver_id, truck_id }));
     body.send_now = sendNow;
-    if (sendNow && !body.assignments.length) {
-      $('#job-form-error').textContent = 'Tick at least one driver to text.';
-      return;
+    body.draft = asDraft;
+    if (!asDraft) {
+      const missing = window.FORMS.missingRequired({ ...body, has_pin: Boolean(body.pin_lat) || body.lat != null }, await requiredFor(body.job_type));
+      if (missing.length) return showMissing(missing);
     }
     try {
       const id = body.id;
       const out = await api(id ? '/jobs/' + id : '/jobs', { method: id ? 'PUT' : 'POST', body });
       dialog.close();
-      if (sendNow) reportSend(out);
-      else toast(`Job #${out.job.id} saved${out.job.assignments.length ? ' — drivers NOT texted yet' : ''}`);
+      if (asDraft) toast(`Job #${out.job.id} saved as a draft — finish it before texting drivers`);
+      else toast(`Job #${out.job.id} saved${out.job.assignments.length && state.can.dispatch ? ' — text the drivers from the board when ready' : ''}`);
       if (out.job.scheduled_date !== state.date) state.date = out.job.scheduled_date;
       if (body.request_id) toast(`Website request scheduled as job #${out.job.id}`);
       if (state.tab === 'requests') loadRequests();
       loadBoard();
     } catch (err) {
+      if (err.missing) return showMissing(window.FORMS.requirable(body.job_type).filter((f) => err.missing.includes(f.key)));
       $('#job-form-error').textContent = err.message;
     }
   });
@@ -1021,8 +1126,10 @@
     const sf = $('#settings-form');
     sf.elements.lineup_on.checked = Boolean(settings.lineup_time);
     sf.elements.lineup_time.value = settings.lineup_time || '17:00';
-    $('#septic-form').elements.septic_reminder_years.value = settings.septic_reminder_years || '2';
+    $('#septic-form').elements.septic_reminder_years.value = settings.septic_reminder_years || '3';
     loadBackups().catch(() => {});
+    reqState.data = settings.required_fields || {};
+    renderRequired();
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
     $('#driver-rows').innerHTML = drivers.map((d) => `
@@ -1359,6 +1466,28 @@
     }, 250);
   });
   $('#cust-new').addEventListener('click', () => openCustomer(null));
+
+  // ---------- required fields (admin) ----------
+  const reqState = { type: 'haul', data: {} };
+  $('#req-type').innerHTML = TYPE_KEYS.map((k) =>
+    `<label><input type="radio" name="req-type" value="${k}" ${k === 'haul' ? 'checked' : ''}><span>${TYPES[k].icon} ${esc(TYPES[k].name)}</span></label>`).join('');
+  function renderRequired() {
+    const on = new Set(reqState.data[reqState.type] || []);
+    $('#req-fields').innerHTML = window.FORMS.requirable(reqState.type).map((f) =>
+      `<label><input type="checkbox" value="${esc(f.key)}" ${on.has(f.key) ? 'checked' : ''}> ${esc(f.label)}</label>`).join('');
+  }
+  $('#req-type').addEventListener('change', (e) => { reqState.type = e.target.value; renderRequired(); });
+  $('#req-fields').addEventListener('change', () => {
+    reqState.data[reqState.type] = $$('#req-fields input:checked').map((i) => i.value);
+  });
+  $('#req-save').addEventListener('click', async () => {
+    try {
+      const out = await api('/settings', { method: 'POST', body: { required_fields: reqState.data } });
+      reqState.data = out.required_fields;
+      requiredCache = null;
+      toast('Required fields saved');
+    } catch (err) { toast(err.message); }
+  });
 
   async function loadBackups() {
     const st = await api('/backups');

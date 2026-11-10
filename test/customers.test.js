@@ -84,8 +84,8 @@ test('septic reminders: due after the interval, not if booked or recently contac
 test('change history records the office, drivers and the system', async (t) => {
   const { d, dave } = await setup(t);
   const job = await runAs('Josh', async () => (await d.saveJob({ job_type: 'haul', scheduled_date: '2026-11-10', material: 'Sand fill',
-    scheduled_time: '07:00', assignments: [{ driver_id: dave.id }] })).job);
-  await runAs('Josh', () => d.saveJob({ ...job, scheduled_time: '08:30', invoice_number: 'INV-1042', amount_billed: '$310.00',
+    time_slot: 'am', assignments: [{ driver_id: dave.id }] })).job);
+  await runAs('Josh', () => d.saveJob({ ...job, time_slot: 'pm', invoice_number: 'INV-1042', amount_billed: '$310.00',
     assignments: [{ driver_id: dave.id }] }));
   await runAs('Josh', () => d.sendJob(job.id));
   await d.handleInbound('+17055550101', 'ok');
@@ -94,7 +94,7 @@ test('change history records the office, drivers and the system', async (t) => {
   const h = await d.historyFor(job.id);
   const lines = h.map((e) => `${e.actor}: ${e.action}${e.details ? ' — ' + e.details : ''}`);
   assert.match(lines[0], /^Josh: Created — Sand fill/);
-  assert.match(lines[1], /^Josh: Edited — Time: 07:00 → 08:30; Invoice #: \(blank\) → INV-1042; Amount billed: \(blank\) → \$310\.00/);
+  assert.match(lines[1], /^Josh: Edited — Time: AM → PM; Invoice #: \(blank\) → INV-1042; Amount billed: \(blank\) → \$310\.00/);
   assert.match(lines[2], /^Josh: Texted — Dave Thompson \(update\)|^Josh: Texted — Dave Thompson/);
   assert.match(lines[3], /^Dave Thompson: Confirmed by text — ok/);
   assert.match(lines[4], /^Dave Thompson: \+1 load \(1\) on the job page/);
@@ -119,7 +119,7 @@ test('customer and history endpoints', async (t) => {
 
   const c = await api('/customers', { name: 'Lakeview Cottage', phone: '705-555-3000', site_address: '9 Shore Rd', notes: 'Dog in yard' });
   assert.equal((await api('/customers/search?q=lake'))[0].id, c.id);
-  const { job } = await api('/jobs', { job_type: 'haul', scheduled_date: '2026-11-10', customer_id: c.id, customer: 'Lakeview Cottage',
+  const { job } = await api('/jobs', { job_type: 'haul', scheduled_date: '2026-11-10', customer_id: c.id, customer: 'Lakeview Cottage', customer_phone: '705-555-3000', to_location: '9 Shore Rd',
     assignments: [{ driver_id: dave.id }] });
   assert.equal(job.customer_id, c.id);
   const detail = await api(`/customers/${c.id}`);

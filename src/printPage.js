@@ -98,7 +98,8 @@ function renderSheet(job) {
     </div>
     <div>
       ${line('Date', created)}
-      ${line(job.job_type === 'septic' ? 'Pump-out date' : 'Delivery date', sms.formatJobWhen(job))}
+      ${line(job.job_type === 'septic' ? 'Pump-out date' : 'Delivery date', sms.formatDate(job.scheduled_date))}
+      ${line('Time', sms.formatJobTime(job) || 'Any time')}
       ${line(FORMS.labels(job).to, job.to_location, 'wide')}
       ${line('Municipality', job.municipality)}
       ${line('Site contact name / phone #', [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' / '))}
@@ -128,6 +129,8 @@ function renderSheet(job) {
   </section>
 
   ${t.disclaimer ? `<p class="disclaimer">${esc(t.disclaimer)}</p>` : ''}
+  <p class="stamp">Work order #${esc(job.id)}${Number(job.draft) ? ' · <b>DRAFT</b>' : ''} · Created${job.created_by_name ? ` by <b>${esc(job.created_by_name)}</b>` : ''} ${esc(fmtStamp(job.created_at))}
+    · Printed <b>${esc(fmtStamp(new Date().toISOString().slice(0, 19).replace('T', ' ')))}</b></p>
   ${photos}
 </article>`;
 }

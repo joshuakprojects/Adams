@@ -288,6 +288,10 @@ const ADDED_COLUMNS = {
     amount_billed: "TEXT NOT NULL DEFAULT ''",
     lat: 'REAL',
     lng: 'REAL',
+    // Time of day instead of an exact time: 'first' (first thing), 'am', 'pm' or '' (any time).
+    time_slot: "TEXT NOT NULL DEFAULT ''",
+    // Saved without every required field filled in: can't be texted until it's finished.
+    draft: 'INTEGER NOT NULL DEFAULT 0',
     // Pricing: driving distance used for the delivery fee, and the price-panel choices (weekly/monthly, off-schedule…).
     distance_km: 'REAL',
     distance_from: "TEXT NOT NULL DEFAULT ''",
@@ -441,7 +445,23 @@ function sqliteDriver(file) {
 async function openDb(target) {
   const db = typeof target === 'object' && target.url ? pgDriver(target.url) : sqliteDriver(typeof target === 'string' ? target : target.file);
   await db.setup();
+  await migrate(db);
   return db;
 }
 
-module.exports = { openDb, toPgSql };
+/** One-time data changes, each run once per database. */
+async function migrate(db) {
+  const done = async (key) => Boolean(await db.get('SELECT value FROM settings WHERE key = ?', 'migration_' + key));
+  const mark = (key) => db.run('INSERT INTO settings (key, value) VALUES (?, ?)', 'migration_' + key, 'done');
+  // Exact times became First thing / AM / PM.
+  if (!(await done('time_slot'))) {
+    await db.run(`UPDATE jobs SET time_slot = CASE
+        WHEN first_thing = 1 THEN 'first'
+        WHEN scheduled_time <> '' AND scheduled_time < '12:00' THEN 'am'
+        WHEN scheduled_time >= '12:00' THEN 'pm'
+        ELSE '' END WHERE time_slot = ''`);
+    await mark('time_slot');
+  }
+}
+
+module.exports = { openDb, toPgSql, migrate };

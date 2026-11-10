@@ -30,13 +30,13 @@ const job = (over) => ({ job_type: 'haul', scheduled_date: '2026-11-11', schedul
 test('lineup: one text per driver listing all their jobs, and it counts as texting the job', async (t) => {
   const { d, sent, dave, ron } = await setup(t);
   await d.saveJob(job({ assignments: [{ driver_id: dave.id }, { driver_id: ron.id }] }));
-  await d.saveJob(job({ scheduled_time: '13:00', material: '3/4" clear', assignments: [{ driver_id: dave.id }] }));
+  await d.saveJob(job({ time_slot: 'pm', material: '3/4" clear', assignments: [{ driver_id: dave.id }] }));
   const out = await d.sendLineup('2026-11-11');
   assert.equal(out.results.length, 2);
   const toDave = sent.find((m) => m.to === '+14035550101').body;
   assert.match(toDave, /Your 2 jobs for Wed Nov 11/);
-  assert.match(toDave, /1\) 7:00 AM - Aggregate #1001/);
-  assert.match(toDave, /2\) 1:00 PM - Aggregate #1002/);
+  assert.match(toDave, /1\) AM - Aggregate #1001/);
+  assert.match(toDave, /2\) PM - Aggregate #1002/);
   assert.match(toDave, /Reply OK to confirm all/);
   const toRon = sent.find((m) => m.to === '+14035550102').body;
   assert.match(toRon, /Your job for Wed Nov 11:\nADAMS BROS - Aggregates Work Order #1001/);
@@ -161,16 +161,24 @@ test('aggregates work order: two aggregate lines, yards, truck type', async (t) 
   await assert.rejects(async () => await d.saveJob({ ...job, id: job.id, details: { truck: 'Pickup' } }), /Circle one/);
 });
 
-test('"first thing" jobs sort first and say FIRST THING', async (t) => {
+test('time of day: first thing, AM, PM, any time — sorted in that order and said in the text', async (t) => {
   const { d, sent, dave } = await setup(t);
-  await d.saveJob(job({ scheduled_time: '06:30', assignments: [{ driver_id: dave.id }] }));
-  const first = (await d.saveJob(job({ scheduled_time: '', first_thing: true, material: 'Sand fill', assignments: [{ driver_id: dave.id }] }))).job;
+  await d.saveJob(job({ time_slot: 'am', assignments: [{ driver_id: dave.id }] }));
+  const first = (await d.saveJob(job({ time_slot: 'first', material: 'Sand fill', assignments: [{ driver_id: dave.id }] }))).job;
+  const pm = (await d.saveJob(job({ time_slot: 'pm', material: 'Fill' }))).job;
+  const any = (await d.saveJob(job({ time_slot: 'any', material: 'Fill' }))).job;
+  // Older callers sending an exact time or the "first thing" tick still work.
+  const old = (await d.saveJob(job({ scheduled_time: '14:30', material: 'Fill' }))).job;
+  assert.equal(old.time_slot, 'pm');
+  assert.equal((await d.saveJob(job({ first_thing: true }))).job.time_slot, 'first');
   assert.equal(first.first_thing, 1);
-  assert.deepEqual((await d.listJobs({ from: '2026-11-11', to: '2026-11-11' })).map((j) => j.id), [first.id, 1001]);
+  const order = (await d.listJobs({ from: '2026-11-11', to: '2026-11-11' })).map((j) => j.id);
+  assert.deepEqual(order.slice(0, 2), [first.id, order[1]]);
+  assert.ok(order.indexOf(1001) < order.indexOf(pm.id) && order.indexOf(pm.id) < order.indexOf(any.id));
   await d.sendJob(first.id);
   assert.match(sent.at(-1).body, /Wed Nov 11 - FIRST THING/);
   await d.sendLineup('2026-11-11');
-  assert.match(sent.at(-1).body, /1\) FIRST THING - Aggregate #1002[\s\S]*2\) 6:30 AM - Aggregate #1001/);
+  assert.match(sent.at(-1).body, /1\) FIRST THING - Aggregate #1002[\s\S]*2\) AM - Aggregate #1001/);
 });
 
 test('haul-away / until the site says stop', async (t) => {

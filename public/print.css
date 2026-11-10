@@ -63,3 +63,4 @@ header { display: grid; grid-template-columns: auto 1fr auto; gap: 16px; align-i
   header { grid-template-columns: 1fr; }
   .wo { text-align: left; }
 }
+.stamp { font-size: 11px; color: #444; margin: 8px 0 0; border-top: 1px solid #bbb; padding-top: 4px; }
