@@ -5,6 +5,7 @@ const config = require('./config');
 const sms = require('./sms');
 const FORMS = require('../public/forms');
 const { createCustomers } = require('./customers');
+const { createGeo, addressKey, validPoint } = require('./geo');
 const { currentActor } = require('./actor');
 
 const JOB_TYPES = FORMS.TYPE_KEYS;
@@ -226,6 +227,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     details: 'Form details', invoice_number: 'Invoice #', amount_billed: 'Amount billed',
   };
   const customers = createCustomers(db, { today });
+  const geo = createGeo(db);
 
   // ---------- change history ----------
 
@@ -246,6 +248,38 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     };
     if (f === 'details') return 'Form details changed';
     return `${FIELD_LABELS[f] || f}: ${show(from)} → ${show(to)}`;
+  }
+
+  // ---------- map pins ----------
+  const sameAddress = (a, b) => addressKey(a) !== '' && addressKey(a) === addressKey(b);
+
+  /** A job at the customer's usual site uses the pin the office already placed for that customer. */
+  async function pinFromCustomer(jobId) {
+    const j = await db.get('SELECT id, lat, customer_id, to_location FROM jobs WHERE id = ?', jobId);
+    if (!j || j.lat != null || !j.customer_id) return;
+    const c = await customers.get(j.customer_id);
+    if (c && c.site_lat != null && sameAddress(c.site_address, j.to_location)) {
+      await db.run('UPDATE jobs SET lat = ?, lng = ? WHERE id = ?', c.site_lat, c.site_lng, jobId);
+    }
+  }
+
+  /** Save a job's map pin. A pin the office dragged also becomes the customer's site pin. */
+  async function setJobLocation(jobId, lat, lng, { manual = false } = {}) {
+    const p = validPoint(lat, lng);
+    if (!p) throw new ValidationError('Invalid map location');
+    const job = await db.get('SELECT * FROM jobs WHERE id = ?', Number(jobId));
+    if (!job) throw new ValidationError('Job not found');
+    await db.run('UPDATE jobs SET lat = ?, lng = ? WHERE id = ?', p.lat, p.lng, job.id);
+    if (manual) {
+      await logHistory(job.id, 'Moved the map pin');
+      if (job.customer_id) {
+        const c = await customers.get(job.customer_id);
+        if (c && (!c.site_address || sameAddress(c.site_address, job.to_location))) {
+          await db.run('UPDATE customers SET site_lat = ?, site_lng = ? WHERE id = ?', p.lat, p.lng, c.id);
+        }
+      }
+    }
+    return p;
   }
 
   async function cleanAssignments(list) {
@@ -287,6 +321,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
         }
         const sets = JOB_FIELDS.map((f) => `${f} = ?`).join(', ');
         await t.run(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`, ...JOB_FIELDS.map((f) => fields[f]), id);
+        if (before.to_location !== fields.to_location || before.municipality !== fields.municipality) {
+          await t.run('UPDATE jobs SET lat = NULL, lng = NULL WHERE id = ?', id); // new address: find it on the map again
+        }
         if (changed) {
           // Drivers who already have the old details need the update.
           await t.run(`UPDATE assignments SET needs_resend = 1 WHERE job_id = ? AND status IN ('sent','acknowledged','in_progress')`, id);
@@ -323,6 +360,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       return id;
     });
 
+    await pinFromCustomer(jobId);
     const job = await getJob(jobId);
     if (isNew) {
       const who = job.assignments.map((a) => a.driver_name).join(', ');
@@ -897,7 +935,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
-    saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers,
+    saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
     getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,

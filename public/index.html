@@ -45,6 +45,7 @@
       <div class="layout-toggle" role="group" aria-label="Board layout">
         <button data-layout="lanes" aria-pressed="true">Lanes</button>
         <button data-layout="list" aria-pressed="false">List</button>
+        <button data-layout="map" aria-pressed="false">Map</button>
       </div>
       <span id="lineup-status" class="muted small"></span>
       <button class="btn outline" id="send-lineup" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
@@ -58,6 +59,18 @@
     <div class="filter-row types" id="type-filter"></div>
     <section class="driver-strip" id="driver-strip" aria-label="Drivers"></section>
     <div id="jobs" class="jobs"></div>
+    <div id="map-panel" class="map-panel hidden">
+      <div class="map-legend">
+        <span><i class="dot st-totext"></i>To text</span><span><i class="dot st-waiting"></i>Waiting for OK</span>
+        <span><i class="dot st-working"></i>Working</span><span><i class="dot st-done"></i>Done</span>
+        <span><i class="dot st-yard"></i>Yard</span>
+        <span class="muted small">Pin in the wrong spot? Drag it — it's remembered for that customer.</span>
+      </div>
+      <div class="map-body">
+        <div id="map" class="map" role="region" aria-label="Map of the day's jobs"></div>
+        <aside class="map-side" id="map-side"></aside>
+      </div>
+    </div>
   </section>
 
   <!-- DRIVERS & TRUCKS -->

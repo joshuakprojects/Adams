@@ -35,7 +35,11 @@ function createCustomers(db, { today }) {
     const c = clean(data);
     if (!c.name && !c.phone) throw new CustomerError('A customer needs a name or a phone number');
     if (data.id) {
-      if (!(await get(data.id))) throw new CustomerError('Customer not found');
+      const before = await get(data.id);
+      if (!before) throw new CustomerError('Customer not found');
+      if (before.site_address !== c.site_address) {
+        await db.run('UPDATE customers SET site_lat = NULL, site_lng = NULL WHERE id = ?', before.id);
+      }
       await db.run(`UPDATE customers SET ${FIELDS.map((f) => `${f} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`,
         ...FIELDS.map((f) => c[f]), Number(data.id));
       return get(data.id);

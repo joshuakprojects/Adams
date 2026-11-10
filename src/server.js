@@ -44,7 +44,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   app.use(express.urlencoded({ extended: false, limit: '50kb' }));
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'no-referrer');
+    // Driver links carry their key in the URL, so they never send a referrer. Office pages send only the
+    // site's origin, which Google Maps needs to check its key is used on this site.
+    res.setHeader('Referrer-Policy', _req.path.startsWith('/j/') ? 'no-referrer' : 'strict-origin');
     res.setHeader('X-Frame-Options', 'DENY');
     next();
   });
@@ -173,7 +175,15 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.use(auth.requireUser);
   const json = (fn) => h(async (req, res) => res.json(await fn(req)));
 
-  api.get('/me', (req, res) => res.json({ user: req.user, smsEnabled: config.smsEnabled, today: dispatch.today() }));
+  api.get('/me', (req, res) => res.json({ user: req.user, smsEnabled: config.smsEnabled, today: dispatch.today(),
+    maps: { key: config.maps.key, mapId: config.maps.mapId, yard: config.maps.yard } }));
+
+  // ---------- map ----------
+  api.post('/geocodes/lookup', h(async (req, res) => res.json(await dispatch.geo.lookup(req.body.addresses))));
+  api.post('/geocodes', h(async (req, res) => res.json({ ok: await dispatch.geo.remember(req.body.address, req.body.lat, req.body.lng) })));
+  api.post('/jobs/:id/location', h(async (req, res) => {
+    res.json(await dispatch.setJobLocation(req.params.id, req.body.lat, req.body.lng, { manual: req.body.manual === true }));
+  }));
   api.get('/board', json(async (req) => ({
     ...(await dispatch.board(String(req.query.date || dispatch.today()))),
     new_requests: await intake.countNew(),

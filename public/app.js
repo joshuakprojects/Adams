@@ -287,6 +287,13 @@
     const lanes = state.layout === 'lanes' && ['active', 'attention'].includes(state.view) && jobs.length;
     $$('.layout-toggle [data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout)));
     $('#jobs').classList.toggle('as-lanes', Boolean(lanes));
+    const onMap = state.layout === 'map';
+    $('#jobs').classList.toggle('hidden', onMap);
+    $('#map-panel').classList.toggle('hidden', !onMap);
+    if (onMap) {
+      renderMap(state.view === 'active' ? typed.filter((j) => j.status !== 'cancelled') : shown);
+      return;
+    }
     if (lanes) {
       // In lanes, finished jobs have their own column, so the board shows open ones plus today's done.
       const laneJobs = state.view === 'attention' ? shown : typed.filter((j) => j.status !== 'cancelled');
@@ -313,6 +320,166 @@
     if (t) { state.typeFilter = t.dataset.type; store.set('type', state.typeFilter); }
     if (l) { state.layout = l.dataset.layout; store.set('layout', state.layout); }
     if (v || t || l) renderBoard();
+  });
+
+  // ---------- map view (Google Maps) ----------
+  const STAGE_COLOURS = { totext: '#8A8A8A', waiting: '#FFD101', working: '#2D6CDF', done: '#1E9E5A', cancelled: '#C0392B' };
+  const mapState = { ready: null, map: null, markers: new Map(), yard: null, info: null, geocoder: null, jobs: [], fitted: '' };
+  const geoQuery = (a) => (/\bon(tario)?\b/i.test(a) ? a : `${a}, Ontario`) + ', Canada';
+
+  function loadGoogleMaps() {
+    if (mapState.ready) return mapState.ready;
+    mapState.ready = new Promise((resolve, reject) => {
+      window.__adamsMapsReady = resolve;
+      window.gm_authFailure = () => mapProblem('Google turned down the Maps key. Check the key, that the Maps JavaScript API and Geocoding API are turned on, and that the key allows this site’s address.');
+      const s = document.createElement('script');
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(state.maps.key)}&v=weekly&libraries=marker&loading=async&callback=__adamsMapsReady`;
+      s.async = true;
+      s.onerror = () => { mapState.ready = null; reject(new Error('Could not load Google Maps — check the internet connection.')); };
+      document.head.append(s);
+    });
+    return mapState.ready;
+  }
+
+  function mapProblem(html) {
+    $('#map').innerHTML = `<div class="map-setup">${html}</div>`;
+    mapState.map = null;
+  }
+
+  async function initMap() {
+    if (mapState.map) return true;
+    if (!state.maps?.key) {
+      mapProblem(`<h3>Turn on the map</h3><p>The map needs a free Google Maps key. In Google Cloud: create a project, turn on the
+        <b>Maps JavaScript API</b> and <b>Geocoding API</b>, create an API key and restrict it to <b>Websites</b> →
+        <code>${esc(location.origin)}/*</code>. Then add it on Replit as the secret <code>GOOGLE_MAPS_API_KEY</code> and republish.</p>
+        <p class="muted small">Google gives a monthly free allowance; a dispatch office this size normally stays inside it.</p>`);
+      return false;
+    }
+    try { await loadGoogleMaps(); } catch (err) { mapProblem(esc(err.message)); return false; }
+    const { Map, InfoWindow } = await google.maps.importLibrary('maps');
+    await google.maps.importLibrary('marker');
+    $('#map').innerHTML = '';
+    mapState.map = new Map($('#map'), { center: { lat: 45.3469, lng: -80.0353 }, zoom: 10, mapId: state.maps.mapId,
+      streetViewControl: false, mapTypeControl: true, fullscreenControl: true, gestureHandling: 'greedy' });
+    mapState.info = new InfoWindow();
+    mapState.geocoder = new google.maps.Geocoder();
+    const yard = await placeFor(state.maps.yard);
+    if (yard) {
+      mapState.yard = new google.maps.marker.AdvancedMarkerElement({ map: mapState.map, position: yard, title: 'Adams Bros yard',
+        content: pinEl('A', '#111', '#FFD101') });
+    }
+    return true;
+  }
+
+  function pinEl(label, bg, fg = '#111') {
+    const el = document.createElement('div');
+    el.className = 'map-pin';
+    el.style.background = bg;
+    el.style.color = fg;
+    el.textContent = label;
+    return el;
+  }
+
+  // Address → point: the shared cache first, then Google's geocoder (which is then cached for everyone).
+  async function placeFor(address) {
+    if (!address) return null;
+    const hit = (await api('/geocodes/lookup', { method: 'POST', body: { addresses: [address] } }).catch(() => ({})))[address];
+    if (hit) return hit;
+    try {
+      const { results } = await mapState.geocoder.geocode({ address: geoQuery(address), region: 'ca' });
+      if (!results?.length) return null;
+      const loc = results[0].geometry.location;
+      const p = { lat: loc.lat(), lng: loc.lng() };
+      api('/geocodes', { method: 'POST', body: { address, ...p } }).catch(() => {});
+      return p;
+    } catch { return null; }
+  }
+
+  async function renderMap(jobs) {
+    mapState.jobs = jobs;
+    if (!(await initMap())) { renderMapSide(jobs, new Set()); return; }
+    if (mapState.jobs !== jobs) return; // a newer refresh took over while the map loaded
+    const missing = new Set();
+    const seen = new Set();
+    const stacked = {};
+    const bounds = new google.maps.LatLngBounds();
+    if (mapState.yard) bounds.extend(mapState.yard.position);
+    // Look up every address we don't have a pin for in one go.
+    const need = [...new Set(jobs.filter((j) => j.lat == null && siteAddress(j)).map(siteAddress))];
+    const cached = need.length ? await api('/geocodes/lookup', { method: 'POST', body: { addresses: need } }).catch(() => ({})) : {};
+    for (const j of jobs) {
+      let pos = j.lat != null ? { lat: j.lat, lng: j.lng } : cached[siteAddress(j)];
+      if (!pos && siteAddress(j)) {
+        pos = await placeFor(siteAddress(j));
+        if (pos) { cached[siteAddress(j)] = pos; api(`/jobs/${j.id}/location`, { method: 'POST', body: pos }).catch(() => {}); }
+      }
+      if (!pos) { missing.add(j.id); continue; }
+      // Several jobs at one address: fan the pins out a little so each can be clicked.
+      const spot = `${pos.lat.toFixed(5)},${pos.lng.toFixed(5)}`;
+      const k = (stacked[spot] = (stacked[spot] || 0) + 1) - 1;
+      if (k) pos = { lat: pos.lat + 0.00025 * k, lng: pos.lng + 0.00035 * k };
+      seen.add(j.id);
+      bounds.extend(pos);
+      const stage = stageOf(j);
+      let m = mapState.markers.get(j.id);
+      if (!m) {
+        m = new google.maps.marker.AdvancedMarkerElement({ map: mapState.map, gmpDraggable: true });
+        m.addListener('click', () => openMapInfo(m.jobId));
+        m.addListener('dragend', async () => {
+          const p = m.position;
+          const lat = typeof p.lat === 'function' ? p.lat() : p.lat;
+          const lng = typeof p.lng === 'function' ? p.lng() : p.lng;
+          try { await api(`/jobs/${m.jobId}/location`, { method: 'POST', body: { lat, lng, manual: true } }); toast(`Pin moved for job #${m.jobId}`); loadBoard(); }
+          catch (err) { toast(err.message); }
+        });
+        mapState.markers.set(j.id, m);
+      }
+      m.jobId = j.id;
+      m.position = pos;
+      m.title = `#${j.id} ${j.customer || ''} — ${siteAddress(j)}`;
+      m.content = pinEl(String(j.id).slice(-3), STAGE_COLOURS[stage], stage === 'waiting' ? '#111' : '#fff');
+      m.map = mapState.map;
+    }
+    for (const [id, m] of mapState.markers) if (!seen.has(id)) { m.map = null; mapState.markers.delete(id); }
+    // Zoom to fit when the day or the set of jobs changes, not on every refresh.
+    const sig = state.date + ':' + [...seen].sort().join(',');
+    if (sig !== mapState.fitted && !bounds.isEmpty()) {
+      mapState.fitted = sig;
+      if (seen.size) mapState.map.fitBounds(bounds, 60);
+      if (seen.size <= 1) mapState.map.setZoom(Math.min(mapState.map.getZoom() || 12, 12));
+    }
+    renderMapSide(jobs, missing);
+  }
+
+  function openMapInfo(jobId) {
+    const j = mapState.jobs.find((x) => x.id === jobId);
+    const m = mapState.markers.get(jobId);
+    if (!j || !m) return;
+    const drivers = j.assignments.filter((a) => a.status !== 'cancelled').map((a) => a.driver_name).join(', ');
+    const nav = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(geoQuery(siteAddress(j)))}`;
+    mapState.info.setContent(`<div class="map-info"><b>#${j.id} · ${esc(typeInfo(j.job_type).name)}</b>
+      <div>${esc(j.customer || '')}</div><div class="muted">${esc(siteAddress(j))}</div>
+      <div>${esc(cargo(j))}</div><div class="muted">${esc(drivers || 'No driver yet')}${j.scheduled_time ? ' · ' + esc(j.scheduled_time) : ''}</div>
+      <div class="row-actions"><button class="btn tiny primary" data-act="edit" data-job="${j.id}">Edit</button>
+        <a class="btn tiny" href="${nav}" target="_blank" rel="noopener">Directions</a></div></div>`);
+    mapState.info.open({ map: mapState.map, anchor: m });
+  }
+
+  function renderMapSide(jobs, missing) {
+    const list = jobs.slice().sort((a, b) => String(a.scheduled_time || '99').localeCompare(String(b.scheduled_time || '99')));
+    $('#map-side').innerHTML = `<h3>${jobs.length} job${jobs.length === 1 ? '' : 's'}</h3>` + (list.map((j) => `
+      <button type="button" class="map-item" data-map-job="${j.id}">
+        <i class="dot st-${stageOf(j)}"></i><b>#${j.id}</b> ${esc(j.customer || typeInfo(j.job_type).name)}
+        <span class="muted small">${esc(siteAddress(j) || 'No address')}${missing.has(j.id) ? ' · <em>not on the map</em>' : ''}</span>
+      </button>`).join('') || '<p class="muted">No jobs on this day.</p>');
+  }
+
+  $('#map-side').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-map-job]');
+    if (!b) return;
+    const id = Number(b.dataset.mapJob);
+    const m = mapState.markers.get(id);
+    if (m && mapState.map) { mapState.map.panTo(m.position); openMapInfo(id); } else api('/jobs/' + id).then(openJobForm).catch((err) => toast(err.message));
   });
 
   function renderJob(job, { stale = false, compact = false } = {}) {
@@ -1182,6 +1349,7 @@
     const me = await api('/me');
     state.today = state.date = me.today;
     state.smsEnabled = me.smsEnabled;
+    state.maps = me.maps || {};
     $('#user-name').textContent = me.user.name;
     $('#user-initial').textContent = (me.user.name || '?').trim()[0].toUpperCase();
     $('#test-mode').classList.toggle('hidden', me.smsEnabled);

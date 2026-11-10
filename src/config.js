@@ -26,6 +26,12 @@ module.exports = {
     website: env.COMPANY_WEBSITE || 'www.adamsbros.ca',
     hst: env.COMPANY_HST || 'R100046929',
   },
+  // Map view: a Google Maps browser key (Maps JavaScript API + Geocoding API), restricted to this site's address.
+  maps: {
+    key: env.GOOGLE_MAPS_API_KEY || '',
+    mapId: env.GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID',
+    yard: env.YARD_ADDRESS || '116 William St, Parry Sound, ON P2A 1V4',
+  },
   dispatchPhone: env.DISPATCH_PHONE || '+17057462962',
   twilio: {
     accountSid: env.TWILIO_ACCOUNT_SID || '',
