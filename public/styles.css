@@ -480,3 +480,5 @@ tr.clickable:hover td, tr.clickable:focus td { background: #FFFBEA; }
 .bad { color: #B3261E; }
 #backup-panel .table { margin-top: 12px; font-size: 14px; }
 #backup-panel .row-actions { margin-top: 8px; }
+.map-alert { background: #FFF6CC; border: 1px solid #E8C200; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; font-size: 14px; line-height: 1.5; }
+.map-place { margin: 0 6px 8px 26px; }

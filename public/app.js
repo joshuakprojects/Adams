@@ -324,7 +324,8 @@
 
   // ---------- map view (Google Maps) ----------
   const STAGE_COLOURS = { totext: '#8A8A8A', waiting: '#FFD101', working: '#2D6CDF', done: '#1E9E5A', cancelled: '#C0392B' };
-  const mapState = { ready: null, map: null, markers: new Map(), yard: null, info: null, geocoder: null, jobs: [], fitted: '' };
+  const mapState = { ready: null, map: null, markers: new Map(), yard: null, info: null, geocoder: null, jobs: [], fitted: '',
+    failed: new Map(), geoError: '', placing: null };
   const geoQuery = (a) => (/\bon(tario)?\b/i.test(a) ? a : `${a}, Ontario`) + ', Canada';
 
   function loadGoogleMaps() {
@@ -363,6 +364,18 @@
       streetViewControl: false, mapTypeControl: true, fullscreenControl: true, gestureHandling: 'greedy' });
     mapState.info = new InfoWindow();
     mapState.geocoder = new google.maps.Geocoder();
+    // "Place on map": the next click on the map sets that job's pin.
+    mapState.map.addListener('click', async (e) => {
+      const id = mapState.placing;
+      if (!id || !e.latLng) return;
+      mapState.placing = null;
+      showMapAlert();
+      try {
+        await api(`/jobs/${id}/location`, { method: 'POST', body: { lat: e.latLng.lat(), lng: e.latLng.lng(), manual: true } });
+        toast(`Pin placed for job #${id}`);
+        await loadBoard();
+      } catch (err) { toast(err.message); }
+    });
     const yard = await placeFor(state.maps.yard);
     if (yard) {
       mapState.yard = new google.maps.marker.AdvancedMarkerElement({ map: mapState.map, position: yard, title: 'Adams Bros yard',
@@ -385,14 +398,39 @@
     if (!address) return null;
     const hit = (await api('/geocodes/lookup', { method: 'POST', body: { addresses: [address] } }).catch(() => ({})))[address];
     if (hit) return hit;
+    // Don't ask Google again for an address it already couldn't find (the board refreshes every few seconds).
+    if (mapState.failed.has(address)) return null;
     try {
       const { results } = await mapState.geocoder.geocode({ address: geoQuery(address), region: 'ca' });
-      if (!results?.length) return null;
+      if (!results?.length) { mapState.failed.set(address, 'ZERO_RESULTS'); return null; }
       const loc = results[0].geometry.location;
       const p = { lat: loc.lat(), lng: loc.lng() };
       api('/geocodes', { method: 'POST', body: { address, ...p } }).catch(() => {});
       return p;
-    } catch { return null; }
+    } catch (err) {
+      const code = String(err?.code || err?.message || 'ERROR');
+      mapState.failed.set(address, code);
+      if (!/ZERO_RESULTS/.test(code)) { mapState.geoError = code; showMapAlert(); }
+      return null;
+    }
+  }
+
+  function showMapAlert() {
+    const box = $('#map-alert');
+    const code = mapState.geoError;
+    if (mapState.placing) {
+      box.innerHTML = `📍 <b>Click on the map where job #${mapState.placing} is.</b> <button class="link" data-map-cancel>Cancel</button>`;
+    } else if (/REQUEST_DENIED/.test(code)) {
+      box.innerHTML = `<b>Google won't look up addresses with this key (REQUEST_DENIED).</b> In Google Cloud console:
+        <b>APIs &amp; Services → Library → Geocoding API → Enable</b>. Then <b>Credentials</b> → your key → if
+        "Restrict key" is on under API restrictions, tick <b>Geocoding API</b> as well as Maps JavaScript API. Save, wait a couple
+        of minutes, and reload this page. Until then you can place pins by hand with <b>Place on map</b>.`;
+    } else if (/OVER_QUERY_LIMIT|OVER_DAILY_LIMIT/.test(code)) {
+      box.innerHTML = `<b>Google's address lookup limit was reached (${esc(code)}).</b> Check billing is set up on the Google Cloud project. You can still place pins by hand.`;
+    } else if (code) {
+      box.innerHTML = `<b>Address lookup failed (${esc(code)}).</b> You can place pins by hand with <b>Place on map</b>.`;
+    }
+    box.classList.toggle('hidden', !mapState.placing && !code);
   }
 
   async function renderMap(jobs) {
@@ -471,10 +509,16 @@
       <button type="button" class="map-item" data-map-job="${j.id}">
         <i class="dot st-${stageOf(j)}"></i><b>#${j.id}</b> ${esc(j.customer || typeInfo(j.job_type).name)}
         <span class="muted small">${esc(siteAddress(j) || 'No address')}${missing.has(j.id) ? ' · <em>not on the map</em>' : ''}</span>
-      </button>`).join('') || '<p class="muted">No jobs on this day.</p>');
+      </button>${missing.has(j.id) && mapState.map ? `<button type="button" class="btn tiny map-place" data-map-place="${j.id}">📍 Place on map</button>` : ''}`).join('')
+      || '<p class="muted">No jobs on this day.</p>');
   }
 
+  $('#map-panel').addEventListener('click', (e) => {
+    if (e.target.closest('[data-map-cancel]')) { mapState.placing = null; showMapAlert(); }
+  });
   $('#map-side').addEventListener('click', (e) => {
+    const place = e.target.closest('[data-map-place]');
+    if (place) { mapState.placing = Number(place.dataset.mapPlace); showMapAlert(); return; }
     const b = e.target.closest('[data-map-job]');
     if (!b) return;
     const id = Number(b.dataset.mapJob);
