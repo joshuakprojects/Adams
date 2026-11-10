@@ -41,11 +41,11 @@ async function createUser(db, { email, name, password, role = 'admin' }) {
 }
 
 async function listUsers(db) {
-  return db.all('SELECT id, email, name, role, active, created_at FROM users ORDER BY active DESC, lower(name)');
+  return db.all('SELECT id, email, name, role, active, boss_notes, created_at FROM users ORDER BY active DESC, lower(name)');
 }
 
 /** Change a login's name, role, or password (blank = keep). Changing the password or turning a login off logs it out. */
-async function updateUser(db, id, { name, role, password, active }) {
+async function updateUser(db, id, { name, role, password, active, boss_notes: bossNotes }) {
   const u = await db.get('SELECT * FROM users WHERE id = ?', Number(id));
   if (!u) throw new UserError('Login not found');
   if (role !== undefined && !ROLES.includes(role)) throw new UserError('Unknown role');
@@ -53,8 +53,9 @@ async function updateUser(db, id, { name, role, password, active }) {
   await db.run('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?',
     String(name ?? u.name).trim() || u.email, role ?? u.role, active === undefined ? u.active : (active ? 1 : 0), u.id);
   if (password) await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(password), u.id);
+  if (bossNotes !== undefined) await db.run('UPDATE users SET boss_notes = ? WHERE id = ?', bossNotes ? 1 : 0, u.id);
   if (password || active === false) await db.run('DELETE FROM sessions WHERE user_id = ?', u.id);
-  return db.get('SELECT id, email, name, role, active, created_at FROM users WHERE id = ?', u.id);
+  return db.get('SELECT id, email, name, role, active, boss_notes, created_at FROM users WHERE id = ?', u.id);
 }
 
 /** Remove a login. Their work orders keep their name in the history. */
@@ -124,9 +125,9 @@ function loadUser(db) {
     try {
       const token = parseCookies(req.headers.cookie)[COOKIE];
       if (token) {
-        const row = await db.get(`SELECT u.id, u.email, u.name, u.role, u.active, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`, token);
+        const row = await db.get(`SELECT u.id, u.email, u.name, u.role, u.active, u.boss_notes, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`, token);
         if (row && Number(row.active) && row.expires_at > new Date().toISOString()) {
-          req.user = { id: row.id, email: row.email, name: row.name, role: row.role || 'admin' };
+          req.user = { id: row.id, email: row.email, name: row.name, role: row.role || 'admin', boss_notes: Number(row.boss_notes) || 0 };
         }
       }
       next();

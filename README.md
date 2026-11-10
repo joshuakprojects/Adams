@@ -153,6 +153,9 @@ the reception screen with `/?view=reception`):
 - **Find:** by name, phone, address or work order number. Change or cancel a booking (a driver who was already texted gets
   told), or book the same again. Floats and labour work orders open in the full form.
 - **Customer asks…:** search the standard answers and the prices; the answers beside a call follow the service picked.
+- **Notes from the boss:** shown at the top of reception's Home. They're written on the dashboard (the **📌 Notes for
+  reception** box on the Board) by the logins the owner ticks under *Notes from the boss* in **Setup → Logins**; those logins
+  can also take notes down. Reception can read them but not add any.
 
 ## Booking jobs
 

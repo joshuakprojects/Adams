@@ -751,6 +751,32 @@
     loadBoard();
   }));
 
+  // ---------- notes from the boss (posted here, shown on reception's Home) ----------
+  async function loadBossNotes() {
+    const notes = await api('/boss-notes').catch(() => []);
+    const c = $('#boss-count');
+    c.textContent = notes.length || '';
+    c.classList.toggle('hidden', !notes.length);
+    $('#boss-list').innerHTML = notes.map((n) => `<li><div class="b">${esc(n.body)}</div>
+      <div class="muted small">${esc(n.author)} · ${esc(fmtStamp(n.created_at))} <button class="link" data-boss-del="${n.id}">Remove</button></div></li>`).join('')
+      || '<li class="muted small">No notes up. Reception sees what you post here at the top of their Home screen.</li>';
+  }
+  $('#boss-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('/boss-notes', { method: 'POST', body: { body: e.target.elements.body.value } });
+      e.target.reset();
+      toast('Posted — reception sees it on their Home screen');
+      loadBossNotes();
+    } catch (err) { toast(err.message); }
+  });
+  $('#boss-list').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-boss-del]');
+    if (!b || !confirm('Take this note down?')) return;
+    await api('/boss-notes/' + b.dataset.bossDel, { method: 'DELETE' }).catch((err) => toast(err.message));
+    loadBossNotes();
+  });
+
   // ---------- calendar (month view) ----------
   let calMonth = null;
   let calData = {};
@@ -1656,6 +1682,8 @@
     document.body.classList.toggle('can-dispatch', Boolean(state.can.dispatch));
     document.body.classList.toggle('can-admin', Boolean(state.can.admin));
     document.body.classList.toggle('is-owner', Boolean(state.can.owner));
+    document.body.classList.toggle('can-notes', Boolean(state.can.notes));
+    if (state.can.notes) loadBossNotes();
     $('#user-name').title = state.can.role_name || '';
     if (!state.can.dispatch) $('#job-form button[value=save]').textContent = 'Save work order';
     state.maps = me.maps || {};

@@ -62,6 +62,14 @@
       <span id="request-count" class="count hidden"></span>
       <button class="link" data-act="go-texts" data-need="dispatch">💬 All texts from drivers <span id="alert-count" class="count hidden"></span></button>
     </div>
+    <details class="boss-box" id="boss-box" data-need="notes">
+      <summary>📌 Notes for reception <span id="boss-count" class="count hidden"></span></summary>
+      <form id="boss-form" class="boss-form">
+        <textarea name="body" rows="2" placeholder="e.g. No septic bookings in McDougall next week — the truck is in for repairs." required></textarea>
+        <button class="btn primary" type="submit">Post to reception</button>
+      </form>
+      <ul class="boss-list" id="boss-list"></ul>
+    </details>
     <div id="alerts"></div>
     <div id="stale-banner"></div>
     <div class="filter-row types" id="type-filter"></div>
@@ -89,7 +97,7 @@
       <p class="muted small"><b>Office</b>: work orders (without texting drivers), customers, prices and questions.
         <b>Dispatcher</b>: also assigns and texts drivers, Texts and Records. <b>Admin</b>: everything, including Setup and changing prices.
         Only you can see this panel.</p>
-      <table class="table compact"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead><tbody id="user-rows"></tbody></table>
+      <table class="table compact"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th title="Can post notes from the boss to the reception screen">Notes from the boss</th><th></th></tr></thead><tbody id="user-rows"></tbody></table>
       <form id="user-form" class="inline-form" autocomplete="off">
         <input name="name" placeholder="Name" required>
         <input name="email" type="email" placeholder="Email (their login)" required>

@@ -202,6 +202,21 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return distance.measure({ from, address: req.body?.address, lat: req.body?.lat, lng: req.body?.lng });
   }));
 
+  // ---------- notes from the boss (shown on reception's Home) ----------
+  const canPost = (req, res, next) => (req.user?.boss_notes ? next()
+    : res.status(403).json({ error: 'Only the logins chosen in Setup → Logins can post notes from the boss' }));
+  api.get('/boss-notes', json(() => db.all('SELECT * FROM boss_notes ORDER BY id DESC LIMIT 50')));
+  api.post('/boss-notes', canPost, json(async (req) => {
+    const body = String(req.body?.body || '').trim().slice(0, 2000);
+    if (!body) throw new ValidationError('Write the note first');
+    const r = await db.run('INSERT INTO boss_notes (body, author, author_id) VALUES (?, ?, ?)', body, req.user.name, req.user.id);
+    return db.get('SELECT * FROM boss_notes WHERE id = ?', Number(r.lastInsertRowid));
+  }));
+  api.delete('/boss-notes/:id', canPost, json(async (req) => {
+    await db.run('DELETE FROM boss_notes WHERE id = ?', Number(req.params.id));
+    return { ok: true };
+  }));
+
   // ---------- reception (office logins): home, find, quotes ----------
   const reception = createReception(db, dispatch);
   api.get('/reception/home', json((req) => reception.home(req.user, dispatch.today())));
@@ -271,7 +286,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     if (Number(req.params.id) === req.user.id && (b.role && b.role !== 'admin' || b.active === false)) {
       throw new ValidationError('You can\'t take away your own admin access');
     }
-    return auth.updateUser(db, req.params.id, { name: b.name, role: b.role, password: b.password || '', active: b.active });
+    return auth.updateUser(db, req.params.id, { name: b.name, role: b.role, password: b.password || '', active: b.active, boss_notes: b.boss_notes });
   }));
   api.delete('/users/:id', needOwner, json(async (req) => {
     if (Number(req.params.id) === req.user.id) throw new ValidationError('You can\'t remove your own login');

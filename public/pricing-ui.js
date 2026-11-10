@@ -704,6 +704,7 @@
       <td><input name="name" value="${esc(u.name)}" aria-label="Name"></td>
       <td>${esc(u.email)}${u.email === state.user?.email ? ' <span class="muted small">(you)</span>' : ''}</td>
       <td><select name="role" aria-label="Role">${ROLE_OPTS.map(([v, t]) => `<option value="${v}" ${u.role === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+      <td><label class="check small"><input type="checkbox" name="boss_notes" ${Number(u.boss_notes) ? 'checked' : ''}> can post</label></td>
       <td class="row-actions"><button class="btn tiny" data-user-act="save">Save</button>
         <button class="btn tiny" data-user-act="password">New password</button>
         <button class="btn tiny danger" data-user-act="remove">Remove</button></td></tr>`).join('');
@@ -715,7 +716,8 @@
     const id = tr.dataset.user;
     try {
       if (b.dataset.userAct === 'save') {
-        await api('/users/' + id, { method: 'PUT', body: { name: $('[name=name]', tr).value, role: $('[name=role]', tr).value } });
+        await api('/users/' + id, { method: 'PUT', body: { name: $('[name=name]', tr).value, role: $('[name=role]', tr).value,
+          boss_notes: $('[name=boss_notes]', tr).checked } });
         toast('Login updated');
       }
       if (b.dataset.userAct === 'password') {

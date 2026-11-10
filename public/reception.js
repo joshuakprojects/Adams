@@ -85,12 +85,15 @@
   // Home
   // =====================================================================
   async function renderHome() {
-    const h = await api('/reception/home').catch(() => ({ recent: [], quotes: [], today_jobs: 0, week_jobs: 0 }));
+    const [h, notes] = await Promise.all([api('/reception/home').catch(() => ({ recent: [], quotes: [], today_jobs: 0, week_jobs: 0 })),
+      api('/boss-notes').catch(() => [])]);
     const hour = new Date().getHours();
     const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
     root().innerHTML = nav() + `<div class="rc-wrap">
       <h1 class="rc-h1">${hello}, ${esc((state.user?.name || '').split(' ')[0])}</h1>
       <div class="rc-sub">${esc(dayName(state.today))} · ${h.today_jobs} job${h.today_jobs === 1 ? '' : 's'} today · ${h.week_jobs} this week</div>
+      ${notes.length ? `<div class="rc-boss"><h3>📌 Notes from the boss</h3>${notes.map((n) => `<div class="rc-boss-note">
+        <div>${esc(n.body)}</div><div class="who">— ${esc(n.author)}, ${esc(A.fmtStamp(n.created_at))}</div></div>`).join('')}</div>` : ''}
       <div class="rc-big3">
         <button class="rc-bigbtn main" data-go="call"><span class="ic">📞</span><span><span class="t">New call</span><span class="s">Price it, answer questions, book it</span></span></button>
         <button class="rc-bigbtn" data-go="find"><span class="ic">🔎</span><span><span class="t">Find a customer</span><span class="s">Name, phone, address or W.O. # — change or cancel a booking</span></span></button>

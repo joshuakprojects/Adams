@@ -33,6 +33,7 @@ function permissions(user) {
     owner: isOwner(user),
     dispatch: can(user, 'dispatcher'), // assign + text drivers, Texts, Records
     admin: can(user, 'admin'), // Setup, edit prices and questions
+    notes: Boolean(user.boss_notes), // posts "Notes from the boss" to reception
   };
 }
 
