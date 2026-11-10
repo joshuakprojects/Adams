@@ -8,6 +8,8 @@ const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
 const { renderPrintPage, renderPrintBatch } = require('./printPage');
 const { jobsToCsv } = require('./records');
+const { runAs } = require('./actor');
+const { CustomerError } = require('./customers');
 const twilio = require('./twilio');
 const { createIntake, validKey, IntakeError } = require('./intake');
 
@@ -152,6 +154,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   // ---------- office ----------
   auth.authRoutes(app, db);
   app.use(auth.loadUser(db));
+  // Everything an office user does is credited to them in the job history.
+  app.use((req, _res, next) => (req.user ? runAs(req.user.name || req.user.email, next) : next()));
   app.get('/login', (_req, res) => res.sendFile(path.join(pub, 'login.html')));
   app.get('/login.css', (_req, res) => res.sendFile(path.join(pub, 'styles.css')));
 
@@ -178,6 +182,13 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/requests/:id/prefill', h(async (req, res) => {
     const p = await intake.prefill(req.params.id, dispatch.today());
     if (!p) return res.status(404).json({ error: 'Not found' });
+    // Known customer? Link them and bring in their site notes (gate codes, dog in yard…).
+    const match = p.customer_phone ? (await dispatch.customers.search(p.customer_phone, 1))[0] : null;
+    if (match) {
+      p.customer_id = match.id;
+      for (const k of ['billing_address', 'customer_email']) if (!p[k]) p[k] = k === 'customer_email' ? match.email : match.billing_address;
+      if (match.notes) p.notes = [p.notes, `Customer notes: ${match.notes}`].filter(Boolean).join('. ');
+    }
     res.json(p);
   }));
   api.post('/requests/:id/status', json((req) => intake.setStatus(req.params.id, req.body?.status, req.user.id)));
@@ -195,6 +206,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     // Scheduled from a website request: link the two.
     if (req.body.request_id) {
       await intake.link(req.body.request_id, job.id, req.user.id);
+      await dispatch.logHistory(job.id, 'Booked from a website order', `Website request #${req.body.request_id}`);
       job = await dispatch.getJob(job.id);
     }
     return req.body.send_now ? dispatch.sendJob(job.id) : { job, results: [] };
@@ -254,6 +266,19 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     res.setHeader('Content-Disposition', `attachment; filename="adams-bros-work-orders-${f.from}-to-${f.to}.csv"`);
     res.send(jobsToCsv(jobs));
   }));
+  // Customer address book and septic reminders.
+  api.get('/customers', json((req) => dispatch.customers.list({ q: String(req.query.q || '') })));
+  api.get('/customers/search', json((req) => dispatch.customers.search(String(req.query.q || ''), 8)));
+  api.get('/customers/due', json(async () => dispatch.customers.septicDue({ years: Number((await dispatch.getSettings()).septic_reminder_years) || 2 })));
+  api.get('/customers/:id', h(async (req, res) => {
+    const c = await dispatch.customers.get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Not found' });
+    res.json({ customer: c, jobs: await dispatch.customers.jobsFor(c.id) });
+  }));
+  api.post('/customers', json((req) => dispatch.customers.save(req.body || {})));
+  api.post('/customers/:id/contacted', json((req) => dispatch.customers.markContacted(req.params.id, req.body?.note)));
+  api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
+  api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   api.get('/drivers', json((req) => dispatch.listDrivers({ includeInactive: req.query.all === '1' })));
   api.post('/drivers', json((req) => dispatch.saveDriver(req.body)));
   api.get('/trucks', json((req) => dispatch.listTrucks({ includeInactive: req.query.all === '1' })));
@@ -313,6 +338,8 @@ async function main() {
   console.log(db.kind === 'pg' ? 'Database: PostgreSQL (DATABASE_URL)' : `Database: SQLite file ${config.dbPath}`);
   await auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
+  const linked = await dispatch.customers.backfill();
+  if (linked) console.log(`Address book: linked ${linked} earlier job(s) to customers.`);
   // DEMO_DATA=true: fill an empty database with sample jobs (for showing the app off).
   if (process.env.DEMO_DATA === 'true' && await require('./demo').seedDemo(dispatch)) console.log('Loaded demo data.');
   createApp({ db, dispatch }).listen(config.port, () => {
