@@ -228,20 +228,33 @@ Google's monthly free allowance normally covers an office this size; addresses a
 
 ## Backups
 
-Every night after 2 AM (Eastern) the app saves the whole database (jobs, customers, drivers, logins, history) as one
-compressed file, and uploads any new ticket photos. Database copies are kept 30 days; photos are kept for good.
-- **On Replit** they go to **Replit App Storage** (Object Storage): open **App Storage** in the project, create a bucket
-  (once), copy the bucket's ID and add it as the Secret **`BACKUP_BUCKET_ID`**, then republish. (The ID is also written to
-  `.replit`, but pulling updates from GitHub replaces that file, so the Secret is what keeps it.)
-- **Elsewhere** they go to `data/backups/` (or `BACKUP_DIR`). `BACKUP_TARGET=off` turns them off.
+The whole database (jobs, customers, drivers, prices, history, logins) is saved **every hour** and **every night after
+2 AM** (Eastern), with any new ticket photos. Hourly copies are kept 48 hours, nightly copies 30 days, photos for good.
+Copies go to:
+- **The cloud — Replit App Storage.** In the project open **App Storage**, create a bucket (once), copy its ID and add it as
+  the Secret **`BACKUP_BUCKET_ID`**. (Elsewhere than Replit: the folder `data/backups/`, or `BACKUP_DIR`.)
+- **Your own server**, as a second, separate copy, once it exists. Add Secrets and republish:
+  - **WebDAV** (Synology / QNAP NAS with WebDAV turned on, Windows Server IIS, Nextcloud):
+    `BACKUP_SERVER_URL` = `https://nas.example.ca:5006/adams-backups`, `BACKUP_SERVER_USER`, `BACKUP_SERVER_PASSWORD`.
+  - **S3-compatible storage** (a NAS's S3 service, MinIO, Backblaze B2, Amazon S3):
+    `BACKUP_SERVER_URL` = `s3://bucket-name` (optionally `s3://bucket-name/folder`), `BACKUP_SERVER_ENDPOINT` =
+    `https://s3.example.ca`, `BACKUP_SERVER_REGION` (default `us-east-1`), `BACKUP_SERVER_USER` = access key ID,
+    `BACKUP_SERVER_PASSWORD` = secret key.
+  The server has to be reachable from the internet over HTTPS (ask whoever sets it up to open that port, with a login).
+  If one place is down, the other still gets its copy, and the one that failed is tried again 15 minutes later.
+- **The office hard drive:** **Setup → Backups → Download a copy (with photos)** gives one .zip with the database and every
+  ticket photo in a folder per work order (`Photos/WO-1042 - Customer - date/…`), plus `Photos/index.csv` listing which photo
+  is which. Move it onto the drive each evening. (*database only* gives just the database.) The .zip includes customer
+  details and the office logins (passwords are scrambled), so keep the drive somewhere safe.
 
-The **Setup** tab shows recent backups, has **Back up now**, and **Download a copy** (the database, without photos; keep it somewhere safe,
-since it includes the office logins' password hashes).
+The Setup tab shows each place's last good copy and any problem, and has **Back up now**.
 
-To restore (into an empty database, e.g. a fresh Replit database):
+To restore into an empty database (e.g. a fresh Replit database):
 ```bash
-npm run restore -- list            # stored backups
-npm run restore -- latest          # or a date: 2026-11-09, or a downloaded file: ./adams-dispatch-backup-2026-11-09.json.gz
+npm run restore -- list                 # stored copies (nightly and hourly)
+npm run restore -- latest               # or a night: 2026-11-09, or an hour: 2026-11-09-14
+npm run restore -- ./adams-dispatch-backup-2026-11-09.zip    # a downloaded copy: database and photos
+npm run restore -- latest --from server # from your own server instead of the cloud
 ```
 Add `--force` to wipe a database that already has data. Then restart / republish.
 
@@ -346,7 +359,7 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `src/records.js` | Spreadsheet (CSV) export of work orders |
 | `src/customers.js` | Address book and septic pump-out reminders |
 | `src/geo.js` | Map pin lookups cache |
-| `src/backup.js` | Nightly backups and restore (`scripts/restore.js`) |
+| `src/backup.js`, `src/backupTargets.js`, `src/zip.js` | Hourly/nightly backups (cloud, your server), the download .zip, restore (`scripts/restore.js`) |
 | `src/prices.js`, `src/priceSeed.js` | Price book (starting prices copied from the price sheets) |
 | `public/pricing.js` | The pricing rules: works out a work order's price lines (shared by the server and the dashboard) |
 | `src/distance.js` | Driving distance (Google Geocoding + Routes) and the Parry Sound town boundary check |

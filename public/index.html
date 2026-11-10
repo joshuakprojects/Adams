@@ -154,11 +154,15 @@
     <div class="panel settings" id="backup-panel">
       <h2>Backups</h2>
       <p class="muted small" id="backup-where"></p>
+      <div class="backup-targets" id="backup-targets"></div>
       <div class="row-actions">
         <button class="btn" type="button" id="backup-run">Back up now</button>
-        <a class="btn" id="backup-download" href="/api/backups/download">Download a copy</a>
+        <a class="btn primary" id="backup-download" href="/api/backups/download" title="One .zip: the database and every ticket photo, in a folder per work order">Download a copy (with photos)</a>
+        <a class="link small" href="/api/backups/download?only=database">database only</a>
       </div>
-      <table class="table compact"><thead><tr><th>When</th><th>Copy</th><th>Size</th><th>New photos</th><th></th></tr></thead><tbody id="backup-rows"></tbody></table>
+      <p class="muted small">For the office hard drive: press <b>Download a copy</b> each evening and move the .zip onto the drive.
+        It holds everything — <code>npm run restore -- the-file.zip</code> puts it all back, photos included.</p>
+      <table class="table compact"><thead><tr><th>When</th><th>Where</th><th>Copy</th><th>Size</th><th>New photos</th><th></th></tr></thead><tbody id="backup-rows"></tbody></table>
     </div>
     <div class="two-col">
       <div class="panel">

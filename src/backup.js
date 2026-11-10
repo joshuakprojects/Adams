@@ -1,7 +1,9 @@
-// Nightly backups.
-//  • db/YYYY-MM-DD.json.gz — every table except logins' sessions, as gzipped JSON. Kept 30 days.
-//  • photos/<ticket id>     — each scale ticket photo, uploaded once (photos are never pruned).
-// Stored in Replit Object Storage when the app runs on Replit with a bucket set up, otherwise in data/backups.
+// Backups, every hour and every night.
+//  • hourly/YYYY-MM-DD-HH.json.gz — every table except logins' sessions, as gzipped JSON. Kept 48 hours.
+//  • db/YYYY-MM-DD.json.gz        — the nightly copy. Kept 30 days.
+//  • photos/<ticket id>           — each scale ticket photo, uploaded once (photos are never pruned).
+// Stored in Replit App Storage (Object Storage) on Replit, otherwise in data/backups — and also on your own server
+// when BACKUP_SERVER_URL is set (src/backupTargets.js). "Download a copy" gives a .zip with the photos too.
 // Restore with `npm run restore` (scripts/restore.js).
 const fs = require('node:fs');
 const path = require('node:path');
@@ -173,69 +175,184 @@ async function restore(db, backup, { photoFor = null, force = false } = {}) {
   return { counts, photos };
 }
 
-// ---------- the nightly job ----------
+/** 'YYYY-MM-DD HH:MM' in the company's time zone, from a stored UTC 'YYYY-MM-DD HH:MM:SS'. */
+function localStamp(sqlUtc) {
+  const d = new Date(String(sqlUtc || '').replace(' ', 'T') + 'Z');
+  if (Number.isNaN(d.getTime())) return '';
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: config.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
 
-function createBackups(db, { storage = chooseStorage(), today, nowHm, readPhoto } = {}) {
+/** A "Download a copy" zip: { backup, photoFor(ticketId), photoCount, close }. */
+function loadZipBackup(file) {
+  const { readZip } = require('./zip');
+  const z = readZip(file);
+  const dbEntry = z.entries.find((e) => !e.name.includes('/') && /\.json\.gz$/.test(e.name));
+  if (!dbEntry) { z.close(); throw new Error('No database file in that zip — is it an Adams Bros Dispatch backup?'); }
+  const backup = gunzipJson(z.read(dbEntry));
+  const photos = new Map();
+  for (const e of z.entries) {
+    const m = /^Photos\/.+\/ticket (\d+) - [^/]*$/.exec(e.name);
+    if (m) photos.set(Number(m[1]), e);
+  }
+  return { backup, photoCount: photos.size, photoFor: async (id) => (photos.has(Number(id)) ? z.read(photos.get(Number(id))) : null), close: z.close };
+}
+
+// ---------- the backup job: hourly + nightly, to every target ----------
+//  hourly/YYYY-MM-DD-HH.json.gz  every hour, kept 48 hours
+//  db/YYYY-MM-DD.json.gz         every night after 2 AM, kept 30 days
+//  photos/<ticket id>            each new ticket photo, once per target, kept for good
+const HOURLY_PREFIX = 'hourly/';
+const KEEP_HOURS = 48;
+
+function createBackups(db, { storage = chooseStorage(), server = undefined, today, nowHm, readPhoto, now = () => Date.now() } = {}) {
+  if (server === undefined) {
+    try { server = require('./backupTargets').serverTarget(); } catch (err) { console.warn('Backup server not used:', err.message); server = null; }
+  }
+  const targets = [storage, server].filter(Boolean);
   async function setting(key) { return (await db.get('SELECT value FROM settings WHERE key = ?', key))?.value ?? null; }
   async function setSetting(key, value) {
     await db.run('DELETE FROM settings WHERE key = ?', key);
     await db.run('INSERT INTO settings (key, value) VALUES (?, ?)', key, String(value));
   }
+  // Each target remembers the last ticket photo it has (the first target kept the original setting name).
+  const photoKey = (t) => (t === targets[0] ? 'backup_photo_id' : `backup_photo_id:${t.kind}`);
+  const nameFor = (kind) => (kind === 'hourly' ? `${HOURLY_PREFIX}${today()}-${nowHm().slice(0, 2)}.json.gz` : `${DB_PREFIX}${today()}.json.gz`);
 
-  async function run({ reason = 'nightly' } = {}) {
-    if (!storage) throw new Error('Backups are turned off (BACKUP_TARGET=off)');
-    const name = `${DB_PREFIX}${today()}.json.gz`;
+  async function runOn(target, name, buf) {
     try {
-      const buf = gzipJson(await dump(db));
-      await storage.put(name, buf);
-      // New ticket photos since the last backup.
-      const after = Number(await setting('backup_photo_id')) || 0;
+      await target.put(name, buf);
+      const after = Number(await setting(photoKey(target))) || 0;
       const fresh = await db.all('SELECT id FROM tickets WHERE id > ? ORDER BY id', after);
       let photos = 0;
       let last = after;
       for (const { id } of fresh) {
         const data = await readPhoto(id);
-        if (data) { await storage.put(`${PHOTO_PREFIX}${id}`, data); photos++; }
+        if (data) { await target.put(`${PHOTO_PREFIX}${id}`, data); photos++; }
         last = id;
       }
-      if (last !== after) await setSetting('backup_photo_id', last);
-      await prune();
-      await db.run('INSERT INTO backups (name, target, bytes, photos, ok) VALUES (?, ?, ?, ?, 1)', name, storage.kind, buf.length, photos);
-      return { ok: true, name, bytes: buf.length, photos, reason };
+      if (last !== after) await setSetting(photoKey(target), last);
+      await prune(target);
+      await db.run('INSERT INTO backups (name, target, bytes, photos, ok) VALUES (?, ?, ?, ?, 1)', name, target.kind, buf.length, photos);
+      return { ok: true, target: target.kind, label: target.label, name, bytes: buf.length, photos };
     } catch (err) {
-      await db.run('INSERT INTO backups (name, target, bytes, photos, ok, error) VALUES (?, ?, 0, 0, 0, ?)', name, storage.kind, String(err.message).slice(0, 500));
-      return { ok: false, name, error: err.message, reason };
+      await db.run('INSERT INTO backups (name, target, bytes, photos, ok, error) VALUES (?, ?, 0, 0, 0, ?)', name, target.kind, String(err.message).slice(0, 500));
+      return { ok: false, target: target.kind, label: target.label, name, error: err.message };
     }
   }
 
-  /** Delete database copies older than 30 days (by the date in the name). */
-  async function prune() {
-    const cutoff = new Date(Date.parse(today() + 'T12:00:00Z') - KEEP_DAYS * 86400e3).toISOString().slice(0, 10);
-    for (const n of await storage.list(DB_PREFIX)) {
+  /** Back up now (to every target, or the ones given). */
+  async function run({ reason = 'by hand', kind = 'nightly', only = null } = {}) {
+    if (!targets.length) throw new Error('Backups are turned off (BACKUP_TARGET=off)');
+    const name = nameFor(kind);
+    const buf = gzipJson(await dump(db));
+    const results = [];
+    for (const t of only || targets) results.push(await runOn(t, name, buf));
+    const first = results[0];
+    const failed = results.filter((r) => !r.ok);
+    return { ok: !failed.length, name, bytes: buf.length, photos: first.photos || 0, reason, results,
+      error: failed.length ? failed.map((r) => `${r.label}: ${r.error}`).join(' · ') : undefined };
+  }
+
+  /** Delete hourly copies older than 48 hours and nightly copies older than 30 days (by the date in the name). */
+  async function prune(target = targets[0]) {
+    const cutoffDay = new Date(Date.parse(today() + 'T12:00:00Z') - KEEP_DAYS * 86400e3).toISOString().slice(0, 10);
+    for (const n of await target.list(DB_PREFIX)) {
       const m = /(\d{4}-\d{2}-\d{2})\.json\.gz$/.exec(n);
-      if (m && m[1] < cutoff) await storage.remove(n);
+      if (m && m[1] < cutoffDay) await target.remove(n);
+    }
+    const nowKey = `${today()}-${nowHm().slice(0, 2)}`;
+    const toMs = (k) => Date.parse(`${k.slice(0, 10)}T${k.slice(11, 13)}:00:00Z`);
+    for (const n of await target.list(HOURLY_PREFIX)) {
+      const m = /(\d{4}-\d{2}-\d{2}-\d{2})\.json\.gz$/.exec(n);
+      if (m && toMs(nowKey) - toMs(m[1]) > KEEP_HOURS * 3600e3) await target.remove(n);
     }
   }
 
-  /** Called every minute: one backup a night, after 2 AM company time (or as soon as the app is up after that). */
+  /** Called every minute: the nightly copy after 2 AM, and an hourly copy every hour — each target on its own. */
   async function runScheduled() {
-    if (!storage || nowHm() < '02:00') return null;
-    const done = await db.get('SELECT id FROM backups WHERE ok = 1 AND name = ? LIMIT 1', `${DB_PREFIX}${today()}.json.gz`);
-    if (done) return null;
-    // After a failure, wait an hour before trying again.
-    const failed = await db.get("SELECT at FROM backups WHERE ok = 0 AND name = ? ORDER BY id DESC LIMIT 1", `${DB_PREFIX}${today()}.json.gz`);
-    if (failed && Date.now() - Date.parse(failed.at.replace(' ', 'T') + 'Z') < 3600e3) return null;
-    return run();
+    if (!targets.length) return null;
+    const due = async (name, t, waitMin) => {
+      if (await db.get('SELECT id FROM backups WHERE ok = 1 AND name = ? AND target = ? LIMIT 1', name, t.kind)) return false;
+      const failed = await db.get('SELECT at FROM backups WHERE ok = 0 AND name = ? AND target = ? ORDER BY id DESC LIMIT 1', name, t.kind);
+      return !(failed && now() - Date.parse(failed.at.replace(' ', 'T') + 'Z') < waitMin * 60e3);
+    };
+    for (const [kind, wait] of [['nightly', 60], ['hourly', 15]]) {
+      if (kind === 'nightly' && nowHm() < '02:00') continue;
+      const name = nameFor(kind);
+      const only = [];
+      for (const t of targets) if (await due(name, t, wait)) only.push(t);
+      if (only.length) return run({ reason: kind, kind, only });
+    }
+    return null;
   }
 
   async function status() {
-    const runs = await db.all('SELECT * FROM backups ORDER BY id DESC LIMIT 10');
-    return { target: storage ? storage.kind : 'off', label: storage ? storage.label : 'Backups are off', keep_days: KEEP_DAYS, runs };
+    const runs = await db.all('SELECT * FROM backups ORDER BY id DESC LIMIT 20');
+    const last = async (kind) => db.get('SELECT * FROM backups WHERE target = ? ORDER BY id DESC LIMIT 1', kind);
+    const lastOk = async (kind) => db.get('SELECT * FROM backups WHERE target = ? AND ok = 1 ORDER BY id DESC LIMIT 1', kind);
+    const list = [];
+    for (const t of targets) list.push({ kind: t.kind, label: t.label, last: await last(t.kind), last_ok: await lastOk(t.kind) });
+    return {
+      target: storage ? storage.kind : 'off',
+      label: storage ? storage.label : 'Backups are off',
+      server: server ? { label: server.label } : null,
+      targets: list,
+      keep_days: KEEP_DAYS,
+      keep_hours: KEEP_HOURS,
+      runs,
+    };
   }
 
+  /** The database only, as one file (.json.gz). */
   async function download() { return gzipJson(await dump(db)); }
 
-  return { run, runScheduled, prune, status, download, storage };
+  /**
+   * Everything in one .zip, streamed: the database (restorable) and every ticket photo in a folder per work order,
+   * with a spreadsheet saying which photo is which. write(buf) sends bytes on.
+   */
+  async function downloadZip(write, { stamp = today() } = {}) {
+    const { zipWriter } = require('./zip');
+    const z = zipWriter(write);
+    await z.add(`adams-dispatch-database-${stamp}.json.gz`, gzipJson(await dump(db)));
+    const rows = await db.all(`SELECT t.id, t.job_id, t.filename, t.content_type, t.source, t.created_at,
+        d.name AS driver_name, j.customer, j.scheduled_date, j.to_location, j.municipality, j.job_type
+      FROM tickets t LEFT JOIN drivers d ON d.id = t.driver_id LEFT JOIN jobs j ON j.id = t.job_id ORDER BY t.job_id, t.id`);
+    const clean = (s) => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const ext = (r) => (/\.[a-z0-9]{3,4}$/i.exec(r.filename || '') || ['.jpg'])[0].toLowerCase();
+    const index = [['File', 'Ticket #', 'Work order #', 'Job date', 'Customer', 'Address', 'Driver', 'Sent', 'How']];
+    let photos = 0;
+    for (const r of rows) {
+      const data = await readPhoto(r.id).catch(() => null);
+      if (!data) continue;
+      const folder = r.job_id ? `WO-${r.job_id} - ${clean(r.customer) || 'no name'} - ${r.scheduled_date || ''}` : 'Not matched to a work order';
+      const when = localStamp(r.created_at).replace(':', '.');
+      const file = `Photos/${clean(folder)}/ticket ${r.id} - ${clean(r.driver_name) || 'driver'} - ${when}${ext(r)}`;
+      await z.add(file, data, r.created_at ? new Date(r.created_at.replace(' ', 'T') + 'Z') : new Date());
+      index.push([file, r.id, r.job_id || '', r.scheduled_date || '', r.customer || '', [r.to_location, r.municipality].filter(Boolean).join(', '),
+        r.driver_name || '', localStamp(r.created_at), r.source === 'sms' ? 'texted' : 'job page']);
+      photos++;
+    }
+    const csvCell = (v) => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    await z.add('Photos/index.csv', Buffer.from('﻿' + index.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n'));
+    await z.add('README.txt', Buffer.from([
+      'Adams Bros Dispatch — backup made ' + new Date().toISOString().slice(0, 16).replace('T', ' ') + ' (UTC)',
+      '',
+      `adams-dispatch-database-${stamp}.json.gz  The whole database: work orders, customers, drivers, prices, history, logins.`,
+      'Photos/                      Every scale ticket photo, in a folder per work order.',
+      'Photos/index.csv             Which photo belongs to which work order (opens in Excel).',
+      '',
+      'To restore everything (database and photos) into an empty database:',
+      '  npm run restore -- path/to/this-file.zip',
+      '',
+      'Keep this file somewhere safe: it includes customer details and the office logins (passwords are scrambled).',
+    ].join('\r\n')));
+    await z.end();
+    return { photos, bytes: z.size };
+  }
+
+  return { run, runScheduled, prune, status, download, downloadZip, storage, server, targets };
 }
 
-module.exports = { createBackups, dump, restore, gzipJson, gunzipJson, localStorageAt, replitStorage, chooseStorage, TABLES, DB_PREFIX, PHOTO_PREFIX };
+module.exports = { createBackups, dump, restore, gzipJson, gunzipJson, localStorageAt, replitStorage, chooseStorage, loadZipBackup, TABLES, DB_PREFIX, PHOTO_PREFIX, HOURLY_PREFIX };

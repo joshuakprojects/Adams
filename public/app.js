@@ -1492,18 +1492,29 @@
 
   async function loadBackups() {
     const st = await api('/backups');
-    const last = st.runs.find((r) => r.ok);
-    $('#backup-where').innerHTML = st.target === 'off'
+    const targets = st.targets || [];
+    const WHERE = { replit: 'Cloud', local: 'Folder', server: 'Your server', memory: 'Test' };
+    $('#backup-where').innerHTML = !targets.length
       ? 'Automatic backups are turned off. You can still download a copy.'
-      : `Every night after 2 AM the whole database is saved to <b>${esc(st.label)}</b>; copies are kept ${st.keep_days} days and ticket photos are kept for good.
-         ${last ? `Last good backup: <b>${esc(fmtStamp(last.at))}</b>` : '<b>No backup has run yet.</b>'}
-         ${st.target === 'replit' && st.runs[0] && !st.runs[0].ok ? '<br><b class="bad">The last backup failed.</b> On Replit, open <b>App Storage</b>, copy your bucket\'s ID, add it as the Secret <b>BACKUP_BUCKET_ID</b>, republish, then press Back up now.' : ''}`;
-    $('#backup-run').classList.toggle('hidden', st.target === 'off');
+      : `Every hour, and every night after 2 AM, the whole database is saved; hourly copies are kept ${st.keep_hours || 48} hours,
+         nightly copies ${st.keep_days} days, and ticket photos for good.`;
+    $('#backup-targets').innerHTML = targets.map((t) => {
+      const bad = t.last && !t.last.ok;
+      return `<div class="backup-target ${bad ? 'bad' : t.last_ok ? 'good' : ''}">
+        <b>${esc(WHERE[t.kind] || t.kind)}</b> <span class="muted small">${esc(t.label)}</span><br>
+        ${t.last_ok ? `Last good copy: <b>${esc(fmtStamp(t.last_ok.at))}</b>` : 'No copy yet.'}
+        ${bad ? `<div class="small"><b>Last try failed:</b> ${esc(t.last.error)}</div>` : ''}
+        ${bad && t.kind === 'replit' ? '<div class="small">On Replit, open <b>App Storage</b>, copy your bucket\'s ID, add it as the Secret <b>BACKUP_BUCKET_ID</b>, republish.</div>' : ''}
+      </div>`;
+    }).join('') + (st.server ? '' : `<div class="backup-target"><b>Your server</b> <span class="muted small">not set up</span><br>
+        <span class="small">When it's ready, add its address as the Secret <code>BACKUP_SERVER_URL</code> (see the README, "Backups") and republish.</span></div>`);
+    $('#backup-run').classList.toggle('hidden', !targets.length);
     $('#backup-rows').innerHTML = st.runs.map((r) => `<tr>
-        <td>${esc(fmtStamp(r.at))}</td><td>${esc(r.name.replace('db/', '').replace('.json.gz', ''))}</td>
+        <td>${esc(fmtStamp(r.at))}</td><td>${esc(WHERE[r.target] || r.target)}</td>
+        <td>${esc(r.name.startsWith('hourly/') ? 'hourly ' + r.name.slice(7, 17) + ' ' + r.name.slice(18, 20) + ':00' : 'nightly ' + r.name.replace('db/', '').replace('.json.gz', ''))}</td>
         <td>${r.ok ? `${Math.max(1, Math.round(r.bytes / 1024))} KB` : ''}</td><td>${r.ok ? r.photos : ''}</td>
         <td>${r.ok ? '<span class="chip done">saved</span>' : `<span class="chip cancelled" title="${esc(r.error)}">failed</span> <span class="muted small">${esc(r.error)}</span>`}</td></tr>`).join('')
-      || '<tr><td colspan="5" class="muted">No backups yet.</td></tr>';
+      || '<tr><td colspan="6" class="muted">No backups yet.</td></tr>';
   }
   $('#backup-run').addEventListener('click', async (e) => {
     e.target.disabled = true;

@@ -351,12 +351,22 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     if (!backups) return res.status(400).json({ error: 'Backups are off' });
     res.json(await backups.run({ reason: 'by hand' }));
   }));
-  api.get('/backups/download', need('admin'), h(async (_req, res) => {
-    const buf = await (backups || createBackups(db, { storage: null, today: dispatch.today })).download();
-    res.setHeader('Content-Type', 'application/gzip');
-    res.setHeader('Content-Disposition', `attachment; filename="adams-dispatch-backup-${dispatch.today()}.json.gz"`);
+  // Download a copy: a .zip with the database and every ticket photo in a folder per work order (?only=database: just the database).
+  api.get('/backups/download', need('admin'), h(async (req, res) => {
+    const b = backups || createBackups(db, { storage: null, server: null, today: dispatch.today,
+      readPhoto: async (id) => (await dispatch.getTicket(id))?.data || null });
     res.setHeader('Cache-Control', 'no-store');
-    res.send(buf);
+    if (req.query.only === 'database') {
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="adams-dispatch-backup-${dispatch.today()}.json.gz"`);
+      return res.send(await b.download());
+    }
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="adams-dispatch-backup-${dispatch.today()}.zip"`);
+    // Streamed: waits whenever the browser is slower than the photos are read.
+    const write = (buf) => (res.write(buf) ? undefined : new Promise((r) => res.once('drain', r)));
+    await b.downloadZip(write);
+    res.end();
   }));
   api.post('/settings', need('admin'), json((req) => dispatch.saveSettings(req.body || {})));
   // Text every driver their whole day for a date (the "tomorrow's jobs" text, sent by hand).
@@ -478,7 +488,7 @@ async function main() {
     nowHm: () => nowHmIn(),
     readPhoto: async (id) => (await dispatch.getTicket(id))?.data || null,
   });
-  console.log(backups.storage ? `Nightly backups: ${backups.storage.label}` : 'Nightly backups are OFF (BACKUP_TARGET=off)');
+  console.log(backups.targets.length ? `Backups every hour and night: ${backups.targets.map((t) => t.label).join(' + ')}` : 'Backups are OFF (BACKUP_TARGET=off)');
   // QuickBooks: every change to a work order queues its Estimate (sent only once an admin connects and switches it on).
   const qbo = createQuickBooks(db, dispatch);
   dispatch.onChange((jobId, action) => { if (!/^Estimate /.test(action)) qbo.enqueue(jobId).catch(() => {}); });
