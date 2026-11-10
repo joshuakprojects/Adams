@@ -298,7 +298,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   }
 
   // ---------- required fields (Setup → Required fields) ----------
-  const DEFAULT_REQUIRED = Object.fromEntries(FORMS.TYPE_KEYS.map((k) => [k, ['customer', 'customer_phone', 'to_location']]));
+  const DEFAULT_REQUIRED = Object.fromEntries(FORMS.TYPE_KEYS.map((k) => [k, FORMS.typeInfo(k).noPricing ? ['to_location', 'material']
+    : ['customer', 'customer_phone', 'to_location']]));
   let reqCache = null;
   async function requiredFields() {
     if (reqCache && reqCache.at > Date.now() - 5000) return reqCache.value;
@@ -438,7 +439,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       throw err;
     }
     fields.draft = wantDraft ? 1 : 0;
-    const lines = cleanLines(data.lines);
+    // Labour work orders aren't priced or billed.
+    const unpriced = FORMS.typeInfo(fields.job_type).noPricing;
+    const lines = unpriced ? [] : cleanLines(data.lines);
+    if (unpriced) Object.assign(fields, { quoted_price: '', payment_method: '', invoice_number: '', amount_billed: '' });
     const rate = await hstRate();
     if (lines) {
       // Old jobs and the board read quoted_price; keep it in step with the priced lines.

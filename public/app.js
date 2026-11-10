@@ -934,6 +934,12 @@
     $('[data-label=loads]', form).textContent = t.loadsLabel || 'Number of loads';
     $('[data-label=qty]', form).textContent = t.quantityLabel || 'Quantity';
     const show = { ...t, unit: t.quantity && !t.fixedUnit };
+    // Labour work orders: just where and what — no customer billing or prices.
+    $$('[data-pricing]', form).forEach((el) => el.classList.toggle('hidden', Boolean(t.noPricing)));
+    $('#assign-title').textContent = t.noPricing ? "Who's going" : 'Drivers';
+    $('#assign-help').textContent = t.noPricing ? 'Tick the labourers (and any drivers) on this job. They each get a text with where and what.'
+      : 'Tick everyone on this job. Pick the truck each one is taking.';
+    $('textarea[name=notes]', form).placeholder = t.noPricing ? 'What to do, who to see on site, anything to watch out for…' : 'Gate code, where to dump, tarp required…';
     $$('[data-when]', form).forEach((el) => el.classList.toggle('hidden', !show[el.dataset.when]));
     // Aggregates: type, loads and yards on one line, like the paper form.
     $('[data-when=what]', form).classList.toggle('wide', !t.fixedUnit);
@@ -971,8 +977,11 @@
         ${withTruck ? `<select>${truckOptions(on ? formAssignments.get(d.id) : d.default_truck_id)}</select>` : '<span class="muted small">labourer</span>'}
       </div>`;
     };
-    $('#assign-list').innerHTML = (drivers.map((d) => row(d, true)).join('') || '<p class="muted">No drivers yet — add them on the Setup tab.</p>')
-      + (labourers.length ? `<h4 class="assign-head">Labourers</h4>${labourers.map((d) => row(d, false)).join('')}` : '');
+    const driverHtml = drivers.map((d) => row(d, true)).join('') || '<p class="muted">No drivers yet — add them on the Setup tab.</p>';
+    const labourHtml = labourers.length ? `<h4 class="assign-head">Labourers</h4>${labourers.map((d) => row(d, false)).join('')}` : '';
+    $('#assign-list').innerHTML = type === 'labour'
+      ? (labourHtml || '<p class="muted">No labourers yet — add them on the Setup tab.</p>') + `<h4 class="assign-head">Drivers</h4>${driverHtml}`
+      : driverHtml + labourHtml;
   }
 
   $('#assign-list').addEventListener('change', (e) => {

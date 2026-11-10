@@ -415,7 +415,7 @@
         </div>
       </fieldset>
 
-      <fieldset class="sec">
+      <fieldset class="sec" data-pricing>
         <legend>Customer</legend>
         <div class="grid">
           <div class="span2 cust-pick">
@@ -456,7 +456,7 @@
         </div>
       </fieldset>
 
-      <fieldset class="sec">
+      <fieldset class="sec" data-pricing>
         <legend>Price &amp; payment</legend>
         <p class="muted small office-note">Office only — drivers never see prices.</p>
         <div class="dist-box" id="f-dist"></div>
@@ -473,8 +473,8 @@
       </fieldset>
 
       <div data-need="dispatch">
-        <h3>Drivers</h3>
-        <p class="muted small">Tick everyone on this job. Pick the truck each one is taking.</p>
+        <h3 id="assign-title">Drivers</h3>
+        <p class="muted small" id="assign-help">Tick everyone on this job. Pick the truck each one is taking.</p>
         <div id="assign-list" class="assign-list"></div>
       </div>
       <p class="muted small" data-hide-for="dispatch">Dispatch will assign the drivers and text them.</p>

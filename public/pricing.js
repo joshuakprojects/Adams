@@ -83,6 +83,7 @@
   };
 
   function calc(job, book) {
+    if (job.job_type === 'labour') return { lines: [], notes: [] }; // labour work orders aren't priced
     const items = book.items || {};
     const d = parseDetails(job);
     const o = parseOptions(job);

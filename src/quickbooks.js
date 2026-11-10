@@ -324,7 +324,8 @@ function createQuickBooks(db, dispatch, {
       const map = await mapping();
       for (const row of rows) {
         const job = await dispatch.getJob(row.job_id);
-        if (!job) { await db.run('DELETE FROM qbo_sync WHERE job_id = ?', row.job_id); continue; }
+        // Gone, or a labour work order (not billed): nothing for QuickBooks.
+        if (!job || FORMS.typeInfo(job.job_type).noPricing) { await db.run('DELETE FROM qbo_sync WHERE job_id = ?', row.job_id); continue; }
         const set = (fields) => db.run(`UPDATE qbo_sync SET ${Object.keys(fields).map((k) => `${k} = ?`).join(', ')}, updated_at = datetime('now') WHERE job_id = ?`,
           ...Object.values(fields), row.job_id);
         // Nothing priced and never sent: nothing to put in QuickBooks yet.

@@ -87,3 +87,34 @@ test('"1200 gallons" is not a job number; a note with a job number goes on that 
   assert.equal(r.reply, null, 'a note: no auto-reply, the office sees it');
   assert.ok((await d.historyFor(a.id)).some((e) => e.action === 'Texted a note' && /lids were buried/.test(e.details)));
 });
+
+test('labour work orders: just where and what — no prices, no billing, not sent to QuickBooks, texted to the crew', async (t) => {
+  const { db, d, sent, lab } = await setup(t);
+  const { createQuickBooks } = require('../src/quickbooks');
+  const FORMS = require('../public/forms');
+  const PRICING = require('../public/pricing');
+  assert.equal(FORMS.typeInfo('labour').noPricing, true);
+  assert.deepEqual((await d.requiredFields()).labour, ['to_location', 'material'], 'needs where and what, not a customer or phone');
+  assert.deepEqual(PRICING.calc({ job_type: 'labour', material: 'Dig lids' }, { items: {} }), { lines: [], notes: [] });
+
+  const { job } = await d.saveJob({ job_type: 'labour', scheduled_date: '2026-11-10', time_slot: 'first', material: 'Dig and uncover lids',
+    to_location: '45 Bay Rd', municipality: 'McDougall', notes: 'Septic truck arrives at 10', details: { bring: 'Shovels, probe bar', report_to: 'Dave' },
+    quoted_price: '$100', lines: [{ description: 'should be ignored', qty: 1, unit_price: 5 }], assignments: [{ driver_id: lab.id }] }, null, { enforceRequired: true });
+  assert.equal(job.lines.length, 0);
+  assert.equal(job.quoted_price, '');
+  assert.equal(FORMS.summary(job), 'Dig and uncover lids');
+  await d.sendJob(job.id);
+  const text = sent.at(-1).body;
+  assert.match(text, /Labour Work Order #\d+/);
+  assert.match(text, /FIRST THING/);
+  assert.match(text, /Dig and uncover lids/);
+  assert.match(text, /45 Bay Rd, McDougall/);
+  assert.match(text, /Shovels, probe bar/);
+
+  const qbo = createQuickBooks(db, d, { clientId: '', clientSecret: '' });
+  await qbo.enqueue(job.id);
+  await qbo.processQueue();
+  assert.equal(await qbo.preview(job.id), null, 'nothing kept for QuickBooks');
+  const { renderPrintPage } = require('../src/printPage');
+  assert.doesNotMatch(renderPrintPage(await d.getJob(job.id)), /Quoted price/);
+});
