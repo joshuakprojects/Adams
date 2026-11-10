@@ -75,6 +75,9 @@ function reportFields(jobType) {
   ];
 }
 
+/** Sort order for the time of day: first thing, morning, afternoon, then any time. */
+const SLOT_ORDER = (t) => `CASE ${t}time_slot WHEN 'first' THEN 0 WHEN 'am' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END, ${t}scheduled_time`;
+
 function parseJson(text) {
   try { return JSON.parse(text || '{}') || {}; } catch { return {}; }
 }
@@ -155,6 +158,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     job.price_options = parseJson(job.price_options);
     job.lines = await db.all('SELECT * FROM job_lines WHERE job_id = ? ORDER BY sort, id', job.id);
     job.totals = PRICING.totals(job.lines, await hstRate());
+    job.created_by_name = job.created_by ? (await db.get('SELECT name FROM users WHERE id = ?', job.created_by))?.name || '' : '';
+    if (Number(job.draft)) {
+      job.missing = FORMS.missingRequired({ ...job, has_pin: job.lat != null }, (await requiredFields())[job.job_type] || []).map((m) => m.label);
+    }
     job.assignments = await assignmentsFor(job.id);
     job.tickets = await ticketsFor(job.id);
     return job;
@@ -167,7 +174,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   async function listJobs({ from, to }) {
     const rows = await db.all(`SELECT * FROM jobs WHERE scheduled_date BETWEEN ? AND ?
-              ORDER BY scheduled_date, first_thing DESC, (scheduled_time = ''), scheduled_time, id`, from, to);
+              ORDER BY scheduled_date, ${SLOT_ORDER('')}, id`, from, to);
     return Promise.all(rows.map(hydrate));
   }
 
@@ -175,8 +182,14 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     const job_type = JOB_TYPES.includes(data.job_type) ? data.job_type : 'haul';
     const scheduled_date = str(data.scheduled_date, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduled_date)) throw new ValidationError('Pick a date for the job');
-    const scheduled_time = str(data.scheduled_time, 5);
-    if (scheduled_time && !/^\d{2}:\d{2}$/.test(scheduled_time)) throw new ValidationError('Time must look like 07:30');
+    // First thing / AM / PM / any time. (Older callers may still send an exact time or the "first thing" tick.)
+    let time_slot = FORMS.TIME_SLOTS.some(([k]) => k === data.time_slot) ? data.time_slot : null;
+    if (time_slot === null) {
+      const hm = str(data.scheduled_time, 5);
+      if (hm && !/^\d{2}:\d{2}$/.test(hm)) throw new ValidationError('Time must look like 07:30');
+      const first = data.first_thing === true || data.first_thing === 1 || data.first_thing === '1' || data.first_thing === 'on';
+      time_slot = first ? 'first' : hm ? (hm < '12:00' ? 'am' : 'pm') : '';
+    }
     const loads = data.loads_planned === '' || data.loads_planned == null ? null : Number(data.loads_planned);
     if (loads != null && (!Number.isInteger(loads) || loads < 0 || loads > 999)) {
       throw new ValidationError('Number of loads must be a whole number');
@@ -207,8 +220,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       contact_name: str(data.contact_name, 100),
       contact_phone: sms.normalizePhone(contactRaw) || contactRaw,
       scheduled_date,
-      scheduled_time,
-      first_thing: data.first_thing === true || data.first_thing === 1 || data.first_thing === '1' || data.first_thing === 'on' ? 1 : 0,
+      time_slot,
+      scheduled_time: '',
+      first_thing: time_slot === 'first' ? 1 : 0,
       notes: str(data.notes, 1000),
       invoice_number: str(data.invoice_number, 60),
       amount_billed: str(data.amount_billed, 60),
@@ -263,6 +277,43 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     });
   }
 
+  // ---------- calendar ----------
+  /** Job counts per day for a month ('YYYY-MM'): { 'YYYY-MM-DD': { total, open, done, drafts } }. Cancelled jobs aren't counted. */
+  async function calendar(month) {
+    if (!/^\d{4}-\d{2}$/.test(String(month))) throw new ValidationError('Month must look like 2026-11');
+    const rows = await db.all(`SELECT scheduled_date, status, draft FROM jobs WHERE scheduled_date >= ? AND scheduled_date <= ? AND status <> 'cancelled'`,
+      `${month}-01`, `${month}-31`);
+    const out = {};
+    for (const r of rows) {
+      const d = (out[r.scheduled_date] = out[r.scheduled_date] || { total: 0, open: 0, done: 0, drafts: 0 });
+      d.total++;
+      if (r.status === 'complete') d.done++; else d.open++;
+      if (Number(r.draft)) d.drafts++;
+    }
+    return out;
+  }
+
+  // ---------- required fields (Setup → Required fields) ----------
+  const DEFAULT_REQUIRED = Object.fromEntries(FORMS.TYPE_KEYS.map((k) => [k, ['customer', 'customer_phone', 'to_location']]));
+  let reqCache = null;
+  async function requiredFields() {
+    if (reqCache && reqCache.at > Date.now() - 5000) return reqCache.value;
+    const row = await db.get("SELECT value FROM settings WHERE key = 'required_fields'");
+    const value = row ? { ...DEFAULT_REQUIRED, ...parseJson(row.value) } : DEFAULT_REQUIRED;
+    reqCache = { value, at: Date.now() };
+    return value;
+  }
+  async function saveRequiredFields(input) {
+    const out = {};
+    for (const type of FORMS.TYPE_KEYS) {
+      const allowed = new Set(FORMS.requirable(type).map((f) => f.key));
+      out[type] = [...new Set((Array.isArray(input?.[type]) ? input[type] : []).filter((k) => allowed.has(k)))];
+    }
+    await setSetting('required_fields', JSON.stringify(out));
+    reqCache = null;
+    return out;
+  }
+
   let hstCache = null;
   async function hstRate() {
     if (hstCache && hstCache.at > Date.now() - 5000) return hstCache.rate;
@@ -272,18 +323,18 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   }
 
   const JOB_FIELDS = ['job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
-    'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'first_thing', 'notes',
+    'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'first_thing', 'time_slot', 'notes',
     'customer_phone', 'customer_email', 'billing_address', 'po_number', 'municipality', 'paper_wo',
     'quoted_price', 'payment_method', 'details', 'invoice_number', 'amount_billed', 'customer_id',
-    'distance_km', 'distance_from', 'distance_mode', 'in_town', 'price_options'];
+    'distance_km', 'distance_from', 'distance_mode', 'in_town', 'price_options', 'draft'];
   // Office-only fields (drivers never see them; payments are handled by the office): changing these doesn't need a new text.
   const OFFICE_ONLY = new Set(['customer_email', 'billing_address', 'po_number', 'paper_wo', 'quoted_price', 'payment_method',
-    'invoice_number', 'amount_billed', 'customer_id', 'distance_km', 'distance_from', 'distance_mode', 'in_town', 'price_options']);
+    'invoice_number', 'amount_billed', 'customer_id', 'distance_km', 'distance_from', 'distance_mode', 'in_town', 'price_options', 'draft']);
   // Names for the change history.
   const FIELD_LABELS = {
     job_type: 'Type', customer: 'Customer', material: 'Material', quantity: 'Quantity', unit: 'Unit', loads_planned: 'Loads',
     from_location: 'From', to_location: 'Address', contact_name: 'Site contact', contact_phone: 'Site phone',
-    scheduled_date: 'Date', scheduled_time: 'Time', first_thing: 'First thing', notes: 'Instructions',
+    scheduled_date: 'Date', scheduled_time: 'Exact time', first_thing: 'First thing', time_slot: 'Time', draft: 'Draft', notes: 'Instructions',
     customer_phone: 'Customer phone', customer_email: 'Email', billing_address: 'Billing address', po_number: 'PO #',
     municipality: 'Municipality', paper_wo: 'Paper W.O. #', quoted_price: 'Quoted price', payment_method: 'Payment',
     details: 'Form details', invoice_number: 'Invoice #', amount_billed: 'Amount billed',
@@ -307,7 +358,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   function describeChange(f, from, to) {
     const show = (v) => {
       if (v === '' || v == null) return '(blank)';
-      if (f === 'first_thing') return Number(v) ? 'yes' : 'no';
+      if (f === 'first_thing' || f === 'draft') return Number(v) ? 'yes' : 'no';
+      if (f === 'time_slot') return FORMS.slotLabel(v);
       return String(v).length > 60 ? String(v).slice(0, 57) + '…' : String(v);
     };
     if (f === 'details') return 'Form details changed';
@@ -365,8 +417,18 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * Returns { job, removed } — `removed` are assignments taken off a job that had already been texted.
    * Texts go out separately via sendJob() so the office decides when drivers are notified.
    */
-  async function saveJob(data, userId = null) {
+  async function saveJob(data, userId = null, { enforceRequired = false } = {}) {
     const fields = cleanJob(data);
+    // Required fields (chosen by an admin on the Setup tab). Missing ones = save as a draft, or not at all.
+    const missing = FORMS.missingRequired({ ...fields, details: parseJson(fields.details), has_pin: Boolean(data.pin_lat) || data.lat != null },
+      (await requiredFields())[fields.job_type] || []);
+    const wantDraft = data.draft === true || data.draft === 1 || data.draft === '1';
+    if (enforceRequired && missing.length && !wantDraft) {
+      const err = new ValidationError(`Fill in: ${missing.map((m) => m.label).join(', ')} — or save it as a draft.`);
+      err.missing = missing.map((m) => m.key);
+      throw err;
+    }
+    fields.draft = wantDraft ? 1 : 0;
     const lines = cleanLines(data.lines);
     const rate = await hstRate();
     if (lines) {
@@ -388,7 +450,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
         if (!before) throw new ValidationError('Job not found');
         const changed = JOB_FIELDS.some((f) => !OFFICE_ONLY.has(f) && String(before[f] ?? '') !== String(fields[f] ?? ''));
         for (const f of JOB_FIELDS) {
-          if (['customer_id', 'distance_from', 'distance_mode', 'in_town', 'price_options'].includes(f)) continue;
+          if (['customer_id', 'distance_from', 'distance_mode', 'in_town', 'price_options', 'scheduled_time', 'first_thing', 'draft'].includes(f)) continue;
           if (f === 'quoted_price' && lines) continue; // the "Price:" line below says it
           if (String(before[f] ?? '') !== String(fields[f] ?? '')) changes.push(describeChange(f, before[f], fields[f]));
         }
@@ -491,6 +553,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   async function sendJob(jobId, { assignmentId = null } = {}) {
     const job = await getJob(jobId);
     if (!job) throw new ValidationError('Job not found');
+    if (Number(job.draft)) throw new ValidationError(`Job #${job.id} is a draft. Finish the work order and save it before texting drivers.`);
     if (job.status === 'cancelled') throw new ValidationError('Job is cancelled');
     const targets = job.assignments.filter((a) =>
       assignmentId ? a.id === Number(assignmentId) : a.status === 'pending' || a.needs_resend);
@@ -560,7 +623,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     if (job.job_type === 'toilet') details.trip = 'Pick up';
     else details.service = 'Empty & no return';
     return (await saveJob({
-      ...job, id: null, scheduled_date: when, scheduled_time: '', first_thing: 0, paper_wo: '', details,
+      ...job, id: null, scheduled_date: when, scheduled_time: '', first_thing: 0, time_slot: '', paper_wo: '', details,
       invoice_number: '', amount_billed: '', history_note: `Pick-up for #${job.id}`,
       notes: [`Pick-up for job #${job.id}.`, job.notes].filter(Boolean).join(' '), assignments: [],
     }, userId)).job;
@@ -596,11 +659,11 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   /** Other upcoming jobs for the same driver, so the job page can link between them. */
   async function otherJobsForDriver(driverId, excludeAssignmentId) {
-    return await db.all(`SELECT a.token, a.status, j.id AS job_id, j.job_type, j.scheduled_date, j.scheduled_time, j.first_thing, j.material, j.to_location
+    return await db.all(`SELECT a.token, a.status, j.id AS job_id, j.job_type, j.scheduled_date, j.scheduled_time, j.first_thing, j.time_slot, j.material, j.to_location
               FROM assignments a JOIN jobs j ON j.id = a.job_id
               WHERE a.driver_id = ? AND a.id != ? AND j.status = 'open' AND j.scheduled_date >= ?
                 AND a.status IN ('sent','acknowledged','in_progress')
-              ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time LIMIT 10`, driverId, excludeAssignmentId, today());
+              ORDER BY j.scheduled_date, ${SLOT_ORDER('j.')} LIMIT 10`, driverId, excludeAssignmentId, today());
   }
 
   /**
@@ -684,10 +747,10 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     }
 
     const { action, jobId } = sms.parseReply(body);
-    const open = await db.all(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing')}
+    const open = await db.all(`${ASSIGNMENT_SELECT.replace('SELECT a.*', 'SELECT a.*, j.scheduled_date, j.scheduled_time, j.first_thing, j.time_slot')}
                     JOIN jobs j ON j.id = a.job_id
                     WHERE a.driver_id = ? AND j.status = 'open' AND a.status IN ('sent','acknowledged','in_progress')
-                    ORDER BY j.scheduled_date, j.first_thing DESC, (j.scheduled_time = ''), j.scheduled_time, j.id`, driver.id);
+                    ORDER BY j.scheduled_date, ${SLOT_ORDER('j.')}, j.id`, driver.id);
     const first = driver.name.split(' ')[0];
     const finish = async (reply, assignmentId, handled = true) => {
       await logInbound(phone, body || '[photo]', driver.id, assignmentId, handled);
@@ -836,7 +899,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   async function getSettings() {
     return {
       lineup_time: await getSetting('lineup_time', config.lineupTime || ''),
-      septic_reminder_years: await getSetting('septic_reminder_years', '2'),
+      septic_reminder_years: await getSetting('septic_reminder_years', '3'),
+      required_fields: await requiredFields(),
     };
   }
 
@@ -846,6 +910,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new ValidationError('Time must look like 17:00');
       await setSetting('lineup_time', t);
     }
+    if ('required_fields' in data) await saveRequiredFields(data.required_fields);
     if ('septic_reminder_years' in data) {
       const y = Number(data.septic_reminder_years);
       if (![1, 2, 3, 4, 5].includes(y)) throw new ValidationError('Reminder interval must be 1 to 5 years');
@@ -858,7 +923,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   /** Per driver, their open jobs on `date`, in time order. */
   async function lineupFor(date) {
-    const jobs = (await listJobs({ from: date, to: date })).filter((j) => j.status === 'open');
+    const jobs = (await listJobs({ from: date, to: date })).filter((j) => j.status === 'open' && !Number(j.draft));
     const byDriver = new Map();
     for (const job of jobs) {
       for (const a of job.assignments) {
@@ -939,7 +1004,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (digits.length >= 4) args.push(`%${digits}%`);
     }
     const jobs = await db.all(`SELECT * FROM jobs WHERE ${where.join(' AND ')}
-      ORDER BY scheduled_date, first_thing DESC, (scheduled_time = ''), scheduled_time, id${limit ? ` LIMIT ${Number(limit)}` : ''}`, ...args);
+      ORDER BY scheduled_date, ${SLOT_ORDER('')}, id${limit ? ` LIMIT ${Number(limit)}` : ''}`, ...args);
     if (!jobs.length) return [];
     const byId = new Map(jobs.map((j) => [j.id, Object.assign(j, { details: parseJson(j.details), assignments: [], tickets: [] })]));
     const ids = [...byId.keys()];
@@ -1025,7 +1090,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
     saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo, prices,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
-    getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
+    getSettings, saveSettings, requiredFields, calendar, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,
   };
 }

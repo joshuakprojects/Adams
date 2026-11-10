@@ -200,7 +200,7 @@ test('roles: office saves work orders but cannot text or assign; only the owner 
   assert.equal((await owner('GET', '/me')).body.can.owner, true);
 
   // Office creates a job: drivers and "text now" are ignored.
-  const made = await office('POST', '/jobs', { job_type: 'septic', scheduled_date: '2026-11-12', customer: 'Jane', municipality: 'Seguin',
+  const made = await office('POST', '/jobs', { job_type: 'septic', scheduled_date: '2026-11-12', customer: 'Jane', municipality: 'Seguin', customer_phone: '705-555-0199', to_location: '5 Lake Rd',
     details: { tank_size: '1000' }, assignments: [{ driver_id: dave.id }], send_now: true,
     lines: [{ slot: 'septic.main', item_key: 'septic.base', description: 'Septic pump-out — up to 1000 gallon tank', qty: 1, unit_price: 395.57, taxable: 1, auto: 1 }] });
   assert.equal(made.status, 200);

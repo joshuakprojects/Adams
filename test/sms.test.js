@@ -34,13 +34,13 @@ test('parseReply leaves other messages for the office', () => {
 
 test('job text has the details a driver needs', () => {
   const job = {
-    id: 1042, job_type: 'haul', scheduled_date: '2026-11-10', scheduled_time: '07:00', material: '2" minus',
+    id: 1042, job_type: 'haul', scheduled_date: '2026-11-10', time_slot: 'am', material: '2" minus',
     quantity: '', unit: '', loads_planned: 20, from_location: 'Pit', to_location: '1388 Lake Rd', municipality: 'Ahmic Harbour',
     customer: 'Smith', customer_phone: '+17055550100', contact_name: 'Mike', contact_phone: '+14035551234', notes: 'Back of lot', details: '{}',
   };
   const text = sms.buildJobText(job, { token: 'abc', truck_unit: 'T1' });
   assert.match(text, /^ADAMS BROS - Aggregates Work Order #1042/);
-  assert.match(text, /Tue Nov 10 @ 7:00 AM/);
+  assert.match(text, /Tue Nov 10 - AM/);
   assert.match(text, /Truck: T1/);
   assert.match(text, /Aggregate type: 2" minus - 20 loads/);
   assert.match(text, /From \(pit \/ yard\): Pit/);

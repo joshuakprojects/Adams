@@ -137,6 +137,22 @@ The server checks the role on every action, not just what the screen shows. Logi
 are Admins. To create the owner login the first time, in the Replit Shell:
 `npm run add-user -- josh@adamsbros.ca "Josh" "a-good-password" admin`
 
+## Booking jobs
+
+- **Saving a work order never texts drivers.** Dispatch texts them from the board (the button on each job card, or
+  **Text drivers their day**) when they're ready.
+- **Time** is **First thing / AM / PM / Any time**; customers aren't given exact times. (Jobs saved with an exact time
+  before this change were switched to AM or PM.)
+- **Calendar** (on the board, next to Lanes / List / Map): the month with the number of jobs each day; click a day to
+  open it. Jobs can be booked any distance ahead.
+- **Required fields:** an admin picks, for each work order type, which fields must be filled in (Setup → Required fields;
+  to start with: customer name, phone and address). If any are missing the form says which, and the job can be
+  **saved as a draft** instead — handy for jobs booked weeks ahead. Drafts show greyed out with what they still need,
+  and can't be texted to drivers until they're finished. A pin dropped on the map counts as the address.
+- **Printed work orders** show who created the work order, when, and when it was printed.
+- **Website requests** and **All texts from drivers** open from the board (the Website requests tile and the link under
+  the tiles), so there are fewer tabs.
+
 ## Prices
 
 The **Prices** tab is the office price sheets (2025 Aggregate, Delivery Fees, 2025 Septic, Roll-off, Toilet & Water).

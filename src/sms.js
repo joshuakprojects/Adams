@@ -60,18 +60,19 @@ function siteAddress(job) {
   return to ? `${to}, ${muni}` : muni;
 }
 
-/** '7:00 AM', 'FIRST THING', 'FIRST THING (7:00 AM)' or '' */
+/** 'FIRST THING', 'AM', 'PM' or '' (any time). Jobs from before time slots may still have an exact time. */
 function formatJobTime(job) {
-  const time = formatTime(job.scheduled_time);
-  if (job.first_thing) return time ? `FIRST THING (${time})` : 'FIRST THING';
-  return time;
+  if (job.time_slot === 'first' || (!job.time_slot && job.first_thing)) return 'FIRST THING';
+  if (job.time_slot === 'am') return 'AM';
+  if (job.time_slot === 'pm') return 'PM';
+  if (job.time_slot === 'any') return '';
+  return formatTime(job.scheduled_time);
 }
 
-/** 'Tue Nov 10 @ 7:00 AM' / 'Tue Nov 10 - FIRST THING' */
+/** 'Tue Nov 10 - AM' / 'Tue Nov 10 - FIRST THING' / 'Tue Nov 10' */
 function formatJobWhen(job) {
   const time = formatJobTime(job);
-  if (!time) return formatDate(job.scheduled_date);
-  return `${formatDate(job.scheduled_date)}${job.first_thing ? ' - ' : ' @ '}${time}`;
+  return time ? `${formatDate(job.scheduled_date)} - ${time}` : formatDate(job.scheduled_date);
 }
 
 function jobLink(token) {

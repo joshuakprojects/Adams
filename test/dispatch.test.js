@@ -84,11 +84,11 @@ test('editing a texted job flags it for re-send and re-send needs a new OK', asy
   const j = (await d.saveJob(baseJob({ assignments: [{ driver_id: dave.id }] }))).job;
   await d.sendJob(j.id);
   await d.handleInbound('+14035550101', 'ok');
-  await d.saveJob({ ...baseJob({ scheduled_time: '06:30' }), id: j.id, assignments: [{ driver_id: dave.id }] });
+  await d.saveJob({ ...baseJob({ time_slot: 'pm' }), id: j.id, assignments: [{ driver_id: dave.id }] });
   assert.equal((await d.getJob(j.id)).assignments[0].needs_resend, 1);
   await d.sendJob(j.id);
   assert.match(sent.at(-1).body, /UPDATED Aggregates Work Order #1001/);
-  assert.match(sent.at(-1).body, /6:30 AM/);
+  assert.match(sent.at(-1).body, /Tue Nov 10 - PM/);
   const a = (await d.getJob(j.id)).assignments[0];
   assert.equal(a.status, 'sent');
   assert.equal(a.needs_resend, 0);

@@ -39,7 +39,7 @@ test('office login, create & text a job, driver confirms by SMS and finishes on 
   const driver = (await api('/drivers', { name: 'Dave', phone: '403-555-0101', default_truck_id: truck.id })).data;
   const today = (await api('/me')).data.today;
   const { data } = await api('/jobs', {
-    job_type: 'haul', scheduled_date: today, scheduled_time: '07:00', material: 'Topsoil', loads_planned: 3,
+    job_type: 'haul', scheduled_date: today, time_slot: 'am', material: 'Topsoil', loads_planned: 3, customer: 'Smith', customer_phone: '705-555-0100',
     from_location: 'Pit', to_location: 'Site', assignments: [{ driver_id: driver.id, truck_id: truck.id }], send_now: true,
   });
   assert.equal(data.results[0].ok, true);
