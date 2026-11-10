@@ -468,6 +468,8 @@ async function main() {
 }
 
 if (require.main === module) {
+  // A background task failing (a backup, a text, a lookup) must not take the dispatch app down: log it and carry on.
+  process.on('unhandledRejection', (err) => console.error('Background task failed (the app keeps running):', err));
   main().catch((err) => {
     console.error('Could not start:', err);
     process.exit(1);

@@ -93,6 +93,24 @@ test('nightly schedule, 30-day pruning and failure logging', async (t) => {
   assert.match(st.runs[0].error, /bucket not found/);
 });
 
+test('Replit Object Storage: a failed connection never crashes the app, and the next backup retries', async () => {
+  let made = 0;
+  class Broken {
+    constructor() {
+      made++;
+      // Like the real library: starts connecting in the constructor, and rejects if that fails.
+      this.state = { promise: Promise.reject(new Error('fetch failed')) };
+    }
+    async uploadFromBytes() { throw new Error('fetch failed'); }
+  }
+  const s = replitStorage(Broken, { bucketId: 'b' });
+  assert.equal(made, 0, 'nothing connects until a backup runs');
+  await assert.rejects(() => s.put('db/x', Buffer.from('a')), /Object Storage upload failed: fetch failed/);
+  await assert.rejects(() => s.put('db/x', Buffer.from('a')), /fetch failed/);
+  assert.equal(made, 2, 'a new connection is tried for the next backup');
+  await new Promise((r) => setImmediate(r)); // no unhandled rejection is left behind
+});
+
 test('Replit Object Storage adapter unwraps results', async () => {
   const calls = [];
   class FakeClient {
@@ -102,7 +120,7 @@ test('Replit Object Storage adapter unwraps results', async () => {
     async list({ prefix }) { return { ok: true, value: [{ name: prefix + 'a' }] }; }
     async delete(n) { return n === 'bad' ? { ok: false, error: { message: 'nope' } } : { ok: true }; }
   }
-  const s = replitStorage(FakeClient);
+  const s = replitStorage(FakeClient, { bucketId: 'test-bucket' });
   await s.put('db/x', Buffer.from('abc'));
   assert.deepEqual(calls, [['up', 'db/x', 3]]);
   assert.equal(String(await s.get('k')), 'hi k');
