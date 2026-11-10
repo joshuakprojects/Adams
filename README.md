@@ -183,6 +183,30 @@ map key from a server):
    *API restrictions*: Restrict key → tick **Geocoding API** and **Routes API**.
 3. On Replit add it as the secret **`GOOGLE_MAPS_SERVER_KEY`** and republish.
 
+## QuickBooks Online
+
+Built and **switched off** until the company is ready. Every work order with prices gets a **pending Estimate** in
+QuickBooks (QuickBooks has no "pending invoice"; the bookkeeper opens the Estimate and clicks *Create invoice*):
+- It's created when the work order is saved, and updated as the job goes: price changes, bin tonnage, loads done, ticket
+  photos, the driver's report (in the Estimate's private note), done. Once the Estimate is turned into an invoice (or
+  accepted/closed) the app stops changing it. A cancelled work order marks its Estimate *Rejected*.
+- Deposits aren't sold, so they go in the note, not as a line. HST or tax-exempt per line (water is exempt).
+- **QuickBooks is the master customer list:** *Import customers from QuickBooks* links them to the address book (by phone,
+  then name); a customer QuickBooks doesn't have yet is added there with their first Estimate.
+- Until it's connected and switched on, **Setup → QuickBooks Online** lists each work order with a **preview** of the
+  Estimate it would send (*View*), so you can check it first.
+
+To go live:
+1. At **developer.intuit.com** create an app (QuickBooks Online and Payments → Accounting scope). Under *Keys & OAuth*
+   add the redirect URI `https://<your dispatch address>/qbo/callback`.
+2. On Replit add the Secrets **`QBO_CLIENT_ID`** and **`QBO_CLIENT_SECRET`** (development keys work with Intuit's sandbox
+   company; for the real company file use the production keys and add **`QBO_ENVIRONMENT`** = `production`). Republish.
+3. **Setup → QuickBooks Online → Connect QuickBooks**, sign in and pick the company.
+4. Pick a QuickBooks product for each kind of price and the HST / exempt tax codes, *Import customers*, check a few
+   previews, then tick **Send estimates to QuickBooks** (and *Check all priced work orders* to send the ones already booked).
+
+The QuickBooks sign-in is kept in the database but never in backups.
+
 ## Customer questions
 
 The **Questions** tab holds the standard answers to customer questions, so everyone answers the same way. Admins add,
@@ -327,6 +351,7 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `public/pricing.js` | The pricing rules: works out a work order's price lines (shared by the server and the dashboard) |
 | `src/distance.js` | Driving distance (Google Geocoding + Routes) and the Parry Sound town boundary check |
 | `src/roles.js` | Office / Dispatcher / Admin permissions |
+| `src/quickbooks.js`, `public/qbo-ui.js` | QuickBooks Online: pending Estimates per work order, customer import, the Setup panel |
 | `public/pricing-ui.js` | Prices tab, job-form price panel, Questions, Logins |
 | `src/db.js` | Database tables, and the PostgreSQL / SQLite drivers |
 | `src/auth.js` | Office logins and sessions |

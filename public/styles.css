@@ -587,3 +587,14 @@ body.month-view #alerts, body.month-view .board-links, body.month-view #send-lin
 @media (max-width: 700px) { .cal-cell { min-height: 64px; padding: 5px; } .cal-n b { font-size: 16px; } .cal-sub { display: none; } }
 .cal-wrap { flex: 1 1 100%; width: 100%; grid-column: 1 / -1; }
 #request-count { display: none !important; }
+
+/* QuickBooks panel */
+.qbo-map { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 16px; margin: 10px 0; }
+.qbo-map h3 { grid-column: 1 / -1; margin: 8px 0 0; font-family: var(--head); }
+.qbo-map label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: #444; }
+.qbo-map select { padding: 7px 9px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; font-size: 14px; }
+.qbo-map .row-actions { grid-column: 1 / -1; }
+#qbo-panel h3 { font-family: var(--head); margin: 14px 0 6px; }
+.qbo-note { white-space: pre-wrap; background: #F6F6F1; border-radius: 8px; padding: 10px; font-size: 13px; font-family: inherit; }
+#qbo-dialog { width: min(900px, 96vw); }
+.ok-text { color: #1E7A45; }

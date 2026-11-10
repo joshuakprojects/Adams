@@ -119,6 +119,7 @@ async function dump(db) {
   for (const t of TABLES) {
     let rows = await db.all(`SELECT * FROM ${t} ORDER BY 1`);
     if (t === 'tickets') rows = rows.map(({ data, ...rest }) => rest); // photos go up separately
+    if (t === 'settings') rows = rows.filter((r) => !String(r.key).startsWith('qbo_tokens') && r.key !== 'qbo_oauth_state'); // no sign-ins in backups
     tables[t] = rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, Buffer.isBuffer(v) || v instanceof Uint8Array ? null : v])));
   }
   return { format: FORMAT, version: 1, created_at: new Date().toISOString(), db_kind: db.kind, tables };

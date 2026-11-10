@@ -126,6 +126,22 @@
       <div id="req-fields" class="req-fields"></div>
       <div class="row-actions"><button class="btn primary" type="button" id="req-save">Save required fields</button></div>
     </div>
+    <div class="panel settings" id="qbo-panel" data-need="admin">
+      <h2>QuickBooks Online</h2>
+      <p class="muted small">Every work order with prices gets a <b>pending Estimate</b> in QuickBooks, updated as the job goes (prices,
+        loads, the driver's report, done). The bookkeeper turns it into an invoice in QuickBooks; after that the app leaves it alone.
+        Cancelled work orders mark their Estimate rejected.</p>
+      <div id="qbo-status">Checking…</div>
+      <div class="row-actions" id="qbo-actions"></div>
+      <div id="qbo-mapping"></div>
+      <h3>Work orders and their Estimates</h3>
+      <div class="row-actions">
+        <button class="btn" data-qbo="sync" type="button">Check now</button>
+        <button class="btn" data-qbo="queue-open" type="button" title="Build (or send) the Estimate for every work order that has prices">Check all priced work orders</button>
+      </div>
+      <table class="table compact"><thead><tr><th>W.O.</th><th>Date</th><th>Customer</th><th>QuickBooks</th><th></th><th></th></tr></thead>
+        <tbody id="qbo-rows"></tbody></table>
+    </div>
     <div class="panel settings">
       <h2>Septic reminders</h2>
       <form id="septic-form" class="inline-form">
@@ -454,6 +470,17 @@
     </div>
   </dialog>
 
+  <!-- QUICKBOOKS ESTIMATE PREVIEW -->
+  <dialog id="qbo-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="qbo-dialog-title">Estimate</h2>
+        <button type="button" class="link" data-close-qbo aria-label="Close">✕</button>
+      </div>
+      <div id="qbo-dialog-body"></div>
+    </div>
+  </dialog>
+
   <!-- JOB HISTORY -->
   <dialog id="history-dialog">
     <div class="ticket-wrap">
@@ -489,5 +516,6 @@
   <script src="/pricing.js"></script>
   <script src="/app.js"></script>
   <script src="/pricing-ui.js"></script>
+  <script src="/qbo-ui.js"></script>
 </body>
 </html>

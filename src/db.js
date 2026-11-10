@@ -257,6 +257,17 @@ CREATE TABLE IF NOT EXISTS faq (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- QuickBooks Online: the Estimate kept for each work order (or a preview while QuickBooks is off).
+CREATE TABLE IF NOT EXISTS qbo_sync (
+  job_id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'queued',
+  estimate_id TEXT NOT NULL DEFAULT '',
+  sync_token TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL DEFAULT '',
+  last_error TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Driving distances looked up with Google (kept up to 30 days).
 CREATE TABLE IF NOT EXISTS distances (
   route_key TEXT PRIMARY KEY,
@@ -310,6 +321,10 @@ const ADDED_COLUMNS = {
     // What the driver filled in after the job (septic conditions, payment collected, notes) as JSON.
     report: "TEXT NOT NULL DEFAULT '{}'",
     report_at: 'TEXT',
+  },
+  customers: {
+    // The same customer in QuickBooks Online (QuickBooks is the master customer list).
+    qbo_id: "TEXT NOT NULL DEFAULT ''",
   },
   geocodes: {
     municipality: "TEXT NOT NULL DEFAULT ''",

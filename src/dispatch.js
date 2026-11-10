@@ -346,9 +346,14 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   // ---------- change history ----------
 
+  // Anything that changes a job is written to its history; listeners (QuickBooks) hear about it there.
+  const changeListeners = [];
+  function onChange(fn) { changeListeners.push(fn); }
+
   async function logHistory(jobId, action, details = '', actor = currentActor()) {
     if (!jobId) return;
     await db.run('INSERT INTO job_history (job_id, actor, action, details) VALUES (?, ?, ?, ?)', Number(jobId), str(actor, 100), action, str(details, 1000));
+    for (const fn of changeListeners) Promise.resolve().then(() => fn(Number(jobId), action)).catch((err) => console.error('Job change listener:', err.message));
   }
 
   async function historyFor(jobId) {
@@ -1088,7 +1093,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
-    saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo, prices,
+    saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo, prices, onChange,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
     getSettings, saveSettings, requiredFields, calendar, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,
