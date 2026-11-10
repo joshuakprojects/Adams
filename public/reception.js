@@ -10,7 +10,7 @@
     set: (k, v) => { try { localStorage.setItem('rc-' + k, v); } catch { /* private mode */ } } };
 
   const SERVICES = [
-    ['haul', '🪨', 'Gravel, sand, soil', 'Delivered by the load or the yard'],
+    ['haul', '🪨', 'Aggregate', 'Gravel, sand, soil — by the load or the yard'],
     ['septic', '💧', 'Septic pump-out', 'Tanks and pump chambers'],
     ['bin', '🗑️', 'Bin', 'Drop off, empty, pick up'],
     ['toilet', '🚻', 'Portable toilet', 'Weekly or monthly'],

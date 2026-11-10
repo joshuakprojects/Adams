@@ -144,7 +144,7 @@ the reception screen with `/?view=reception`):
 - **Home:** three big buttons (**New call**, **Find a customer**, **Customer asks…**), the **quotes to call back**, and
   **what I booked recently** in plain words ("Waiting for dispatch", "Driver confirmed ✓", "Draft — needs Phone #") with
   Change / Cancel / Book again / Print.
-- **New call**, *step by step*: **what they need** (big picture buttons, tap the material, truck and amount) → **where &
+- **New call**, *step by step*: **what they need** (big picture buttons — Aggregate, Septic, Bin, Toilet, Water, Something else — tap the material, truck and amount) → **where &
   price** (type the address; distance, delivery and HST are worked out, with a line to read to the caller) → **who** (type
   their phone number and a returning customer fills in, with their notes, and "due for a pump-out" when it applies) →
   **which day** (five weeks at a glance, coloured by how busy each day already is, with the jobs of each kind) → **Book it**,
