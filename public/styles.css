@@ -733,3 +733,20 @@ body.reception .tabs { display: none; }
 .rc-match { display: block; line-height: 1.6; }
 .rc-match .btn { margin-top: 4px; }
 .rc-one .rc-grid2 { grid-template-columns: 1fr; }
+
+/* Notes from the boss */
+body:not(.can-notes) [data-need="notes"] { display: none !important; }
+.boss-box { background: #fff; border: 2px solid #FFD101; border-radius: 12px; padding: 8px 14px; margin: 8px 0; max-width: 900px; }
+.boss-box summary { font-weight: 700; cursor: pointer; }
+.boss-form { display: flex; gap: 10px; margin: 10px 0; align-items: flex-start; flex-wrap: wrap; }
+.boss-form textarea { flex: 1 1 400px; padding: 8px 10px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; font-size: 14px; }
+.boss-list { list-style: none; padding: 0; margin: 0; }
+.boss-list li { padding: 8px 0; border-top: 1px solid #f0f0ea; }
+.boss-list .b { white-space: pre-wrap; }
+.rc-boss { background: #FFF6CC; border: 3px solid #FFD101; border-radius: 16px; padding: 14px 18px; margin-top: 18px; }
+.rc-boss h3 { font-family: var(--head); margin: 0 0 6px; font-size: 18px; }
+.rc-boss-note { padding: 8px 0; border-top: 1px solid #F0DA7A; font-size: 16px; white-space: pre-wrap; }
+.rc-boss-note:first-of-type { border-top: 0; }
+.rc-boss-note .who { font-size: 13px; color: #6b5a00; margin-top: 2px; white-space: normal; }
+.rc-boss-note { white-space: normal; }
+.rc-boss-note > div:first-child { white-space: pre-wrap; }

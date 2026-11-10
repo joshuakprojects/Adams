@@ -257,6 +257,15 @@ CREATE TABLE IF NOT EXISTS faq (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- "Notes from the boss": written on the dashboard by the logins allowed to (users.boss_notes), shown on reception's Home.
+CREATE TABLE IF NOT EXISTS boss_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  body TEXT NOT NULL,
+  author TEXT NOT NULL DEFAULT '',
+  author_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Quotes given on the phone (reception), kept to call back and turn into a work order.
 CREATE TABLE IF NOT EXISTS quotes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -332,6 +341,8 @@ const ADDED_COLUMNS = {
   users: {
     // office: prices, questions, customers, work orders (no texting) · dispatcher: + texting drivers · admin: everything
     role: "TEXT NOT NULL DEFAULT 'admin'",
+    // Can post "Notes from the boss" to the reception screen (the owner ticks it in Setup → Logins).
+    boss_notes: 'INTEGER NOT NULL DEFAULT 0',
     active: 'INTEGER NOT NULL DEFAULT 1',
   },
   assignments: {

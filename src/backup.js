@@ -13,7 +13,7 @@ const config = require('./config');
 const FORMAT = 'adams-dispatch-backup';
 // Restore order: parents before children (foreign keys).
 const TABLES = ['users', 'trucks', 'drivers', 'customers', 'jobs', 'assignments', 'messages', 'tickets',
-  'lineup_sends', 'settings', 'requests', 'job_history', 'price_items', 'price_changes', 'job_lines', 'faq', 'qbo_sync', 'quotes'];
+  'lineup_sends', 'settings', 'requests', 'job_history', 'price_items', 'price_changes', 'job_lines', 'faq', 'qbo_sync', 'quotes', 'boss_notes'];
 // Tables without an "id" counter (PostgreSQL counters are reset after a restore).
 const NO_ID = new Set(['settings', 'qbo_sync']);
 const KEEP_DAYS = 30;
