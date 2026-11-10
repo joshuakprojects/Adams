@@ -138,6 +138,25 @@
       fields: [],
       report: [],
     },
+    // The boss telling the crew where to be and what to do: no customer billing, no prices, not sent to QuickBooks.
+    labour: {
+      name: 'Labour',
+      title: 'Labour Work Order',
+      icon: '👷',
+      what: 'What they are doing',
+      whatSuggestions: ['Dig and uncover lids', 'Install risers', 'Landscaping', 'Clean-up', 'Hand digging', 'Flagging / traffic',
+        'Help the operator', 'Shop / yard work'],
+      quantity: false,
+      loads: false,
+      from: null,
+      to: 'Where',
+      noPricing: true,
+      fields: [
+        { key: 'bring', label: 'Bring (tools / equipment)', kind: 'text', wide: true, sms: true },
+        { key: 'report_to', label: 'Report to', kind: 'text', sms: true },
+      ],
+      report: [],
+    },
     misc: {
       name: 'Misc',
       title: 'Miscellaneous Work Order',
@@ -213,6 +232,8 @@
         return ['Pump-out', d.tank_type && d.tank_type.toLowerCase() + ' tank', d.tank_size].filter(Boolean).join(' - ');
       case 'toilet':
         return [d.trip, toiletSummary(d)].filter(Boolean).join(' - ');
+      case 'labour':
+        return job.material || 'Labour';
       default:
         return [job.material, qty, loads].filter(Boolean).join(' - ') || (t.name === 'Misc' ? '' : t.name);
     }

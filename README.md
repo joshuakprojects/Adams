@@ -289,6 +289,9 @@ npm run add-user -- jane@adamsbros.ca "Jane" "a-good-password"
 
 - **Labourers** are added on the Setup tab in their own column (name and cell, no truck). In the job form they're listed
   under the drivers; they get the same texts, job page link and OK / DONE replies.
+- **Labour work orders** (Labour in the job form) are just the boss telling the crew where to be and what to do: date,
+  time, *what they're doing*, *where*, site contact, what to bring, who to report to and instructions. No customer billing,
+  no prices, nothing sent to QuickBooks. Labourers are listed first when picking who's going.
 - **Which job a text is about:** "WO 1042", "W.O. #1042", "work order 1042", "job 1042" and "#1042" always count as a job
   number. A plain number only counts when it's one of that person's open jobs, so "pumped 1200 gallons" isn't taken for job
   #1200.

@@ -120,13 +120,13 @@ function renderSheet(job) {
 
   ${reportHtml || blankReport}
 
-  <section class="price">
+  ${t.noPricing ? '' : `<section class="price">
     <div class="ln"><span class="lb">Quoted price:</span><span class="val">${esc(job.quoted_price)}</span></div>
     <div class="ln"><span class="lb">HST # ${esc(c.hst)}</span><span class="val"></span></div>
     <div class="ln total"><span class="lb">TOTAL:</span><span class="val">${esc(job.amount_billed)}</span></div>
     ${job.invoice_number ? line('Invoice #', job.invoice_number) : ''}
     ${circled('Payment', FORMS.PAYMENT_METHODS, job.payment_method)}
-  </section>
+  </section>`}
 
   ${t.disclaimer ? `<p class="disclaimer">${esc(t.disclaimer)}</p>` : ''}
   <p class="stamp">Work order #${esc(job.id)}${Number(job.draft) ? ' · <b>DRAFT</b>' : ''} · Created${job.created_by_name ? ` by <b>${esc(job.created_by_name)}</b>` : ''} ${esc(fmtStamp(job.created_at))}
