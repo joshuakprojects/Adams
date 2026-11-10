@@ -94,7 +94,7 @@ test('ticket photos: from the job page, texted in, and unmatched', async (t) => 
 
   // Ron has no job today: photo is kept, flagged, and can be attached by the office.
   r = await d.handleInbound('+14035550102', '', { media: [{ buffer: JPEG, contentType: 'image/jpeg' }] });
-  assert.match(r.reply, /couldn't tell which job/);
+  assert.match(r.reply, /no job today to put it on/);
   const board = await d.board('2026-11-10');
   assert.equal(board.unmatched_tickets.length, 1);
   assert.equal(board.alerts.length, 1);

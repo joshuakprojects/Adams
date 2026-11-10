@@ -181,11 +181,12 @@
         <p class="small" id="restore-status"></p>
       </div>
     </div>
-    <div class="two-col">
+    <div class="three-col">
       <div class="panel">
         <h2>Drivers</h2>
         <form id="driver-form" class="inline-form">
           <input type="hidden" name="id">
+          <input type="hidden" name="kind" value="driver">
           <input name="name" placeholder="Name" required>
           <input name="phone" placeholder="Cell (403-555-1234)" required>
           <select name="default_truck_id"></select>
@@ -195,6 +196,21 @@
         </form>
         <table class="table"><thead><tr><th>Name</th><th>Cell</th><th>Usual truck</th><th></th></tr></thead>
           <tbody id="driver-rows"></tbody></table>
+      </div>
+      <div class="panel">
+        <h2>Labourers</h2>
+        <form id="labourer-form" class="inline-form">
+          <input type="hidden" name="id">
+          <input type="hidden" name="kind" value="labourer">
+          <input name="name" placeholder="Name" required>
+          <input name="phone" placeholder="Cell (705-555-1234)" required>
+          <label class="check"><input type="checkbox" name="active" checked> Active</label>
+          <button class="btn primary" type="submit">Save labourer</button>
+          <button class="btn" type="reset">Clear</button>
+        </form>
+        <p class="muted small">Labourers get their jobs by text just like drivers (reply OK / DONE, job page link), without a truck.</p>
+        <table class="table"><thead><tr><th>Name</th><th>Cell</th><th></th></tr></thead>
+          <tbody id="labourer-rows"></tbody></table>
       </div>
       <div class="panel">
         <h2>Trucks</h2>

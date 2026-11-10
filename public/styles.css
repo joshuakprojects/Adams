@@ -608,3 +608,8 @@ body.month-view #alerts, body.month-view .board-links, body.month-view #send-lin
 .restore-box h3 { margin: 0 0 6px; font-family: var(--head); color: #8C1D14; }
 .restore-box .inline-form { margin: 8px 0; flex-wrap: wrap; }
 .restore-box select { padding: 7px 9px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; font-size: 14px; min-width: 320px; max-width: 100%; }
+
+.three-col { display: grid; grid-template-columns: 1.2fr 1fr 1.2fr; gap: 16px; }
+@media (max-width: 1200px) { .three-col { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 800px) { .three-col { grid-template-columns: 1fr; } }
+.assign-head { grid-column: 1 / -1; margin: 10px 0 2px; font-family: var(--head); font-size: 14px; text-transform: uppercase; color: #555; }

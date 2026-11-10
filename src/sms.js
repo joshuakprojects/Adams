@@ -169,6 +169,18 @@ const SMALL_TALK = /^(THANKS|THANK YOU|THANKYOU|THX|TY|CHEERS|NP|NO PROBLEM)[\s!
  * Returns { action: 'ack' | 'done' | null, jobId: number | null }.
  * Only the first word decides the action so "ok thanks" works but "not ok" doesn't.
  */
+/**
+ * Job numbers in a driver's text: { explicit: [...], plain: [...] }.
+ * explicit = written as a job number ("WO 1042", "W.O. #1042", "work order 1042", "job 1042", "#1042");
+ * plain = any other 3–6 digit number (only trusted when it matches one of the driver's jobs).
+ */
+function jobNumbers(body) {
+  const text = String(body || '').replace(/10-4/g, '');
+  const explicit = [...text.matchAll(/(?:\bw\.?\s*o\b\.?|\bwork\s*order\b|\bjob\b|#)\s*#?\s*(\d{3,6})\b/gi)].map((m) => Number(m[1]));
+  const plain = [...text.matchAll(/\b(\d{3,6})\b/g)].map((m) => Number(m[1])).filter((n) => !explicit.includes(n));
+  return { explicit: [...new Set(explicit)], plain: [...new Set(plain)] };
+}
+
 function parseReply(body) {
   const text = String(body || '').trim();
   if (!text) return { action: null, jobId: null };
@@ -233,6 +245,7 @@ function twiml(message) {
 }
 
 module.exports = {
+  jobNumbers,
   normalizePhone,
   prettyPhone,
   formatDate,

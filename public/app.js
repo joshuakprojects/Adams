@@ -956,20 +956,23 @@
 
   function renderAssignList(type) {
     const truckKind = new Map(state.trucks.map((t) => [t.id, t.kind]));
-    const drivers = [...state.drivers].sort((a, b) => {
+    const drivers = state.drivers.filter((d) => d.kind !== 'labourer').sort((a, b) => {
       const ka = truckKind.get(a.default_truck_id) === type ? 0 : 1;
       const kb = truckKind.get(b.default_truck_id) === type ? 0 : 1;
       return ka - kb || a.name.localeCompare(b.name);
     });
-    $('#assign-list').innerHTML = drivers.map((d) => {
+    const labourers = state.drivers.filter((d) => d.kind === 'labourer').sort((a, b) => a.name.localeCompare(b.name));
+    const row = (d, withTruck) => {
       const on = formAssignments.has(d.id);
       const busy = busyByDriver.get(d.id);
-      return `<div class="assign ${on ? 'on' : ''}" data-driver="${d.id}">
+      return `<div class="assign ${on ? 'on' : ''} ${withTruck ? '' : 'no-truck'}" data-driver="${d.id}">
         <input type="checkbox" ${on ? 'checked' : ''} id="as-${d.id}">
         <label class="nm" for="as-${d.id}">${esc(d.name)}${busy ? `<span class="busy">Also on ${busy}</span>` : ''}</label>
-        <select>${truckOptions(on ? formAssignments.get(d.id) : d.default_truck_id)}</select>
+        ${withTruck ? `<select>${truckOptions(on ? formAssignments.get(d.id) : d.default_truck_id)}</select>` : '<span class="muted small">labourer</span>'}
       </div>`;
-    }).join('') || '<p class="muted">No drivers yet — add them on the Setup tab.</p>';
+    };
+    $('#assign-list').innerHTML = (drivers.map((d) => row(d, true)).join('') || '<p class="muted">No drivers yet — add them on the Setup tab.</p>')
+      + (labourers.length ? `<h4 class="assign-head">Labourers</h4>${labourers.map((d) => row(d, false)).join('')}` : '');
   }
 
   $('#assign-list').addEventListener('change', (e) => {
@@ -977,7 +980,7 @@
     if (!row) return;
     const id = Number(row.dataset.driver);
     const cb = $('input', row);
-    const truck = $('select', row).value || null;
+    const truck = $('select', row)?.value || null;
     if (e.target.tagName === 'SELECT' && !cb.checked) cb.checked = true;
     if (cb.checked) formAssignments.set(id, truck ? Number(truck) : null);
     else formAssignments.delete(id);
@@ -1133,7 +1136,12 @@
     renderRequired();
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
-    $('#driver-rows').innerHTML = drivers.map((d) => `
+    const labourers = drivers.filter((d) => d.kind === 'labourer');
+    $('#labourer-rows').innerHTML = labourers.map((d) => `
+      <tr class="${d.active ? '' : 'inactive'}"><td>${esc(d.name)}${d.active ? '' : ' (inactive)'}</td><td>${esc(prettyPhone(d.phone))}</td>
+      <td><button class="btn tiny" data-edit-labourer='${esc(JSON.stringify(d))}'>Edit</button></td></tr>`).join('')
+      || '<tr><td colspan="3" class="muted">No labourers yet.</td></tr>';
+    $('#driver-rows').innerHTML = drivers.filter((d) => d.kind !== 'labourer').map((d) => `
       <tr class="${d.active ? '' : 'inactive'}"><td>${esc(d.name)}${d.active ? '' : ' (inactive)'}</td><td>${esc(prettyPhone(d.phone))}</td>
       <td>${esc(d.default_truck_unit || '')}</td>
       <td><button class="btn tiny" data-edit-driver='${esc(JSON.stringify(d))}'>Edit</button></td></tr>`).join('');
@@ -1154,11 +1162,13 @@
   $('#tab-people').addEventListener('click', (e) => {
     const d = e.target.closest('[data-edit-driver]');
     if (d) fillForm($('#driver-form'), JSON.parse(d.dataset.editDriver));
+    const l = e.target.closest('[data-edit-labourer]');
+    if (l) fillForm($('#labourer-form'), JSON.parse(l.dataset.editLabourer));
     const t = e.target.closest('[data-edit-truck]');
     if (t) fillForm($('#truck-form'), JSON.parse(t.dataset.editTruck));
   });
 
-  for (const [formId, path] of [['#driver-form', '/drivers'], ['#truck-form', '/trucks']]) {
+  for (const [formId, path] of [['#driver-form', '/drivers'], ['#labourer-form', '/drivers'], ['#truck-form', '/trucks']]) {
     $(formId).addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(e.target).entries());
@@ -1171,7 +1181,10 @@
         loadPeople();
       } catch (err) { toast(err.message); }
     });
-    $(formId).addEventListener('reset', (e) => setTimeout(() => { e.target.elements.id.value = ''; }));
+    $(formId).addEventListener('reset', (e) => setTimeout(() => {
+      e.target.elements.id.value = '';
+      if (e.target.elements.kind) e.target.elements.kind.value = formId === '#labourer-form' ? 'labourer' : 'driver';
+    }));
   }
 
   $('#settings-form').addEventListener('submit', async (e) => {
