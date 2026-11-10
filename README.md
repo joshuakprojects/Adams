@@ -249,7 +249,12 @@ Copies go to:
 
 The Setup tab shows each place's last good copy and any problem, and has **Back up now**.
 
-To restore into an empty database (e.g. a fresh Replit database):
+**Restore button (easiest):** Setup → Backups → **Restore** (only the owner login sees it). Pick a backup from the list
+— nightly, hourly, or a "safety" copy — or choose a downloaded .zip, type RESTORE, and the live app is put back the way it
+was then, photos included. A safety copy of how things were just before is saved first, so a restore can be undone the
+same way. Everyone logs in again afterwards (the logins come back from the backup too).
+
+From the Shell instead, into an empty database (e.g. a fresh Replit database):
 ```bash
 npm run restore -- list                 # stored copies (nightly and hourly)
 npm run restore -- latest               # or a night: 2026-11-09, or an hour: 2026-11-09-14

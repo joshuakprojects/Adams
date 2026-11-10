@@ -1509,6 +1509,7 @@
     }).join('') + (st.server ? '' : `<div class="backup-target"><b>Your server</b> <span class="muted small">not set up</span><br>
         <span class="small">When it's ready, add its address as the Secret <code>BACKUP_SERVER_URL</code> (see the README, "Backups") and republish.</span></div>`);
     $('#backup-run').classList.toggle('hidden', !targets.length);
+    loadRestoreList();
     $('#backup-rows').innerHTML = st.runs.map((r) => `<tr>
         <td>${esc(fmtStamp(r.at))}</td><td>${esc(WHERE[r.target] || r.target)}</td>
         <td>${esc(r.name.startsWith('hourly/') ? 'hourly ' + r.name.slice(7, 17) + ' ' + r.name.slice(18, 20) + ':00' : 'nightly ' + r.name.replace('db/', '').replace('.json.gz', ''))}</td>
@@ -1516,6 +1517,58 @@
         <td>${r.ok ? '<span class="chip done">saved</span>' : `<span class="chip cancelled" title="${esc(r.error)}">failed</span> <span class="muted small">${esc(r.error)}</span>`}</td></tr>`).join('')
       || '<tr><td colspan="6" class="muted">No backups yet.</td></tr>';
   }
+  // ---------- restore (owner only) ----------
+  const WHEN_KIND = { nightly: 'Nightly', hourly: 'Hourly', safety: 'Safety copy (before a restore)' };
+  async function loadRestoreList() {
+    if (!state.can?.owner) return;
+    const list = await api('/backups/stored').catch(() => []);
+    const PLACE = { replit: 'cloud', local: 'folder', server: 'your server' };
+    $('#restore-pick').innerHTML = '<option value="">Pick a backup…</option>' + list.map((b) =>
+      `<option value="${esc(b.target)}|${esc(b.name)}">${esc(b.stamp)} — ${esc(WHEN_KIND[b.kind] || b.kind)} (${esc(PLACE[b.target] || b.target)})</option>`).join('');
+  }
+  function confirmRestore(what) {
+    const typed = prompt(`Restore ${what}?\n\nEverything entered since then will be replaced (a safety copy of right now is saved first). `
+      + 'Everyone will need to log in again.\n\nType RESTORE to go ahead:');
+    if (typed === null) return null;
+    if (typed.trim().toUpperCase() !== 'RESTORE') { toast('Not restored — you need to type RESTORE'); return null; }
+    return 'RESTORE';
+  }
+  function restored(out) {
+    alert(`Restored the backup from ${fmtStamp(String(out.created_at || '').slice(0, 19).replace('T', ' '))}: ${out.counts?.jobs ?? '?'} work orders, `
+      + `${out.photos} photos.${out.safety ? '\n\nThe safety copy from just before is in the list, if you need to undo this.' : ''}\n\nPlease log in again.`);
+    location.href = '/login';
+  }
+  $('#restore-go').addEventListener('click', async (e) => {
+    const v = $('#restore-pick').value;
+    if (!v) return toast('Pick a backup first');
+    const [target, name] = v.split('|');
+    const confirm = confirmRestore($('#restore-pick').selectedOptions[0].textContent);
+    if (!confirm) return;
+    e.target.disabled = true;
+    $('#restore-status').textContent = 'Saving a safety copy, then restoring… this can take a minute. Don\'t close this page.';
+    try { restored(await api('/backups/restore', { method: 'POST', body: { target, name, confirm } })); } catch (err) {
+      $('#restore-status').textContent = '';
+      toast(err.message);
+    } finally { e.target.disabled = false; }
+  });
+  $('#restore-upload').addEventListener('click', async (e) => {
+    const file = $('#restore-file').files[0];
+    if (!file) return toast('Choose the .zip file first');
+    const confirm = confirmRestore(`the file ${file.name}`);
+    if (!confirm) return;
+    e.target.disabled = true;
+    $('#restore-status').textContent = `Uploading ${Math.round(file.size / 1048576)} MB, then restoring… Don't close this page.`;
+    try {
+      const res = await fetch('/api/backups/restore-upload?confirm=' + confirm, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || 'Restore failed');
+      restored(out);
+    } catch (err) {
+      $('#restore-status').textContent = '';
+      toast(err.message);
+    } finally { e.target.disabled = false; }
+  });
+
   $('#backup-run').addEventListener('click', async (e) => {
     e.target.disabled = true;
     try {
