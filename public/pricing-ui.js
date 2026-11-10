@@ -742,5 +742,5 @@
     } catch (err) { toast(err.message); }
   });
 
-  window.PRICE_UI = { loadPrices, loadFaq, loadUsers, openForm, collect, suggestionsFor, getBook };
+  window.PRICE_UI = { loadPrices, loadFaq, loadUsers, openForm, collect, suggestionsFor, getBook, openPin };
 })();

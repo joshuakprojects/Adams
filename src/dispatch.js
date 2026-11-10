@@ -285,12 +285,13 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   /** Job counts per day for a month ('YYYY-MM'): { 'YYYY-MM-DD': { total, open, done, drafts } }. Cancelled jobs aren't counted. */
   async function calendar(month) {
     if (!/^\d{4}-\d{2}$/.test(String(month))) throw new ValidationError('Month must look like 2026-11');
-    const rows = await db.all(`SELECT scheduled_date, status, draft FROM jobs WHERE scheduled_date >= ? AND scheduled_date <= ? AND status <> 'cancelled'`,
+    const rows = await db.all(`SELECT scheduled_date, status, draft, job_type FROM jobs WHERE scheduled_date >= ? AND scheduled_date <= ? AND status <> 'cancelled'`,
       `${month}-01`, `${month}-31`);
     const out = {};
     for (const r of rows) {
-      const d = (out[r.scheduled_date] = out[r.scheduled_date] || { total: 0, open: 0, done: 0, drafts: 0 });
+      const d = (out[r.scheduled_date] = out[r.scheduled_date] || { total: 0, open: 0, done: 0, drafts: 0, types: {} });
       d.total++;
+      d.types[r.job_type] = (d.types[r.job_type] || 0) + 1;
       if (r.status === 'complete') d.done++; else d.open++;
       if (Number(r.draft)) d.drafts++;
     }

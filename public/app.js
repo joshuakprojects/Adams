@@ -1663,6 +1663,8 @@
     $('#user-initial').textContent = (me.user.name || '?').trim()[0].toUpperCase();
     $('#test-mode').classList.toggle('hidden', me.smsEnabled);
     await loadBoard();
+    // Office logins get the simple reception screens; dispatchers and admins can look with ?view=reception.
+    if (!state.can.dispatch || new URLSearchParams(location.search).get('view') === 'reception') window.RECEPTION?.start();
     // Keep the board fresh so driver confirmations show up without reloading.
     setInterval(() => {
       if (document.hidden || dialog.open || $('#ticket-dialog').open) return;

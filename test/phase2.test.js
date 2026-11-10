@@ -75,7 +75,7 @@ test('calendar: job counts per day for a month', async (t) => {
   const c = await mk('2026-11-20');
   await d.cancelJob(c.job.id);
   const cal = (await api('GET', '/calendar?month=2026-11')).body;
-  assert.deepEqual(cal['2026-11-12'], { total: 2, open: 2, done: 0, drafts: 1 });
+  assert.deepEqual(cal['2026-11-12'], { total: 2, open: 2, done: 0, drafts: 1, types: { bin: 2 } });
   assert.equal(cal['2026-11-20'], undefined, 'cancelled jobs are not counted');
   assert.equal(cal['2026-12-01'], undefined);
   assert.equal((await api('GET', '/calendar?month=nope')).status, 400);

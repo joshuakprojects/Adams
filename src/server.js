@@ -7,6 +7,7 @@ const { createBackups } = require('./backup');
 const { need, needOwner, can, permissions } = require('./roles');
 const { createDistance } = require('./distance');
 const { createQuickBooks } = require('./quickbooks');
+const { createReception } = require('./reception');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
@@ -201,6 +202,21 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return distance.measure({ from, address: req.body?.address, lat: req.body?.lat, lng: req.body?.lng });
   }));
 
+  // ---------- reception (office logins): home, find, quotes ----------
+  const reception = createReception(db, dispatch);
+  api.get('/reception/home', json((req) => reception.home(req.user, dispatch.today())));
+  api.get('/reception/find', json((req) => reception.find(String(req.query.q || ''))));
+  api.get('/reception/customers/:id/jobs', json((req) => reception.customerJobs(req.params.id)));
+  api.get('/quotes', json((req) => reception.listQuotes({ status: String(req.query.status || 'open') })));
+  api.get('/quotes/:id', h(async (req, res) => {
+    const q = await reception.getQuote(req.params.id);
+    if (!q) return res.status(404).json({ error: 'Quote not found' });
+    res.json(q);
+  }));
+  api.post('/quotes', json((req) => reception.saveQuote(req.body || {}, req.user)));
+  api.put('/quotes/:id', json((req) => reception.saveQuote({ ...(req.body || {}), id: req.params.id }, req.user)));
+  api.post('/quotes/:id/status', json((req) => reception.setQuoteStatus(req.params.id, String(req.body?.status || ''))));
+
   // ---------- QuickBooks Online (admins) ----------
   const admin = need('admin');
   api.get('/qbo', admin, json(() => qbo.status()));
@@ -307,6 +323,11 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.post('/jobs', json(async (req) => {
     req.body = await officeSafe(req, null);
     let { job } = await dispatch.saveJob({ ...req.body, id: null }, req.user.id, { enforceRequired: true });
+    // Booked from a saved quote: the quote is done.
+    if (req.body.quote_id) {
+      await reception.setQuoteStatus(req.body.quote_id, 'booked', job.id).catch(() => {});
+      await dispatch.logHistory(job.id, 'Booked from a quote', `Quote #${req.body.quote_id}`);
+    }
     // Scheduled from a website request: link the two.
     if (req.body.request_id) {
       await intake.link(req.body.request_id, job.id, req.user.id);
@@ -322,7 +343,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return req.body.send_now ? dispatch.sendJob(job.id) : { job, results: [] };
   }));
   api.post('/jobs/:id/send', need('dispatcher'), json((req) => dispatch.sendJob(req.params.id, { assignmentId: req.body?.assignment_id || null })));
-  api.post('/jobs/:id/cancel', need('dispatcher'), json((req) => dispatch.cancelJob(req.params.id)));
+  // Reception can cancel too (drivers who were texted are told).
+  api.post('/jobs/:id/cancel', json((req) => dispatch.cancelJob(req.params.id)));
   api.post('/jobs/:id/status', need('dispatcher'), json((req) => dispatch.setJobStatus(req.params.id, req.body.status)));
   api.post('/jobs/:id/pickup', json((req) => dispatch.bookPickup(req.params.id, req.body?.date, req.user.id)));
   api.post('/jobs/:id/move', json((req) => dispatch.moveJob(req.params.id, req.body?.date)));

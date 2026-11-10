@@ -137,6 +137,23 @@ The server checks the role on every action, not just what the screen shows. Logi
 are Admins. To create the owner login the first time, in the Replit Shell:
 `npm run add-user -- josh@adamsbros.ca "Josh" "a-good-password" admin`
 
+## Reception screen (office logins)
+
+Office logins see a simpler screen instead of the dashboard (dispatchers and admins keep the dashboard, and can look at
+the reception screen with `/?view=reception`):
+- **Home:** three big buttons (**New call**, **Find a customer**, **Customer asks…**), the **quotes to call back**, and
+  **what I booked recently** in plain words ("Waiting for dispatch", "Driver confirmed ✓", "Draft — needs Phone #") with
+  Change / Cancel / Book again / Print.
+- **New call**, *step by step*: **what they need** (big picture buttons, tap the material, truck and amount) → **where &
+  price** (type the address; distance, delivery and HST are worked out, with a line to read to the caller) → **who** (type
+  their phone number and a returning customer fills in, with their notes, and "due for a pump-out" when it applies) →
+  **which day** (five weeks at a glance, coloured by how busy each day already is, with the jobs of each kind) → **Book it**,
+  then the exact words to tell the customer. **Save as quote** keeps a price for someone not ready to book.
+- **One page:** the same, all on one screen, for staff who know it well (switch at the top right; it's remembered).
+- **Find:** by name, phone, address or work order number. Change or cancel a booking (a driver who was already texted gets
+  told), or book the same again. Floats and labour work orders open in the full form.
+- **Customer asks…:** search the standard answers and the prices; the answers beside a call follow the service picked.
+
 ## Booking jobs
 
 - **Saving a work order never texts drivers.** Dispatch texts them from the board (the button on each job card, or
@@ -399,6 +416,7 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `src/roles.js` | Office / Dispatcher / Admin permissions |
 | `src/quickbooks.js`, `public/qbo-ui.js` | QuickBooks Online: pending Estimates per work order, customer import, the Setup panel |
 | `public/pricing-ui.js` | Prices tab, job-form price panel, Questions, Logins |
+| `public/reception.js`, `src/reception.js` | Reception screen for office logins: home, new call, find, quotes |
 | `src/db.js` | Database tables, and the PostgreSQL / SQLite drivers |
 | `src/auth.js` | Office logins and sessions |
 | `public/` | Office dashboard (plain HTML/CSS/JS, no build step) |
