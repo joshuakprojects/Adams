@@ -1,0 +1,14 @@
+# Replit settings for the dispatch app.
+# Secrets (TWILIO_*, ADMIN_PASSWORD…) go in the Replit "Secrets" tool, not in this file.
+modules = ["nodejs-22"]
+run = "npm install && npm start"
+
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+[deployment]
+# A Reserved VM keeps running all day, so the 5 PM "tomorrow's jobs" text still goes out.
+deploymentTarget = "gce"
+build = ["npm", "ci", "--omit=dev"]
+run = ["npm", "start"]

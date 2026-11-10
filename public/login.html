@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adams Bros Dispatch – Log in</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/brand/favicon-64.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Quantico:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+      background: #111111; color: #111111; font-family: Poppins, system-ui, sans-serif; }
+    .wrap { width: min(400px, 100%); display: flex; flex-direction: column; align-items: center; gap: 22px; }
+    .brand { display: flex; flex-direction: column; align-items: center; gap: 12px; color: #FFFFFF; text-align: center; }
+    .brand img { height: 96px; width: auto; display: block; }
+    .brand .name { font-family: Quantico, sans-serif; font-weight: 700; font-size: 30px; letter-spacing: 0.08em; line-height: 1; }
+    .brand .sub { font-family: Quantico, sans-serif; font-size: 13px; letter-spacing: 0.42em; color: #FFD101; margin-right: -0.42em; }
+    form { width: 100%; background: #FFFFFF; border-radius: 14px; padding: 26px; display: flex; flex-direction: column; gap: 14px;
+      border-top: 5px solid #FFD101; }
+    h1 { margin: 0; font-family: Quantico, sans-serif; font-size: 22px; }
+    label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; font-size: 14px; color: #333333; }
+    input { font: inherit; font-size: 16px; padding: 12px; border: 1.5px solid #CFCFCB; border-radius: 8px; color: #111111; }
+    input:focus { outline: 3px solid #FFD101; outline-offset: 1px; border-color: #111111; }
+    button { font: inherit; font-weight: 700; font-size: 16px; padding: 14px; border: 0; border-radius: 8px;
+      background: #FFD101; color: #111111; cursor: pointer; margin-top: 4px; }
+    button:hover { background: #FFE04D; }
+    button:focus-visible { outline: 3px solid #111111; outline-offset: 2px; }
+    .error { color: #B3261E; font-weight: 600; min-height: 1.2em; font-size: 14px; }
+    .foot { color: #B8B8B4; font-size: 13px; text-align: center; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand">
+      <img src="/brand/adams-a.png" alt="Adams Bros">
+      <div class="name">ADAMS BROS</div>
+      <div class="sub">DISPATCH</div>
+    </div>
+    <form id="login">
+      <h1>Office login</h1>
+      <label>Email <input name="email" type="email" autocomplete="username" required autofocus></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <div id="err" class="error" role="alert"></div>
+      <button type="submit">Log in</button>
+    </form>
+    <div class="foot">Adams Bros Construction · Parry Sound</div>
+  </main>
+  <script>
+    document.getElementById('login').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: f.get('email'), password: f.get('password') }),
+      });
+      if (res.ok) location.href = '/';
+      else document.getElementById('err').textContent = (await res.json()).error || 'Login failed';
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adams Bros Dispatch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Quantico:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/brand/favicon-64.png">
+  <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/brand/adams-a.png" alt="" class="brand-a">
+      <div class="brand-text"><div class="b1">ADAMS BROS</div><div class="b2">DISPATCH</div></div>
+    </div>
+    <nav class="tabs" aria-label="Main">
+      <button data-tab="board" class="active">Board</button>
+      <button data-tab="requests">Requests <span id="request-count" class="count hidden"></span></button>
+      <button data-tab="customers">Customers <span id="due-count" class="count hidden"></span></button>
+      <button data-tab="messages">Texts <span id="alert-count" class="count hidden"></span></button>
+      <button data-tab="records">Records</button>
+      <button data-tab="people">Setup</button>
+    </nav>
+    <div class="spacer"></div>
+    <span id="test-mode" class="test-mode hidden" title="Twilio isn't set up yet. Texts are printed in the server log, not sent.">TEST MODE – texts not sent</span>
+    <span class="user"><span class="avatar" id="user-initial"></span><span id="user-name"></span></span>
+    <button id="logout" class="link">Log out</button>
+  </header>
+
+  <!-- BOARD -->
+  <section id="tab-board" class="tab">
+    <div class="daybar">
+      <div class="daynav">
+        <button class="btn" data-day="-1" aria-label="Previous day">‹</button>
+        <button class="btn" data-day="0">Today</button>
+        <button class="btn" data-day="1" aria-label="Next day">›</button>
+      </div>
+      <input type="date" id="board-date" aria-label="Pick a day">
+      <h1 id="board-title"></h1>
+      <div class="spacer"></div>
+      <div class="layout-toggle" role="group" aria-label="Board layout">
+        <button data-layout="lanes" aria-pressed="true">Lanes</button>
+        <button data-layout="list" aria-pressed="false">List</button>
+        <button data-layout="map" aria-pressed="false">Map</button>
+      </div>
+      <span id="lineup-status" class="muted small"></span>
+      <button class="btn outline" id="send-lineup" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
+      <button class="btn primary big" id="new-job">+ New job</button>
+    </div>
+    <div id="board-filters">
+      <div class="tiles" id="status-filter"></div>
+    </div>
+    <div id="alerts"></div>
+    <div id="stale-banner"></div>
+    <div class="filter-row types" id="type-filter"></div>
+    <section class="driver-strip" id="driver-strip" aria-label="Drivers"></section>
+    <div id="jobs" class="jobs"></div>
+    <div id="map-panel" class="map-panel hidden">
+      <div class="map-legend">
+        <span><i class="dot st-totext"></i>To text</span><span><i class="dot st-waiting"></i>Waiting for OK</span>
+        <span><i class="dot st-working"></i>Working</span><span><i class="dot st-done"></i>Done</span>
+        <span><i class="dot st-yard"></i>Yard</span>
+        <span class="muted small">Pin in the wrong spot? Drag it — it's remembered for that customer.</span>
+      </div>
+      <div class="map-body">
+        <div id="map" class="map" role="region" aria-label="Map of the day's jobs"></div>
+        <aside class="map-side" id="map-side"></aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- DRIVERS & TRUCKS -->
+  <section id="tab-people" class="tab hidden">
+    <div class="panel settings" id="sms-panel">
+      <h2>Texting (Twilio)</h2>
+      <div id="sms-status" class="muted">Checking…</div>
+      <div class="inline-form" style="margin-top:10px">
+        <button class="btn" id="sms-recheck" type="button">Check again</button>
+        <button class="btn primary" id="sms-connect" type="button">Connect number to this app</button>
+        <form id="sms-test" class="inline-form" style="margin:0">
+          <input name="phone" placeholder="Your cell (705-555-1234)" required>
+          <button class="btn" type="submit">Send test text</button>
+        </form>
+      </div>
+    </div>
+    <div class="panel settings">
+      <h2>Evening text: tomorrow's jobs</h2>
+      <form id="settings-form" class="inline-form">
+        <label class="check"><input type="checkbox" name="lineup_on"> Automatically text each driver their jobs for tomorrow at</label>
+        <input type="time" name="lineup_time" value="17:00">
+        <span class="muted small">(Eastern time)</span>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+      <p class="muted small">Drivers who already got their day by text are only texted again if a job was added or changed.
+        You can also send it any time with the "Text drivers their day" button on the board.</p>
+    </div>
+    <div class="panel settings">
+      <h2>Septic reminders</h2>
+      <form id="septic-form" class="inline-form">
+        <label class="check">Customers show as <b>&nbsp;due for a pump-out&nbsp;</b> after
+          <select name="septic_reminder_years"><option value="1">1 year</option><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></label>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+      <p class="muted small">See them on the Customers tab under "Due for pump-out". Nothing is sent to customers automatically.</p>
+    </div>
+    <div class="panel settings" id="backup-panel">
+      <h2>Backups</h2>
+      <p class="muted small" id="backup-where"></p>
+      <div class="row-actions">
+        <button class="btn" type="button" id="backup-run">Back up now</button>
+        <a class="btn" id="backup-download" href="/api/backups/download">Download a copy</a>
+      </div>
+      <table class="table compact"><thead><tr><th>When</th><th>Copy</th><th>Size</th><th>New photos</th><th></th></tr></thead><tbody id="backup-rows"></tbody></table>
+    </div>
+    <div class="two-col">
+      <div class="panel">
+        <h2>Drivers</h2>
+        <form id="driver-form" class="inline-form">
+          <input type="hidden" name="id">
+          <input name="name" placeholder="Name" required>
+          <input name="phone" placeholder="Cell (403-555-1234)" required>
+          <select name="default_truck_id"></select>
+          <label class="check"><input type="checkbox" name="active" checked> Active</label>
+          <button class="btn primary" type="submit">Save driver</button>
+          <button class="btn" type="reset">Clear</button>
+        </form>
+        <table class="table"><thead><tr><th>Name</th><th>Cell</th><th>Usual truck</th><th></th></tr></thead>
+          <tbody id="driver-rows"></tbody></table>
+      </div>
+      <div class="panel">
+        <h2>Trucks</h2>
+        <form id="truck-form" class="inline-form">
+          <input type="hidden" name="id">
+          <input name="unit" placeholder="Unit # (e.g. T12)" required>
+          <select name="kind" id="truck-kind"></select>
+          <input name="description" placeholder="Description (Kenworth tri-axle…)">
+          <label class="check"><input type="checkbox" name="active" checked> Active</label>
+          <button class="btn primary" type="submit">Save truck</button>
+          <button class="btn" type="reset">Clear</button>
+        </form>
+        <table class="table"><thead><tr><th>Unit</th><th>Type</th><th>Description</th><th></th></tr></thead>
+          <tbody id="truck-rows"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- WEBSITE REQUESTS -->
+  <section id="tab-requests" class="tab hidden">
+    <div class="toolbar">
+      <h2>Website requests</h2>
+      <div class="segmented small-seg" id="request-filter">
+        <label><input type="radio" name="rf" value="open" checked><span>New</span></label>
+        <label><input type="radio" name="rf" value="scheduled"><span>Scheduled</span></label>
+        <label><input type="radio" name="rf" value="all"><span>All</span></label>
+      </div>
+    </div>
+    <p class="muted small">Orders sent from the website. Click <b>Schedule</b> to open the work order already filled in, then pick the day and drivers.</p>
+    <div id="request-list" class="request-list"></div>
+  </section>
+
+  <!-- RECORDS (search & export) -->
+  <!-- CUSTOMERS (address book + septic reminders) -->
+  <section id="tab-customers" class="tab hidden">
+    <div class="toolbar">
+      <h2>Customers</h2>
+      <div class="segmented small-seg" id="cust-filter">
+        <label><input type="radio" name="cf" value="all" checked><span>All</span></label>
+        <label><input type="radio" name="cf" value="due"><span>Due for pump-out <b id="due-count-inline"></b></span></label>
+      </div>
+      <input id="cust-search" class="search-input" placeholder="Search name, phone or address…" aria-label="Search customers">
+      <div class="spacer"></div>
+      <button class="btn primary" id="cust-new">+ New customer</button>
+    </div>
+    <p class="muted small" id="cust-hint">Customers are added automatically from jobs and website orders. Pick one in the job form and their details fill in.</p>
+    <div class="cust-layout">
+      <div class="panel cust-list"><table class="table"><thead id="cust-head"></thead><tbody id="cust-rows"></tbody></table></div>
+      <div class="panel cust-detail hidden" id="cust-detail"></div>
+    </div>
+  </section>
+
+  <section id="tab-records" class="tab hidden">
+    <div class="panel">
+      <h2>Work order records</h2>
+      <p class="muted small">Every work order is kept permanently. Find past jobs, download them as a spreadsheet for the accountant,
+        or print them (one per page, with ticket photos) and choose <b>Save as PDF</b> to keep a file.</p>
+      <form id="records-form" class="inline-form records-form">
+        <label>From <input type="date" name="from"></label>
+        <label>To <input type="date" name="to"></label>
+        <select name="status">
+          <option value="complete">Completed</option>
+          <option value="all">All statuses</option>
+          <option value="open">Open / not finished</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select name="type"></select>
+        <input name="q" placeholder="Customer, address, W.O. #, phone…">
+        <button class="btn primary" type="submit">Search</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" id="records-csv">⬇ Download spreadsheet (CSV)</button>
+        <button class="btn" type="button" id="records-print">🖨 Print / Save as PDF</button>
+      </form>
+      <div class="records-quick muted small">Quick ranges:
+        <button class="link" data-range="year">This year</button>
+        <button class="link" data-range="lastyear">Last year</button>
+        <button class="link" data-range="month">This month</button>
+        <button class="link" data-range="lastmonth">Last month</button>
+      </div>
+      <div id="records-summary" class="records-summary"></div>
+      <div class="table-wrap"><table class="table records"><thead><tr>
+        <th>W.O. #</th><th>Date</th><th>Type</th><th>Customer</th><th>Address</th><th>Work</th><th>Loads</th><th>Quoted</th><th>Billed</th><th>Status</th><th></th>
+      </tr></thead><tbody id="records-rows"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- MESSAGES -->
+  <section id="tab-messages" class="tab hidden">
+    <div class="panel">
+      <h2>Text log</h2>
+      <form id="simulate" class="inline-form hidden">
+        <strong>Try a driver reply:</strong>
+        <select name="phone" id="sim-driver"></select>
+        <input name="body" placeholder="OK" required>
+        <button class="btn" type="submit">Send as driver</button>
+        <span id="sim-result" class="muted"></span>
+      </form>
+      <div id="message-list"></div>
+    </div>
+  </section>
+
+  <!-- JOB FORM -->
+  <dialog id="job-dialog">
+    <form id="job-form" method="dialog">
+      <div class="dialog-head">
+        <h2 id="job-form-title">New job</h2>
+        <button type="button" class="link" data-close>✕</button>
+      </div>
+      <input type="hidden" name="id">
+      <input type="hidden" name="request_id">
+      <div id="from-request" class="from-request hidden"></div>
+      <div class="segmented types" id="job-type"></div>
+      <div class="form-title" id="form-title"></div>
+
+      <fieldset class="sec">
+        <legend>When</legend>
+        <div class="grid">
+          <label><span data-label="date">Delivery date</span> <input type="date" name="scheduled_date" required></label>
+          <div class="field-col"><label for="f-time">Time</label><span class="time-row"><input type="time" name="scheduled_time" id="f-time">
+            <label class="first-thing" title="First job of the morning — goes to the top of the driver's day"><input type="checkbox" name="first_thing"> First thing</label></span></div>
+          <label>Paper W.O. # <input name="paper_wo" placeholder="if written on paper"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="sec">
+        <legend>Customer</legend>
+        <div class="grid">
+          <div class="span2 cust-pick">
+            <label for="f-customer">Name</label>
+            <input name="customer" id="f-customer" placeholder="Start typing to find a past customer" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="cust-suggest">
+            <div id="cust-suggest" class="suggest hidden" role="listbox" aria-label="Customers"></div>
+            <input type="hidden" name="customer_id">
+          </div>
+          <label>Phone # <input name="customer_phone" type="tel"></label>
+          <label class="span2">Billing / mailing address <input name="billing_address"></label>
+          <label>PO # <input name="po_number"></label>
+          <label class="wide">Email <input name="customer_email" type="email"></label>
+        </div>
+        <div id="cust-note" class="cust-note hidden"></div>
+      </fieldset>
+
+      <fieldset class="sec">
+        <legend id="job-legend">Job</legend>
+        <div class="grid">
+          <div class="grid sub" id="type-fields-first"></div>
+          <label class="wide" data-when="what"><span data-label="what">Material</span>
+            <input name="material" list="dl-what" autocomplete="off"></label>
+          <label data-when="loads"><span data-label="loads">Number of loads</span> <input type="number" name="loads_planned" min="0" max="999"></label>
+          <label data-when="quantity"><span data-label="qty">Quantity</span> <input name="quantity" placeholder="e.g. 200"></label>
+          <label data-when="unit">Unit <input name="unit" list="dl-units" placeholder="tonnes / yards"></label>
+          <div class="grid sub" id="type-fields-top"></div>
+          <label class="wide" data-when="from"><span data-label="from">From</span>
+            <input name="from_location" list="dl-locations" autocomplete="off"></label>
+          <label class="span2"><span data-label="to">Delivery address</span>
+            <input name="to_location" list="dl-locations" autocomplete="off"></label>
+          <label>Municipality <input name="municipality" list="dl-municipalities" autocomplete="off"></label>
+          <label class="span2">Site contact name <input name="contact_name"></label>
+          <label>Site contact phone # <input name="contact_phone" type="tel"></label>
+        </div>
+        <div class="grid" id="type-fields"></div>
+        <div class="grid">
+          <label class="wide">Special instructions (drivers see this) <textarea name="notes" rows="2" placeholder="Gate code, where to dump, tarp required…"></textarea></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="sec">
+        <legend>Price &amp; payment</legend>
+        <div class="grid">
+          <label>Quoted price <input name="quoted_price" placeholder="$"></label>
+          <label>Payment method <select name="payment_method"></select></label>
+          <p class="muted small office-note">Office only — drivers never see these.</p>
+          <label>Invoice # <input name="invoice_number" placeholder="once billed"></label>
+          <label>Amount billed <input name="amount_billed" placeholder="$ incl. HST"></label>
+        </div>
+      </fieldset>
+
+      <h3>Drivers</h3>
+      <p class="muted small">Tick everyone on this job. Pick the truck each one is taking.</p>
+      <div id="assign-list" class="assign-list"></div>
+
+      <div id="job-form-error" class="error"></div>
+      <div class="dialog-foot">
+        <button type="button" class="btn" data-close>Close</button>
+        <div class="spacer"></div>
+        <button type="submit" class="btn" value="save">Save only</button>
+        <button type="submit" class="btn primary big" value="send">Save &amp; text drivers</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- JOB HISTORY -->
+  <dialog id="history-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="history-title">History</h2>
+        <button type="button" class="link" data-close-history aria-label="Close">✕</button>
+      </div>
+      <ol id="history-list" class="history-list"></ol>
+    </div>
+  </dialog>
+
+  <!-- TICKET PHOTOS -->
+  <dialog id="ticket-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="ticket-title">Scale tickets</h2>
+        <button type="button" class="link" data-close-tickets>✕</button>
+      </div>
+      <div id="ticket-list" class="ticket-list"></div>
+    </div>
+  </dialog>
+
+  <datalist id="dl-customers"></datalist>
+  <datalist id="dl-what"></datalist>
+  <datalist id="dl-municipalities"></datalist>
+  <datalist id="dl-toilets"></datalist>
+  <datalist id="dl-locations"></datalist>
+  <datalist id="dl-units"></datalist>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/forms.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
