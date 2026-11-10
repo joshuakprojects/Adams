@@ -257,6 +257,23 @@ CREATE TABLE IF NOT EXISTS faq (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Quotes given on the phone (reception), kept to call back and turn into a work order.
+CREATE TABLE IF NOT EXISTS quotes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  address TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  total REAL,
+  data TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'open',
+  job_id INTEGER,
+  created_by INTEGER,
+  created_by_name TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- QuickBooks Online: the Estimate kept for each work order (or a preview while QuickBooks is off).
 CREATE TABLE IF NOT EXISTS qbo_sync (
   job_id INTEGER PRIMARY KEY,
