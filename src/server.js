@@ -4,6 +4,8 @@ const config = require('./config');
 const { openDb } = require('./db');
 const { createDispatch, ValidationError, nowHmIn } = require('./dispatch');
 const { createBackups } = require('./backup');
+const { need, needOwner, can, permissions } = require('./roles');
+const { createDistance } = require('./distance');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
@@ -36,7 +38,7 @@ function sendImage(res, ticket) {
 /** Express 4 doesn't catch errors from async handlers; this passes them to the error handler. */
 const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, next)).catch(next);
 
-function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null }) {
+function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db) }) {
   const intake = createIntake(db);
   const app = express();
   app.set('trust proxy', true);
@@ -176,8 +178,70 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.use(auth.requireUser);
   const json = (fn) => h(async (req, res) => res.json(await fn(req)));
 
-  api.get('/me', (req, res) => res.json({ user: req.user, smsEnabled: config.smsEnabled, today: dispatch.today(),
-    maps: { key: config.maps.key, mapId: config.maps.mapId, yard: config.maps.yard } }));
+  api.get('/me', (req, res) => res.json({ user: req.user, can: permissions(req.user), smsEnabled: config.smsEnabled, today: dispatch.today(),
+    maps: { key: config.maps.key, mapId: config.maps.mapId, yard: config.maps.yard, distance: Boolean(config.maps.serverKey) },
+    owner_email: config.ownerEmail }));
+
+  // ---------- price book ----------
+  api.get('/prices', json(async () => ({
+    items: await dispatch.prices.list({ includeInactive: true }),
+    categories: dispatch.prices.categories,
+    notes: dispatch.prices.categoryNotes,
+    settings: await dispatch.prices.settings(),
+  })));
+  api.get('/prices/book', json(() => dispatch.prices.book()));
+  api.get('/prices/changes', json(() => dispatch.prices.changes(200)));
+  api.post('/prices', need('admin'), json((req) => dispatch.prices.save(req.body?.changes || [])));
+  api.post('/prices/settings', need('admin'), json((req) => dispatch.prices.saveSettings(req.body || {})));
+  // Driving distance from the starting point to an address or a dropped pin (for the delivery fee).
+  api.post('/distance', json(async (req) => {
+    const from = String(req.body?.from || '').trim() || (await dispatch.prices.settings()).start_address;
+    return distance.measure({ from, address: req.body?.address, lat: req.body?.lat, lng: req.body?.lng });
+  }));
+
+  // ---------- customer questions (standard answers) ----------
+  api.get('/faq', json(() => db.all('SELECT * FROM faq ORDER BY lower(topic), lower(question)')));
+  const saveFaq = async (req) => {
+    const question = String(req.body?.question || '').trim().slice(0, 500);
+    const answer = String(req.body?.answer || '').trim().slice(0, 4000);
+    const topic = String(req.body?.topic || '').trim().slice(0, 60);
+    if (!question) throw new ValidationError('Type the question');
+    if (req.params.id) {
+      await db.run("UPDATE faq SET question = ?, answer = ?, topic = ?, updated_by = ?, updated_at = datetime('now') WHERE id = ?",
+        question, answer, topic, req.user.name, Number(req.params.id));
+      return db.get('SELECT * FROM faq WHERE id = ?', Number(req.params.id));
+    }
+    const r = await db.run('INSERT INTO faq (question, answer, topic, updated_by) VALUES (?, ?, ?, ?)', question, answer, topic, req.user.name);
+    return db.get('SELECT * FROM faq WHERE id = ?', Number(r.lastInsertRowid));
+  };
+  api.post('/faq', need('admin'), json(saveFaq));
+  api.put('/faq/:id', need('admin'), json(saveFaq));
+  api.delete('/faq/:id', need('admin'), json(async (req) => {
+    await db.run('DELETE FROM faq WHERE id = ?', Number(req.params.id));
+    return { ok: true };
+  }));
+
+  // ---------- logins (owner only) ----------
+  api.get('/users', needOwner, json(() => auth.listUsers(db)));
+  api.post('/users', needOwner, json(async (req) => {
+    const b = req.body || {};
+    const email = String(b.email || '').trim().toLowerCase();
+    if (await db.get('SELECT id FROM users WHERE email = ?', email)) throw new ValidationError('There is already a login for that email');
+    const id = await auth.createUser(db, { email, name: b.name, password: b.password, role: b.role });
+    return (await auth.listUsers(db)).find((u) => u.id === id);
+  }));
+  api.put('/users/:id', needOwner, json(async (req) => {
+    const b = req.body || {};
+    if (Number(req.params.id) === req.user.id && (b.role && b.role !== 'admin' || b.active === false)) {
+      throw new ValidationError('You can\'t take away your own admin access');
+    }
+    return auth.updateUser(db, req.params.id, { name: b.name, role: b.role, password: b.password || '', active: b.active });
+  }));
+  api.delete('/users/:id', needOwner, json(async (req) => {
+    if (Number(req.params.id) === req.user.id) throw new ValidationError('You can\'t remove your own login');
+    await auth.deleteUser(db, req.params.id);
+    return { ok: true };
+  }));
 
   // ---------- map ----------
   api.post('/geocodes/lookup', h(async (req, res) => res.json(await dispatch.geo.lookup(req.body.addresses))));
@@ -212,7 +276,15 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     if (!job) return res.status(404).json({ error: 'Not found' });
     res.json(job);
   }));
+  // Office logins save work orders but don't assign or text drivers (that's dispatch).
+  const officeSafe = async (req, id) => {
+    if (can(req.user, 'dispatcher')) return req.body;
+    const current = id ? await dispatch.getJob(id) : null;
+    return { ...req.body, send_now: false,
+      assignments: current ? current.assignments.map((a) => ({ driver_id: a.driver_id, truck_id: a.truck_id })) : [] };
+  };
   api.post('/jobs', json(async (req) => {
+    req.body = await officeSafe(req, null);
     let { job } = await dispatch.saveJob({ ...req.body, id: null }, req.user.id);
     // Scheduled from a website request: link the two.
     if (req.body.request_id) {
@@ -223,17 +295,18 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return req.body.send_now ? dispatch.sendJob(job.id) : { job, results: [] };
   }));
   api.put('/jobs/:id', json(async (req) => {
+    req.body = await officeSafe(req, req.params.id);
     const { job, removed } = await dispatch.saveJob({ ...req.body, id: req.params.id }, req.user.id);
     await dispatch.notifyRemoved(job, removed);
     return req.body.send_now ? dispatch.sendJob(job.id) : { job, results: [] };
   }));
-  api.post('/jobs/:id/send', json((req) => dispatch.sendJob(req.params.id, { assignmentId: req.body?.assignment_id || null })));
-  api.post('/jobs/:id/cancel', json((req) => dispatch.cancelJob(req.params.id)));
-  api.post('/jobs/:id/status', json((req) => dispatch.setJobStatus(req.params.id, req.body.status)));
+  api.post('/jobs/:id/send', need('dispatcher'), json((req) => dispatch.sendJob(req.params.id, { assignmentId: req.body?.assignment_id || null })));
+  api.post('/jobs/:id/cancel', need('dispatcher'), json((req) => dispatch.cancelJob(req.params.id)));
+  api.post('/jobs/:id/status', need('dispatcher'), json((req) => dispatch.setJobStatus(req.params.id, req.body.status)));
   api.post('/jobs/:id/pickup', json((req) => dispatch.bookPickup(req.params.id, req.body?.date, req.user.id)));
   api.post('/jobs/:id/move', json((req) => dispatch.moveJob(req.params.id, req.body?.date)));
   api.post('/jobs/:id/duplicate', json((req) => dispatch.duplicateJob(req.params.id, req.body.date, req.user.id)));
-  api.delete('/jobs/:id', h(async (req, res) => {
+  api.delete('/jobs/:id', need('dispatcher'), h(async (req, res) => {
     const job = await dispatch.getJob(req.params.id);
     if (job && job.assignments.some((a) => a.status !== 'pending')) {
       return res.status(400).json({ error: 'Drivers were already texted. Cancel the job instead so they get told.' });
@@ -242,48 +315,48 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     res.json({ ok: true });
   }));
   api.get('/tickets/:id/image', h(async (req, res) => sendImage(res, await dispatch.getTicket(req.params.id))));
-  api.post('/tickets/:id/attach', json(async (req) => {
+  api.post('/tickets/:id/attach', need('dispatcher'), json(async (req) => {
     const t = await dispatch.attachTicket(req.params.id, req.body.job_id);
     return { ...t, data: undefined };
   }));
-  api.delete('/tickets/:id', json(async (req) => {
+  api.delete('/tickets/:id', need('dispatcher'), json(async (req) => {
     await dispatch.deleteTicket(req.params.id);
     return { ok: true };
   }));
   api.get('/settings', json(() => dispatch.getSettings()));
   // Backups: status, run one now, or download a copy of the whole database (photos stay in the backup store).
-  api.get('/backups', json(() => (backups ? backups.status() : { target: 'off', label: 'Backups are off', runs: [] })));
-  api.post('/backups/run', h(async (_req, res) => {
+  api.get('/backups', need('admin'), json(() => (backups ? backups.status() : { target: 'off', label: 'Backups are off', runs: [] })));
+  api.post('/backups/run', need('admin'), h(async (_req, res) => {
     if (!backups) return res.status(400).json({ error: 'Backups are off' });
     res.json(await backups.run({ reason: 'by hand' }));
   }));
-  api.get('/backups/download', h(async (_req, res) => {
+  api.get('/backups/download', need('admin'), h(async (_req, res) => {
     const buf = await (backups || createBackups(db, { storage: null, today: dispatch.today })).download();
     res.setHeader('Content-Type', 'application/gzip');
     res.setHeader('Content-Disposition', `attachment; filename="adams-dispatch-backup-${dispatch.today()}.json.gz"`);
     res.setHeader('Cache-Control', 'no-store');
     res.send(buf);
   }));
-  api.post('/settings', json((req) => dispatch.saveSettings(req.body || {})));
+  api.post('/settings', need('admin'), json((req) => dispatch.saveSettings(req.body || {})));
   // Text every driver their whole day for a date (the "tomorrow's jobs" text, sent by hand).
-  api.post('/lineup/send', json((req) => {
+  api.post('/lineup/send', need('dispatcher'), json((req) => {
     const date = String(req.body?.date || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new ValidationError('Pick a date');
     return dispatch.sendLineup(date);
   }));
   // Office can set a driver's status by hand (e.g. driver phoned in).
-  api.post('/assignments/:token/:action', json(async (req) => {
+  api.post('/assignments/:token/:action', need('dispatcher'), json(async (req) => {
     const a = await dispatch.driverAction(req.params.token, req.params.action, 'office');
     return { ...a, job: undefined };
   }));
 
   // Records: find past work orders, download a spreadsheet, print / save as PDF (tax season).
-  api.get('/records', json(async (req) => {
+  api.get('/records', need('dispatcher'), json(async (req) => {
     const f = recordFilters(req.query);
     const jobs = await dispatch.findJobs({ ...f, limit: 501 });
     return { ...f, truncated: jobs.length > 500, jobs: jobs.slice(0, 500) };
   }));
-  api.get('/records.csv', h(async (req, res) => {
+  api.get('/records.csv', need('dispatcher'), h(async (req, res) => {
     const f = recordFilters(req.query);
     const jobs = await dispatch.findJobs(f);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -304,29 +377,29 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   api.get('/drivers', json((req) => dispatch.listDrivers({ includeInactive: req.query.all === '1' })));
-  api.post('/drivers', json((req) => dispatch.saveDriver(req.body)));
+  api.post('/drivers', need('admin'), json((req) => dispatch.saveDriver(req.body)));
   api.get('/trucks', json((req) => dispatch.listTrucks({ includeInactive: req.query.all === '1' })));
-  api.post('/trucks', json((req) => dispatch.saveTruck(req.body)));
+  api.post('/trucks', need('admin'), json((req) => dispatch.saveTruck(req.body)));
   api.get('/suggestions', json(() => dispatch.suggestions()));
-  api.get('/messages', json(() => dispatch.listMessages({ limit: 200 })));
-  api.post('/messages/seen', json(async (req) => {
+  api.get('/messages', need('dispatcher'), json(() => dispatch.listMessages({ limit: 200 })));
+  api.post('/messages/seen', need('dispatcher'), json(async (req) => {
     await dispatch.markMessagesSeen(req.body.ids);
     return { ok: true };
   }));
   // Texting setup (Setup tab).
-  api.get('/sms/status', json(() => twilio.checkSetup()));
-  api.post('/sms/connect', json(() => {
+  api.get('/sms/status', need('admin'), json(() => twilio.checkSetup()));
+  api.post('/sms/connect', need('admin'), json(() => {
     if (!config.smsEnabled) throw new ValidationError('Add the Twilio settings to .env first');
     return twilio.connectWebhook();
   }));
-  api.post('/sms/test', json(async (req) => {
+  api.post('/sms/test', need('admin'), json(async (req) => {
     const to = sms.normalizePhone(req.body?.phone);
     if (!to) throw new ValidationError('Enter a 10-digit cell number');
     const r = await sms.sendSms(to, `${config.companyName} dispatch: test text. Reply OK to check replies reach the office.`);
     return { ok: true, simulated: Boolean(r.simulated) };
   }));
   // Try a driver reply without a real phone (only when texting isn't hooked up yet).
-  api.post('/simulate-reply', json((req) => {
+  api.post('/simulate-reply', need('dispatcher'), json((req) => {
     if (config.smsEnabled) throw new ValidationError('Texting is live; reply from a real phone.');
     return dispatch.handleInbound(req.body.phone, req.body.body);
   }));
@@ -334,7 +407,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 
   app.get('/', auth.requireUser, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
   // Many work orders at once, one per page (Records tab → Print / Save as PDF).
-  app.get('/print/records', auth.requireUser, h(async (req, res) => {
+  app.get('/print/records', auth.requireUser, need('dispatcher'), h(async (req, res) => {
     const f = recordFilters(req.query);
     res.send(renderPrintBatch(await dispatch.findJobs(f), f));
   }));
@@ -362,6 +435,8 @@ async function main() {
   console.log(db.kind === 'pg' ? 'Database: PostgreSQL (DATABASE_URL)' : `Database: SQLite file ${config.dbPath}`);
   await auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
+  const priced = await dispatch.prices.seed();
+  if (priced) console.log(`Price book: loaded ${priced} prices from the price sheets.`);
   const linked = await dispatch.customers.backfill();
   if (linked) console.log(`Address book: linked ${linked} earlier job(s) to customers.`);
   // DEMO_DATA=true: fill an empty database with sample jobs (for showing the app off).

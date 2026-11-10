@@ -19,15 +19,48 @@ function verifyPassword(password, stored) {
 }
 
 // Emails are stored lower-case so logins aren't case-sensitive (in SQLite and PostgreSQL alike).
-async function createUser(db, { email, name, password }) {
-  if (!email || !password || password.length < 8) throw new Error('Email and a password of 8+ characters are required');
+class UserError extends Error {
+  constructor(message) { super(message); this.status = 400; }
+}
+const ROLES = ['office', 'dispatcher', 'admin'];
+const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+
+/** Create a login, or update the name / password / role of an existing one (same email). */
+async function createUser(db, { email, name, password, role = 'admin' }) {
+  if (!email || !password || String(password).length < 8) throw new UserError('Email and a password of 8+ characters are required');
   email = String(email).trim().toLowerCase();
+  if (!validEmail(email)) throw new UserError('That email address doesn\'t look right');
+  if (!ROLES.includes(role)) throw new UserError('Unknown role');
   const existing = await db.get('SELECT id FROM users WHERE email = ?', email);
   if (existing) {
-    await db.run('UPDATE users SET name = ?, password_hash = ? WHERE id = ?', name || email, hashPassword(password), existing.id);
+    await db.run('UPDATE users SET name = ?, password_hash = ?, role = ?, active = 1 WHERE id = ?', name || email, hashPassword(password), role, existing.id);
     return existing.id;
   }
-  return Number((await db.run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)', email, name || email, hashPassword(password))).lastInsertRowid);
+  return Number((await db.run('INSERT INTO users (email, name, password_hash, role) VALUES (?, ?, ?, ?)',
+    email, name || email, hashPassword(password), role)).lastInsertRowid);
+}
+
+async function listUsers(db) {
+  return db.all('SELECT id, email, name, role, active, created_at FROM users ORDER BY active DESC, lower(name)');
+}
+
+/** Change a login's name, role, or password (blank = keep). Changing the password or turning a login off logs it out. */
+async function updateUser(db, id, { name, role, password, active }) {
+  const u = await db.get('SELECT * FROM users WHERE id = ?', Number(id));
+  if (!u) throw new UserError('Login not found');
+  if (role !== undefined && !ROLES.includes(role)) throw new UserError('Unknown role');
+  if (password && String(password).length < 8) throw new UserError('Passwords need 8 or more characters');
+  await db.run('UPDATE users SET name = ?, role = ?, active = ? WHERE id = ?',
+    String(name ?? u.name).trim() || u.email, role ?? u.role, active === undefined ? u.active : (active ? 1 : 0), u.id);
+  if (password) await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hashPassword(password), u.id);
+  if (password || active === false) await db.run('DELETE FROM sessions WHERE user_id = ?', u.id);
+  return db.get('SELECT id, email, name, role, active, created_at FROM users WHERE id = ?', u.id);
+}
+
+/** Remove a login. Their work orders keep their name in the history. */
+async function deleteUser(db, id) {
+  await db.run('DELETE FROM sessions WHERE user_id = ?', Number(id));
+  await db.run('DELETE FROM users WHERE id = ?', Number(id));
 }
 
 /** On first start, create the admin from ADMIN_EMAIL / ADMIN_PASSWORD if there are no users yet. */
@@ -63,7 +96,7 @@ function authRoutes(app, db) {
     }
     const { email, password } = req.body || {};
     const user = await db.get('SELECT * FROM users WHERE email = ?', String(email || '').trim().toLowerCase());
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    if (!user || !verifyPassword(password, user.password_hash) || !Number(user.active ?? 1)) {
       const next = rec && rec.until > Date.now() ? rec.count + 1 : 1;
       loginAttempts.set(ip, { count: next, until: Date.now() + 10 * 60 * 1000 });
       return res.status(401).json({ error: 'Wrong email or password' });
@@ -91,8 +124,10 @@ function loadUser(db) {
     try {
       const token = parseCookies(req.headers.cookie)[COOKIE];
       if (token) {
-        const row = await db.get(`SELECT u.id, u.email, u.name, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`, token);
-        if (row && row.expires_at > new Date().toISOString()) req.user = { id: row.id, email: row.email, name: row.name };
+        const row = await db.get(`SELECT u.id, u.email, u.name, u.role, u.active, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`, token);
+        if (row && Number(row.active) && row.expires_at > new Date().toISOString()) {
+          req.user = { id: row.id, email: row.email, name: row.name, role: row.role || 'admin' };
+        }
       }
       next();
     } catch (err) {
@@ -107,4 +142,4 @@ function requireUser(req, res, next) {
   res.redirect('/login');
 }
 
-module.exports = { hashPassword, verifyPassword, createUser, ensureAdmin, authRoutes, loadUser, requireUser };
+module.exports = { hashPassword, verifyPassword, createUser, listUsers, updateUser, deleteUser, UserError, ensureAdmin, authRoutes, loadUser, requireUser };

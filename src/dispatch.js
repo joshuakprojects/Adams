@@ -4,6 +4,8 @@ const path = require('node:path');
 const config = require('./config');
 const sms = require('./sms');
 const FORMS = require('../public/forms');
+const PRICING = require('../public/pricing');
+const { createPrices } = require('./prices');
 const { createCustomers } = require('./customers');
 const { createGeo, addressKey, validPoint } = require('./geo');
 const { currentActor } = require('./actor');
@@ -150,6 +152,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   async function hydrate(job) {
     job.details = parseJson(job.details);
+    job.price_options = parseJson(job.price_options);
+    job.lines = await db.all('SELECT * FROM job_lines WHERE job_id = ? ORDER BY sort, id', job.id);
+    job.totals = PRICING.totals(job.lines, await hstRate());
     job.assignments = await assignmentsFor(job.id);
     job.tickets = await ticketsFor(job.id);
     return job;
@@ -207,16 +212,72 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       notes: str(data.notes, 1000),
       invoice_number: str(data.invoice_number, 60),
       amount_billed: str(data.amount_billed, 60),
+      ...cleanDistance(data),
+      price_options: JSON.stringify(cleanPriceOptions(data.price_options)),
     };
+  }
+
+  function cleanDistance(data) {
+    const km = data.distance_km === '' || data.distance_km == null ? null : Number(data.distance_km);
+    if (km != null && (!Number.isFinite(km) || km < 0 || km > 2000)) throw new ValidationError('Distance must be a number of km');
+    const mode = ['address', 'pin', 'manual'].includes(data.distance_mode) ? data.distance_mode : '';
+    return {
+      distance_km: km == null ? null : Math.round(km * 10) / 10,
+      distance_from: km == null ? '' : str(data.distance_from, 200),
+      distance_mode: km == null ? '' : mode,
+      in_town: km == null && !Number(data.in_town) ? null : Number(data.in_town) ? 1 : 0,
+    };
+  }
+
+  function cleanPriceOptions(o) {
+    const src = typeof o === 'string' ? parseJson(o) : o || {};
+    const out = {};
+    if (src.period === 'month' || src.period === 'week') out.period = src.period;
+    if (['yes', 'no', 'auto'].includes(src.member)) out.member = src.member;
+    if (['mixed', 'concrete', 'asbestos', 'metal'].includes(src.waste)) out.waste = src.waste;
+    for (const k of ['off_schedule', 'pump_chamber_too']) if (src[k]) out[k] = true;
+    for (const k of ['tons', 'extra_weeks']) {
+      const n = Number(src[k]);
+      if (Number.isFinite(n) && n > 0 && n < 10000) out[k] = Math.round(n * 100) / 100;
+    }
+    return out;
+  }
+
+  /** The priced lines sent with a work order (the form works them out; the office can add or change lines). */
+  function cleanLines(list) {
+    if (!Array.isArray(list)) return null;
+    return list.slice(0, 60).map((l, i) => {
+      const description = str(l.description, 200);
+      if (!description) throw new ValidationError('Every price line needs a description');
+      const qty = Number(l.qty);
+      if (!Number.isFinite(qty) || qty < 0 || qty > 100000) throw new ValidationError(`Quantity for "${description}" isn't a number`);
+      let price = l.unit_price === '' || l.unit_price == null ? null : Number(String(l.unit_price).replace(/[$,]/g, ''));
+      if (price != null && (!Number.isFinite(price) || Math.abs(price) > 1e6)) throw new ValidationError(`Price for "${description}" isn't a number`);
+      if (price != null) price = Math.round(price * 10000) / 10000;
+      return {
+        item_key: str(l.item_key, 120), description, qty: Math.round(qty * 100) / 100, unit: str(l.unit, 40), unit_price: price,
+        taxable: Number(l.taxable) ? 1 : 0, kind: l.kind === 'deposit' ? 'deposit' : 'charge', auto: Number(l.auto) ? 1 : 0,
+        slot: str(l.slot, 60), note: str(l.note, 200), sort: i,
+      };
+    });
+  }
+
+  let hstCache = null;
+  async function hstRate() {
+    if (hstCache && hstCache.at > Date.now() - 5000) return hstCache.rate;
+    const rate = Number((await db.get("SELECT value FROM settings WHERE key = 'price_hst_rate'"))?.value ?? 13);
+    hstCache = { rate, at: Date.now() };
+    return rate;
   }
 
   const JOB_FIELDS = ['job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
     'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'first_thing', 'notes',
     'customer_phone', 'customer_email', 'billing_address', 'po_number', 'municipality', 'paper_wo',
-    'quoted_price', 'payment_method', 'details', 'invoice_number', 'amount_billed', 'customer_id'];
+    'quoted_price', 'payment_method', 'details', 'invoice_number', 'amount_billed', 'customer_id',
+    'distance_km', 'distance_from', 'distance_mode', 'in_town', 'price_options'];
   // Office-only fields (drivers never see them; payments are handled by the office): changing these doesn't need a new text.
   const OFFICE_ONLY = new Set(['customer_email', 'billing_address', 'po_number', 'paper_wo', 'quoted_price', 'payment_method',
-    'invoice_number', 'amount_billed', 'customer_id']);
+    'invoice_number', 'amount_billed', 'customer_id', 'distance_km', 'distance_from', 'distance_mode', 'in_town', 'price_options']);
   // Names for the change history.
   const FIELD_LABELS = {
     job_type: 'Type', customer: 'Customer', material: 'Material', quantity: 'Quantity', unit: 'Unit', loads_planned: 'Loads',
@@ -225,9 +286,11 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     customer_phone: 'Customer phone', customer_email: 'Email', billing_address: 'Billing address', po_number: 'PO #',
     municipality: 'Municipality', paper_wo: 'Paper W.O. #', quoted_price: 'Quoted price', payment_method: 'Payment',
     details: 'Form details', invoice_number: 'Invoice #', amount_billed: 'Amount billed',
+    distance_km: 'Distance (km)', distance_from: 'Distance from', distance_mode: 'Distance by', in_town: 'In town', price_options: 'Price options',
   };
   const customers = createCustomers(db, { today });
   const geo = createGeo(db);
+  const prices = createPrices(db);
 
   // ---------- change history ----------
 
@@ -303,6 +366,13 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    */
   async function saveJob(data, userId = null) {
     const fields = cleanJob(data);
+    const lines = cleanLines(data.lines);
+    const rate = await hstRate();
+    if (lines) {
+      // Old jobs and the board read quoted_price; keep it in step with the priced lines.
+      const t = PRICING.totals(lines, rate);
+      if (lines.length) fields.quoted_price = PRICING.money(t.total) + (t.unpriced ? ' + to be priced' : '');
+    }
     const wanted = await cleanAssignments(data.assignments);
     const removed = [];
     const changes = [];
@@ -317,7 +387,9 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
         if (!before) throw new ValidationError('Job not found');
         const changed = JOB_FIELDS.some((f) => !OFFICE_ONLY.has(f) && String(before[f] ?? '') !== String(fields[f] ?? ''));
         for (const f of JOB_FIELDS) {
-          if (f !== 'customer_id' && String(before[f] ?? '') !== String(fields[f] ?? '')) changes.push(describeChange(f, before[f], fields[f]));
+          if (['customer_id', 'distance_from', 'distance_mode', 'in_town', 'price_options'].includes(f)) continue;
+          if (f === 'quoted_price' && lines) continue; // the "Price:" line below says it
+          if (String(before[f] ?? '') !== String(fields[f] ?? '')) changes.push(describeChange(f, before[f], fields[f]));
         }
         const sets = JOB_FIELDS.map((f) => `${f} = ?`).join(', ');
         await t.run(`UPDATE jobs SET ${sets}, updated_at = datetime('now') WHERE id = ?`, ...JOB_FIELDS.map((f) => fields[f]), id);
@@ -334,6 +406,17 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
         id = Number(r.lastInsertRowid);
       }
 
+      if (lines) {
+        const before = await t.all('SELECT * FROM job_lines WHERE job_id = ?', id);
+        const was = PRICING.totals(before, rate).total;
+        const now = PRICING.totals(lines, rate).total;
+        if (!isNew && (was !== now || before.length !== lines.length)) changes.push(`Price: ${PRICING.money(was)} → ${PRICING.money(now)}`);
+        await t.run('DELETE FROM job_lines WHERE job_id = ?', id);
+        for (const l of lines) {
+          await t.run(`INSERT INTO job_lines (job_id, item_key, description, qty, unit, unit_price, taxable, kind, auto, slot, note, sort)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, l.item_key, l.description, l.qty, l.unit, l.unit_price, l.taxable, l.kind, l.auto, l.slot, l.note, l.sort);
+        }
+      }
       const existing = await t.all(`${ASSIGNMENT_SELECT} WHERE a.job_id = ?`, id);
       const wantedIds = new Set(wanted.map((w) => w.driver_id));
       for (const a of existing) {
@@ -935,7 +1018,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     listTrucks, saveTruck, listDrivers, saveDriver,
     getJob, listJobs, saveJob, sendJob, notifyRemoved, cancelJob, setJobStatus, duplicateJob, deleteJob,
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
-    saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo,
+    saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo, prices,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
     getSettings, saveSettings, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,

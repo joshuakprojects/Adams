@@ -29,6 +29,9 @@ module.exports = {
   // Map view: a Google Maps browser key (Maps JavaScript API + Geocoding API), restricted to this site's address.
   maps: {
     key: env.GOOGLE_MAPS_API_KEY || '',
+    // A second key used by the server for driving distances (Geocoding API + Routes API). Google doesn't accept
+    // website-restricted keys from a server, so this one is restricted by API instead.
+    serverKey: env.GOOGLE_MAPS_SERVER_KEY || '',
     mapId: env.GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID',
     yard: env.YARD_ADDRESS || '116 William St, Parry Sound, ON P2A 1V4',
   },
@@ -42,6 +45,8 @@ module.exports = {
     email: env.ADMIN_EMAIL || '',
     password: env.ADMIN_PASSWORD || '',
   },
+  // The one login allowed to add, change and remove logins.
+  ownerEmail: String(env.OWNER_EMAIL || 'josh@adamsbros.ca').trim().toLowerCase(),
   cookieSecure: env.COOKIE_SECURE === 'true',
   // Shared secret the website sends with each order (Authorization: Bearer <key>). Blank = intake off.
   intakeKey: env.INTAKE_KEY || '',
