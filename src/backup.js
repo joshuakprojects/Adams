@@ -38,21 +38,56 @@ function localStorageAt(dir) {
   };
 }
 
-/** Replit Object Storage (the bucket set up in the Replit "Object Storage" tool). */
-function replitStorage(Client = require('@replit/object-storage').Client) {
-  const client = new Client();
-  const unwrap = (r, what) => {
-    if (!r.ok) throw new Error(`Object Storage ${what} failed: ${r.error?.message || r.error || 'unknown error'}`);
+/** The bucket made in Replit's Object Storage tool, as written in .replit (or BACKUP_BUCKET_ID). */
+function replitBucketId(env = process.env) {
+  if (env.BACKUP_BUCKET_ID) return env.BACKUP_BUCKET_ID;
+  try {
+    const text = fs.readFileSync(path.join(__dirname, '..', '.replit'), 'utf8');
+    return /defaultBucketID\s*=\s*"([^"]+)"/.exec(text)?.[1] || undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * Replit Object Storage (the bucket set up in the Replit "Object Storage" tool).
+ * The client is only made when a backup runs: the library starts connecting as soon as a client is created, and a
+ * failed connection there must never stop the dispatch app. If it fails, the next backup tries again.
+ */
+function replitStorage(Client = null, { bucketId = replitBucketId() } = {}) {
+  let client = null;
+  const getClient = () => {
+    if (!client) {
+      const C = Client || require('@replit/object-storage').Client;
+      client = new C(bucketId ? { bucketId } : undefined);
+      // The library starts its own connection in the background; note a failure here instead of crashing.
+      client.state?.promise?.catch?.((err) => {
+        console.warn('Object Storage not reachable:', err.message);
+        client = null;
+      });
+    }
+    return client;
+  };
+  const call = async (what, fn) => {
+    let r;
+    try {
+      r = await fn(getClient());
+    } catch (err) {
+      client = null;
+      throw new Error(`Object Storage ${what} failed: ${err.message}. On Replit, open the Object Storage tool and check a bucket exists.`);
+    }
+    if (!r || !r.ok) {
+      if (/initiali[sz]/i.test(String(r?.error?.message || r?.error || ''))) client = null;
+      throw new Error(`Object Storage ${what} failed: ${r?.error?.message || r?.error || 'unknown error'}`);
+    }
     return r.value;
   };
   return {
     kind: 'replit',
     label: 'Replit Object Storage',
-    async put(name, buf) { unwrap(await client.uploadFromBytes(name, buf), 'upload'); },
-    async get(name) { const v = unwrap(await client.downloadAsBytes(name), 'download'); return Array.isArray(v) ? v[0] : v; },
-    async exists(name) { return unwrap(await client.exists(name), 'check'); },
-    async list(prefix) { return unwrap(await client.list({ prefix }), 'list').map((o) => o.name); },
-    async remove(name) { unwrap(await client.delete(name), 'delete'); },
+    async put(name, buf) { await call('upload', (c) => c.uploadFromBytes(name, buf)); },
+    async get(name) { const v = await call('download', (c) => c.downloadAsBytes(name)); return Array.isArray(v) ? v[0] : v; },
+    async exists(name) { return call('check', (c) => c.exists(name)); },
+    async list(prefix) { return (await call('list', (c) => c.list({ prefix }))).map((o) => o.name); },
+    async remove(name) { await call('delete', (c) => c.delete(name)); },
   };
 }
 
@@ -62,7 +97,10 @@ function chooseStorage(env = process.env) {
   if (want === 'off') return null;
   const onReplit = Boolean(env.REPL_ID || env.REPLIT_DEPLOYMENT);
   if (want === 'replit' || (!want && onReplit)) {
-    try { return replitStorage(); } catch (err) {
+    try {
+      require.resolve('@replit/object-storage');
+      return replitStorage();
+    } catch (err) {
       if (want === 'replit') throw err;
       console.warn('Replit Object Storage not available, backing up to data/backups instead:', err.message);
     }
