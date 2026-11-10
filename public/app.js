@@ -1367,7 +1367,7 @@
       ? 'Automatic backups are turned off. You can still download a copy.'
       : `Every night after 2 AM the whole database is saved to <b>${esc(st.label)}</b>; copies are kept ${st.keep_days} days and ticket photos are kept for good.
          ${last ? `Last good backup: <b>${esc(fmtStamp(last.at))}</b>` : '<b>No backup has run yet.</b>'}
-         ${st.target === 'replit' && st.runs[0] && !st.runs[0].ok ? '<br><b class="bad">The last backup failed.</b> On Replit, open the <b>Object Storage</b> tool and create a bucket, then press Back up now.' : ''}`;
+         ${st.target === 'replit' && st.runs[0] && !st.runs[0].ok ? '<br><b class="bad">The last backup failed.</b> On Replit, open <b>App Storage</b>, copy your bucket\'s ID, add it as the Secret <b>BACKUP_BUCKET_ID</b>, republish, then press Back up now.' : ''}`;
     $('#backup-run').classList.toggle('hidden', st.target === 'off');
     $('#backup-rows').innerHTML = st.runs.map((r) => `<tr>
         <td>${esc(fmtStamp(r.at))}</td><td>${esc(r.name.replace('db/', '').replace('.json.gz', ''))}</td>
