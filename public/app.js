@@ -1132,7 +1132,7 @@
 
   // ---------- texting setup ----------
   function renderSmsStatus(s) {
-    const rows = [];
+    const rows = (s.lines || []).map((l) => `<div>${esc(l)}</div>`);
     if (s.account) rows.push(`<div>Account: <b>${esc(s.account.name)}</b> (${esc(s.account.type)}, ${esc(s.account.status)})</div>`);
     if (s.number) rows.push(`<div>Dispatch number: <b>${esc(prettyPhone(s.number.phone))}</b> · SMS ${s.number.sms ? '✔' : '✖'} · MMS (photos) ${s.number.mms ? '✔' : '✖'}</div>`);
     rows.push(`<div>Incoming texts should go to: <code>${esc(s.webhook)}</code>${s.number ? (s.number.smsUrl === s.webhook ? ' ✔' : ` — currently <code>${esc(s.number.smsUrl || 'not set')}</code>`) : ''}</div>`);

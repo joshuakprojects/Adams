@@ -8,6 +8,7 @@ const { need, needOwner, can, permissions } = require('./roles');
 const { createDistance } = require('./distance');
 const { createQuickBooks } = require('./quickbooks');
 const { createReception } = require('./reception');
+const { createSunwire } = require('./sunwire');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
@@ -41,7 +42,8 @@ function sendImage(res, ticket) {
 const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, next)).catch(next);
 
 function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
-  qbo = createQuickBooks(db, dispatch) }) {
+  qbo = createQuickBooks(db, dispatch), sunwire = createSunwire(), sendReply = (to, body) => sms.sendSms(to, body),
+  smsProvider = config.smsProvider }) {
   const intake = createIntake(db);
   const app = express();
   app.set('trust proxy', true);
@@ -134,6 +136,34 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     }
     const { reply } = await dispatch.handleInbound(req.body.From, req.body.Body, { media });
     res.type('text/xml').send(sms.twiml(reply));
+  }));
+
+  // Incoming texts through Sunwire (SolSwitch): JSON, checked with the key Sunwire sends. Photos arrive as links.
+  const seenSunwire = new Map(); // message ID → time: Sunwire retries, so the same message can arrive twice
+  app.post('/sms/sunwire', h(async (req, res) => {
+    if (smsProvider !== 'sunwire') return res.status(503).json({ Status: 'FAIL', Reason: 'Sunwire texting is not switched on' });
+    if (!sunwire.verify(req)) return res.status(401).json({ Status: 'FAIL', Reason: 'Bad key' });
+    const b = req.body || {};
+    if (String(b.Type || '').toLowerCase() === 'report') return res.json({ Status: 'OK' }); // delivery receipts: nothing to do
+    if (b.ID && seenSunwire.has(String(b.ID))) return res.json({ Status: 'OK' });
+    const { text, links } = sunwire.parseBody(b.Body);
+    const media = [];
+    for (const link of links.slice(0, 10)) {
+      try {
+        const m = await sunwire.fetchPhoto(link);
+        if (m.buffer.length) media.push(m);
+      } catch (err) {
+        console.error('Could not download texted photo:', err.message);
+      }
+    }
+    const { reply } = await dispatch.handleInbound(b.From, text, { media });
+    if (b.ID) {
+      seenSunwire.set(String(b.ID), Date.now());
+      if (seenSunwire.size > 2000) seenSunwire.delete(seenSunwire.keys().next().value);
+    }
+    res.json({ Status: 'OK' });
+    // Sunwire can't carry a reply in its answer on a 10-digit number: the reply goes out as its own text.
+    if (reply) sendReply(sms.normalizePhone(b.From) || b.From, reply).catch((err) => console.error('Could not send the reply:', err.message));
   }));
 
   // ---------- orders from the website ----------
@@ -481,8 +511,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return { ok: true };
   }));
   // Texting setup (Setup tab).
-  api.get('/sms/status', need('admin'), json(() => twilio.checkSetup()));
+  api.get('/sms/status', need('admin'), json(() => (smsProvider === 'sunwire' ? sunwire.status() : twilio.checkSetup())));
   api.post('/sms/connect', need('admin'), json(() => {
+    if (smsProvider === 'sunwire') throw new ValidationError('With Sunwire, give them the incoming address shown above; they set it up.');
     if (!config.smsEnabled) throw new ValidationError('Add the Twilio settings to .env first');
     return twilio.connectWebhook();
   }));

@@ -323,15 +323,33 @@ npm run add-user -- jane@adamsbros.ca "Jane" "a-good-password"
   office on the board.
 - The **job page link** in each text is still the surest way to send photos: they always land on the right job.
 
-## Texting from the office (VoIP) number
+## Texting from the office number (Sunwire / SolSwitch)
 
-Texts go out through Twilio from (249) 701-4820 for now. To send from the office VoIP number instead, there are two ways
-— ask the VoIP provider which they support:
-1. **Twilio "Hosted SMS":** the number stays with the VoIP provider for calls, and Twilio handles its texts. Nothing in the
-   app changes except `TWILIO_FROM_NUMBER`. (Twilio checks the number is yours; the VoIP provider must allow it.)
-2. **The VoIP provider's own texting:** if they have a texting API with a "webhook" for incoming texts (VoIP.ms, Telnyx,
-   Bandwidth and others do), the app needs a small adapter for that provider — tell the developer the provider's name.
-   All sending is in `src/sms.js` (`sendSms`) and incoming texts arrive at `/sms/inbound` in `src/server.js`.
+Texts can go through **Sunwire** (SolSwitch) from the office number instead of Twilio. Calls to the number are not
+affected. Switch by setting these Secrets and republishing (Twilio keeps working until you do):
+
+| Secret | What |
+|---|---|
+| `SMS_PROVIDER` | `sunwire` (leave unset, or `twilio`, for Twilio) |
+| `SUNWIRE_SMS_URL` | The SMS address Sunwire gives you, e.g. `https://xxx.sunwire.ca/sms/` |
+| `SUNWIRE_MMS_URL` | The MMS (photo) address, e.g. `https://xxx.sunwire.ca/mms/` (optional: the app only receives photos today) |
+| `SUNWIRE_FROM_NUMBER` | The office number, e.g. `7057462962` |
+| `SUNWIRE_KEY` | The API key, if Sunwire set one up |
+| `SUNWIRE_INBOUND_KEY` | The key Sunwire sends with incoming texts (defaults to `SUNWIRE_KEY`); incoming texts without it are refused |
+| `OUTBOUND_PROXY_URL` | The fixed-IP relay, e.g. `http://user:password@relay.example.com:9293` (see below) |
+
+Then give Sunwire the incoming-texts address: **`https://<your dispatch address>/sms/sunwire`** (Setup → Texting shows it),
+and ask them to include the key with each message.
+
+- **Photos:** Sunwire sends a link that expires after 7 days; the app downloads it straight away and puts it on the job
+  (only links on sunwire.ca are fetched).
+- **Replies** ("Thanks Dave - Job #1042 confirmed") go out as their own text (Sunwire can't carry a reply on a 10-digit
+  number), so each costs one outbound text.
+- **Fixed IP:** Sunwire only accepts sends from IP addresses it has been given. Replit doesn't have a fixed outbound IP, so
+  either set `OUTBOUND_PROXY_URL` to a static-IP relay (e.g. QuotaGuard Static) and give Sunwire the relay's IP addresses,
+  or run the app on a server with a fixed IP.
+- **Plain characters:** every text (Twilio too) has fancy characters (×, —, smart quotes) swapped for plain ones, so each
+  SMS segment holds 160 characters instead of 70.
 
 ## Going live with texting (Twilio)
 
@@ -417,6 +435,7 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `public/pricing.js` | The pricing rules: works out a work order's price lines (shared by the server and the dashboard) |
 | `src/distance.js` | Driving distance (Google Geocoding + Routes) and the Parry Sound town boundary check |
 | `src/roles.js` | Office / Dispatcher / Admin permissions |
+| `src/sunwire.js`, `src/httpOut.js` | Texting through Sunwire (SolSwitch), and the fixed-IP relay for outgoing requests |
 | `src/quickbooks.js`, `public/qbo-ui.js` | QuickBooks Online: pending Estimates per work order, customer import, the Setup panel |
 | `public/pricing-ui.js` | Prices tab, job-form price panel, Questions, Logins |
 | `public/reception.js`, `src/reception.js` | Reception screen for office logins: home, new call, find, quotes |

@@ -209,11 +209,14 @@ function parseReply(body) {
  * Send a text. Without Twilio settings the message is only logged (handy for trying
  * the system out); it still shows on the dashboard as sent.
  */
-async function sendSms(to, body) {
+async function sendSms(to, bodyRaw) {
+  // Plain characters only: one fancy character (×, —, smart quotes) makes every segment hold 70 characters instead of 160.
+  const body = require('./sunwire').plainText(bodyRaw);
   if (!config.smsEnabled) {
     console.log(`\n[SMS not configured — would text ${to}]\n${body}\n`);
     return { sid: 'local-' + crypto.randomBytes(6).toString('hex'), simulated: true };
   }
+  if (config.smsProvider === 'sunwire') return require('./sunwire').createSunwire().sendSms(to, body);
   const { accountSid, authToken, fromNumber } = config.twilio;
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
     method: 'POST',

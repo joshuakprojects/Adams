@@ -45,6 +45,17 @@ module.exports = {
     email: env.ADMIN_EMAIL || '',
     password: env.ADMIN_PASSWORD || '',
   },
+  // Which company sends the texts: 'twilio' (default) or 'sunwire' (SolSwitch, from the office number).
+  smsProvider: String(env.SMS_PROVIDER || 'twilio').toLowerCase() === 'sunwire' ? 'sunwire' : 'twilio',
+  sunwire: {
+    smsUrl: env.SUNWIRE_SMS_URL || '',
+    mmsUrl: env.SUNWIRE_MMS_URL || '',
+    fromNumber: env.SUNWIRE_FROM_NUMBER || '',
+    key: env.SUNWIRE_KEY || '', // sent with each text, if Sunwire set one up
+    inboundKey: env.SUNWIRE_INBOUND_KEY || env.SUNWIRE_KEY || '', // Sunwire includes it with incoming texts
+  },
+  // A fixed-IP relay for providers that only accept known IP addresses (http://user:pass@host:port). Blank = direct.
+  outboundProxy: env.OUTBOUND_PROXY_URL || '',
   // QuickBooks Online (an Intuit developer app). Nothing is sent until an admin connects and switches it on.
   qbo: {
     clientId: env.QBO_CLIENT_ID || '',
@@ -58,6 +69,6 @@ module.exports = {
   intakeKey: env.INTAKE_KEY || '',
 };
 
-module.exports.smsEnabled = Boolean(
-  module.exports.twilio.accountSid && module.exports.twilio.authToken && module.exports.twilio.fromNumber
-);
+module.exports.smsEnabled = module.exports.smsProvider === 'sunwire'
+  ? Boolean(module.exports.sunwire.smsUrl && module.exports.sunwire.fromNumber)
+  : Boolean(module.exports.twilio.accountSid && module.exports.twilio.authToken && module.exports.twilio.fromNumber);
