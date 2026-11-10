@@ -105,9 +105,54 @@ address, municipality, W.O. # or phone.
 
 - **⬇ Download spreadsheet (CSV):** opens in Excel or Google Sheets, one row per work order, with W.O. #, paper W.O. #,
   date, type, status, completed date, customer and billing details, PO #, address and municipality, the work, loads,
-  drivers, trucks, quoted price, payment method, form details, the driver's report, and ticket photo count.
+  drivers, trucks, quoted price, payment method, invoice # and amount billed, form details, the driver's report, and ticket photo count.
 - **🖨 Print / Save as PDF:** every matching work order on its own page, laid out like the paper forms, with the
   scale ticket photos. In the print window choose *Save as PDF* to keep a file.
+
+## Customers, septic reminders and history
+
+- **Customers tab (address book):** every job is linked to a customer, matched by phone number (or exact name when there's
+  no phone). New jobs and website orders add customers automatically; existing details are filled in but never overwritten.
+  In the job form, start typing a name and pick the customer: phone, email, billing and site address fill in, and their
+  notes (gate code, dog in yard, where the tank is) can be added to the driver's instructions. Each customer shows all their jobs.
+- **Due for pump-out:** customers whose last completed septic pump-out was more than 2 years ago (1–5, set on the Setup
+  tab), with the tank type and size from last time. **Book pump-out** opens a septic work order filled in from the last
+  one; **Mark contacted** hides them for 90 days. Nothing is sent to customers automatically.
+- **Invoice # and Amount billed** (office only) are on each work order, in the Records spreadsheet and on the printout.
+- **History:** a job's **More → History** shows who did what and when: office edits (field by field, by login), texts sent,
+  driver replies and job-page taps, ticket photos, and completion.
+
+## Map
+
+The board has a **Map** layout next to Lanes and List: each job is a pin coloured by stage (to text, waiting for OK,
+working, done), with the yard marked. Click a pin for the job, Edit and Directions. If a pin is in the wrong spot (rural
+addresses often are), drag it: the spot is saved for that job and remembered for the customer's next job at the same address.
+
+It uses Google Maps and needs a browser key:
+1. In [Google Cloud console](https://console.cloud.google.com/), create a project and turn on **Maps JavaScript API** and **Geocoding API**.
+2. **Credentials → Create credentials → API key.** Restrict it: *Application restrictions → Websites*, add
+   `https://dispatch.joshtemp.site/*` (your dispatch address); *API restrictions* → those two APIs.
+3. Set it as `GOOGLE_MAPS_API_KEY` (on Replit: **Secrets**, then republish).
+
+Google's monthly free allowance normally covers an office this size; addresses are looked up once and reused for 30 days.
+
+## Backups
+
+Every night after 2 AM (Eastern) the app saves the whole database (jobs, customers, drivers, logins, history) as one
+compressed file, and uploads any new ticket photos. Database copies are kept 30 days; photos are kept for good.
+- **On Replit** they go to **Replit Object Storage**: open the **Object Storage** tool in the project and create a bucket
+  (once). Nothing else to set up.
+- **Elsewhere** they go to `data/backups/` (or `BACKUP_DIR`). `BACKUP_TARGET=off` turns them off.
+
+The **Setup** tab shows recent backups, has **Back up now**, and **Download a copy** (the database, without photos; keep it somewhere safe,
+since it includes the office logins' password hashes).
+
+To restore (into an empty database, e.g. a fresh Replit database):
+```bash
+npm run restore -- list            # stored backups
+npm run restore -- latest          # or a date: 2026-11-09, or a downloaded file: ./adams-dispatch-backup-2026-11-09.json.gz
+```
+Add `--force` to wipe a database that already has data. Then restart / republish.
 
 ## Running it
 
@@ -192,7 +237,7 @@ Without `DATABASE_URL` (on a laptop, for example) it uses a local SQLite file in
 Any small server or VPS works (for example a $5–10/month droplet or Render/Fly.io with a persistent disk).
 A `Dockerfile` is included: mount a persistent volume at `/app/data` and set the `.env` values as environment variables.
 Run it behind HTTPS on a subdomain like `dispatch.adamsbros.ca` and set `COOKIE_SECURE=true`.
-With `DATABASE_URL` set, everything, ticket photos included, is in PostgreSQL. Back it up with your host's database backups.
+With `DATABASE_URL` set, everything, ticket photos included, is in PostgreSQL. The nightly backups (see Backups) are a second copy.
 Without it, everything is in the SQLite file `data/dispatch.db` (`DB_PATH`). Back up that file.
 Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on work orders (address, phone, HST #) can be changed with the `COMPANY_*` settings in `.env`.
 
@@ -208,6 +253,9 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `src/driverPage.js` | The driver's job page and after-job report (works without JavaScript) |
 | `src/printPage.js` | Printable work orders laid out like the paper forms (one, or a whole date range) |
 | `src/records.js` | Spreadsheet (CSV) export of work orders |
+| `src/customers.js` | Address book and septic pump-out reminders |
+| `src/geo.js` | Map pin lookups cache |
+| `src/backup.js` | Nightly backups and restore (`scripts/restore.js`) |
 | `src/db.js` | Database tables, and the PostgreSQL / SQLite drivers |
 | `src/auth.js` | Office logins and sessions |
 | `public/` | Office dashboard (plain HTML/CSS/JS, no build step) |
@@ -216,4 +264,3 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 
 - Typing the ticket number and weight next to each photo
 - Billing export / QuickBooks: jobs already record customer, material, quantity and loads per driver
-- Saved customers and pits with exact map pins

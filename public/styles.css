@@ -477,3 +477,6 @@ tr.clickable:hover td, tr.clickable:focus td { background: #FFFBEA; }
   .map { min-height: 420px; height: 60vh; }
   .map-side { flex: none; min-height: 0; max-height: none; }
 }
+.bad { color: #B3261E; }
+#backup-panel .table { margin-top: 12px; font-size: 14px; }
+#backup-panel .row-actions { margin-top: 8px; }

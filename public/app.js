@@ -965,6 +965,7 @@
     sf.elements.lineup_on.checked = Boolean(settings.lineup_time);
     sf.elements.lineup_time.value = settings.lineup_time || '17:00';
     $('#septic-form').elements.septic_reminder_years.value = settings.septic_reminder_years || '2';
+    loadBackups().catch(() => {});
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
     $('#driver-rows').innerHTML = drivers.map((d) => `
@@ -1301,6 +1302,30 @@
     }, 250);
   });
   $('#cust-new').addEventListener('click', () => openCustomer(null));
+
+  async function loadBackups() {
+    const st = await api('/backups');
+    const last = st.runs.find((r) => r.ok);
+    $('#backup-where').innerHTML = st.target === 'off'
+      ? 'Automatic backups are turned off. You can still download a copy.'
+      : `Every night after 2 AM the whole database is saved to <b>${esc(st.label)}</b>; copies are kept ${st.keep_days} days and ticket photos are kept for good.
+         ${last ? `Last good backup: <b>${esc(fmtStamp(last.at))}</b>` : '<b>No backup has run yet.</b>'}
+         ${st.target === 'replit' && st.runs[0] && !st.runs[0].ok ? '<br><b class="bad">The last backup failed.</b> On Replit, open the <b>Object Storage</b> tool and create a bucket, then press Back up now.' : ''}`;
+    $('#backup-run').classList.toggle('hidden', st.target === 'off');
+    $('#backup-rows').innerHTML = st.runs.map((r) => `<tr>
+        <td>${esc(fmtStamp(r.at))}</td><td>${esc(r.name.replace('db/', '').replace('.json.gz', ''))}</td>
+        <td>${r.ok ? `${Math.max(1, Math.round(r.bytes / 1024))} KB` : ''}</td><td>${r.ok ? r.photos : ''}</td>
+        <td>${r.ok ? '<span class="chip done">saved</span>' : `<span class="chip cancelled" title="${esc(r.error)}">failed</span> <span class="muted small">${esc(r.error)}</span>`}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="muted">No backups yet.</td></tr>';
+  }
+  $('#backup-run').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const out = await api('/backups/run', { method: 'POST' });
+      toast(out.ok ? `Backed up (${out.photos} new photo${out.photos === 1 ? '' : 's'})` : `Backup failed: ${out.error}`);
+      await loadBackups();
+    } catch (err) { toast(err.message); } finally { e.target.disabled = false; }
+  });
 
   $('#septic-form').addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -107,6 +107,15 @@
       </form>
       <p class="muted small">See them on the Customers tab under "Due for pump-out". Nothing is sent to customers automatically.</p>
     </div>
+    <div class="panel settings" id="backup-panel">
+      <h2>Backups</h2>
+      <p class="muted small" id="backup-where"></p>
+      <div class="row-actions">
+        <button class="btn" type="button" id="backup-run">Back up now</button>
+        <a class="btn" id="backup-download" href="/api/backups/download">Download a copy</a>
+      </div>
+      <table class="table compact"><thead><tr><th>When</th><th>Copy</th><th>Size</th><th>New photos</th><th></th></tr></thead><tbody id="backup-rows"></tbody></table>
+    </div>
     <div class="two-col">
       <div class="panel">
         <h2>Drivers</h2>

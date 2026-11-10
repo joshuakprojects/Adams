@@ -2,7 +2,8 @@ const path = require('node:path');
 const express = require('express');
 const config = require('./config');
 const { openDb } = require('./db');
-const { createDispatch, ValidationError } = require('./dispatch');
+const { createDispatch, ValidationError, nowHmIn } = require('./dispatch');
+const { createBackups } = require('./backup');
 const auth = require('./auth');
 const sms = require('./sms');
 const { renderDriverPage, renderNotFound } = require('./driverPage');
@@ -35,7 +36,7 @@ function sendImage(res, ticket) {
 /** Express 4 doesn't catch errors from async handlers; this passes them to the error handler. */
 const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, next)).catch(next);
 
-function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey }) {
+function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null }) {
   const intake = createIntake(db);
   const app = express();
   app.set('trust proxy', true);
@@ -250,6 +251,19 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return { ok: true };
   }));
   api.get('/settings', json(() => dispatch.getSettings()));
+  // Backups: status, run one now, or download a copy of the whole database (photos stay in the backup store).
+  api.get('/backups', json(() => (backups ? backups.status() : { target: 'off', label: 'Backups are off', runs: [] })));
+  api.post('/backups/run', h(async (_req, res) => {
+    if (!backups) return res.status(400).json({ error: 'Backups are off' });
+    res.json(await backups.run({ reason: 'by hand' }));
+  }));
+  api.get('/backups/download', h(async (_req, res) => {
+    const buf = await (backups || createBackups(db, { storage: null, today: dispatch.today })).download();
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="adams-dispatch-backup-${dispatch.today()}.json.gz"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buf);
+  }));
   api.post('/settings', json((req) => dispatch.saveSettings(req.body || {})));
   // Text every driver their whole day for a date (the "tomorrow's jobs" text, sent by hand).
   api.post('/lineup/send', json((req) => {
@@ -352,7 +366,13 @@ async function main() {
   if (linked) console.log(`Address book: linked ${linked} earlier job(s) to customers.`);
   // DEMO_DATA=true: fill an empty database with sample jobs (for showing the app off).
   if (process.env.DEMO_DATA === 'true' && await require('./demo').seedDemo(dispatch)) console.log('Loaded demo data.');
-  createApp({ db, dispatch }).listen(config.port, () => {
+  const backups = createBackups(db, {
+    today: dispatch.today,
+    nowHm: () => nowHmIn(),
+    readPhoto: async (id) => (await dispatch.getTicket(id))?.data || null,
+  });
+  console.log(backups.storage ? `Nightly backups: ${backups.storage.label}` : 'Nightly backups are OFF (BACKUP_TARGET=off)');
+  createApp({ db, dispatch, backups }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
@@ -361,6 +381,14 @@ async function main() {
     dispatch.runScheduledLineup()
       .then((out) => out && console.log(`Sent lineup for ${out.date} to ${out.results.length} driver(s)`))
       .catch((err) => console.error('Lineup send failed:', err));
+    // Nightly backup, after 2 AM.
+    backups.runScheduled()
+      .then((out) => {
+        if (!out) return;
+        console.log(out.ok ? `Backup saved: ${out.name} (${out.bytes} bytes, ${out.photos} new photo(s))` : `Backup FAILED: ${out.error}`);
+        if (out.ok) dispatch.geo.prune().catch(() => {});
+      })
+      .catch((err) => console.error('Backup failed:', err));
   }, 60 * 1000);
 }
 

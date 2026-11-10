@@ -14,10 +14,14 @@
     "add-user": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/add-user.js",
     "twilio": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/twilio.js",
     "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
-    "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://localhost/dispatch_test} npm test"
+    "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://localhost/dispatch_test} npm test",
+    "restore": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/restore.js"
   },
   "dependencies": {
     "express": "4.22.3",
     "pg": "8.13.1"
+  },
+  "optionalDependencies": {
+    "@replit/object-storage": "1.0.0"
   }
 }
