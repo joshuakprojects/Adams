@@ -912,9 +912,10 @@
       const cls = f.wide ? 'wide' : f.suggestions === 'toilets' ? 'span2' : '';
       return `<label class="${cls}">${esc(f.label)}<input type="${type}" name="${name}" value="${esc(v)}" ${list} ${type === 'number' ? 'min="0"' : ''}></label>`;
     };
-    $('#type-fields-first').innerHTML = t.fields.filter((f) => f.slot === 'first').map(html).join('');
-    $('#type-fields-top').innerHTML = t.fields.filter((f) => f.top).map(html).join('');
-    $('#type-fields').innerHTML = t.fields.filter((f) => !f.top && !f.slot).map(html).join('');
+    const visible = t.fields.filter((f) => !f.hidden); // removed fields keep their values but leave the form
+    $('#type-fields-first').innerHTML = visible.filter((f) => f.slot === 'first').map(html).join('');
+    $('#type-fields-top').innerHTML = visible.filter((f) => f.top).map(html).join('');
+    $('#type-fields').innerHTML = visible.filter((f) => !f.top && !f.slot).map(html).join('');
   }
 
   // Click a selected pill again to clear it.
@@ -1169,6 +1170,8 @@
     loadBackups().catch(() => {});
     reqState.data = settings.required_fields || {};
     renderRequired();
+    cf.data = JSON.parse(JSON.stringify(settings.custom_fields || {}));
+    renderCustomFields();
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
     const labourers = drivers.filter((d) => d.kind === 'labourer');
@@ -1516,6 +1519,90 @@
   });
   $('#cust-new').addEventListener('click', () => openCustomer(null));
 
+  // ---------- work order fields added by admins ----------
+  const cf = { type: 'haul', data: {} };
+  const KIND_NAMES = { text: 'Short text', textarea: 'Long text', number: 'Number', yesno: 'Yes / No', choice: 'Pick from a list', date: 'Date' };
+  $('#cf-type').innerHTML = TYPE_KEYS.map((k) =>
+    `<label><input type="radio" name="cf-type" value="${k}" ${k === 'haul' ? 'checked' : ''}><span>${TYPES[k].icon} ${esc(TYPES[k].name)}</span></label>`).join('');
+  function renderCustomFields() {
+    const list = cf.data[cf.type] || [];
+    const live = list.map((f, i) => ({ f, i })).filter(({ f }) => f.active !== false);
+    const removed = list.map((f, i) => ({ f, i })).filter(({ f }) => f.active === false);
+    $('#cf-rows').innerHTML = live.map(({ f, i }, n) => `<tr data-cf="${i}">
+      <td><input name="label" value="${esc(f.label)}" placeholder="e.g. Gate code" aria-label="Field name"></td>
+      <td><select name="kind" aria-label="Kind">${Object.entries(KIND_NAMES).map(([k, t]) => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        ${f.kind === 'choice' ? `<input name="options" value="${esc((f.options || []).join(', '))}" placeholder="Choices, with commas" aria-label="Choices">` : ''}</td>
+      <td><select name="by" aria-label="Filled in by"><option value="office" ${f.by !== 'driver' ? 'selected' : ''}>Office (work order)</option>
+        <option value="driver" ${f.by === 'driver' ? 'selected' : ''}>Driver (after the job)</option></select></td>
+      <td class="c"><input type="checkbox" name="sms" ${f.sms ? 'checked' : ''} ${f.by === 'driver' ? 'disabled' : ''} aria-label="In the driver's text"></td>
+      <td class="c"><input type="checkbox" name="reception" ${f.reception ? 'checked' : ''} ${f.by === 'driver' ? 'disabled' : ''} aria-label="On the reception screen"></td>
+      <td><div class="row-actions"><button class="btn tiny" data-cf-move="-1" ${n === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+        <button class="btn tiny" data-cf-move="1" ${n === live.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+        <button class="btn tiny danger" data-cf-remove>Remove</button></div></td></tr>`).join('')
+      || `<tr><td colspan="6" class="muted">No fields added to ${esc(TYPES[cf.type].name)} work orders yet.</td></tr>`;
+    $('#cf-removed').innerHTML = removed.length ? `<details><summary>Removed fields (${removed.length}) — old work orders still show what was filled in</summary>
+      ${removed.map(({ f, i }) => `<div class="cf-gone" data-cf="${i}">${esc(f.label)} <span class="muted small">${esc(KIND_NAMES[f.kind] || '')}</span>
+        <button class="btn tiny" data-cf-restore>Put back</button></div>`).join('')}</details>` : '';
+  }
+  const cfList = () => (cf.data[cf.type] = cf.data[cf.type] || []);
+  $('#cf-type').addEventListener('change', (e) => { cf.type = e.target.value; renderCustomFields(); });
+  $('#fields-panel').addEventListener('input', (e) => {
+    const tr = e.target.closest('[data-cf]');
+    if (!tr) return;
+    const f = cfList()[Number(tr.dataset.cf)];
+    const n = e.target.name;
+    if (n === 'label') f.label = e.target.value;
+    if (n === 'options') f.options = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
+  });
+  $('#fields-panel').addEventListener('change', (e) => {
+    const tr = e.target.closest('[data-cf]');
+    if (!tr) return;
+    const f = cfList()[Number(tr.dataset.cf)];
+    const n = e.target.name;
+    if (n === 'kind') { f.kind = e.target.value; if (f.kind === 'choice' && !f.options?.length) f.options = []; renderCustomFields(); }
+    if (n === 'by') { f.by = e.target.value; if (f.by === 'driver') { f.sms = false; f.reception = false; } renderCustomFields(); }
+    if (n === 'sms' || n === 'reception') f[n] = e.target.checked;
+  });
+  $('#fields-panel').addEventListener('click', (e) => {
+    const tr = e.target.closest('[data-cf]');
+    const list = cfList();
+    if (e.target.id === 'cf-add') {
+      list.push({ label: '', kind: 'text', options: [], by: 'office', sms: true, reception: true, active: true });
+      renderCustomFields();
+      $$('#cf-rows input[name=label]').at(-1)?.focus();
+      return;
+    }
+    if (!tr) return;
+    const i = Number(tr.dataset.cf);
+    if (e.target.closest('[data-cf-remove]')) {
+      if (!list[i].key) list.splice(i, 1); else list[i].active = false; // never saved: just drop it
+      renderCustomFields();
+    }
+    if (e.target.closest('[data-cf-restore]')) { list[i].active = true; renderCustomFields(); }
+    const mv = e.target.closest('[data-cf-move]');
+    if (mv) {
+      const live = list.map((f, k) => k).filter((k) => list[k].active !== false);
+      const pos = live.indexOf(i);
+      const j = live[pos + Number(mv.dataset.cfMove)];
+      if (j !== undefined) { [list[i], list[j]] = [list[j], list[i]]; renderCustomFields(); }
+    }
+  });
+  $('#cf-save').addEventListener('click', async () => {
+    for (const list of Object.values(cf.data)) {
+      for (let k = list.length - 1; k >= 0; k--) if (!list[k].key && !String(list[k].label || '').trim()) list.splice(k, 1); // empty new rows
+    }
+    try {
+      const out = await api('/settings', { method: 'POST', body: { custom_fields: cf.data } });
+      cf.data = JSON.parse(JSON.stringify(out.custom_fields));
+      window.FORMS.setCustomFields(out.custom_fields);
+      reqState.data = out.required_fields || reqState.data;
+      requiredCache = null;
+      renderCustomFields();
+      renderRequired();
+      toast('Work order fields saved');
+    } catch (err) { toast(err.message); }
+  });
+
   // ---------- required fields (admin) ----------
   const reqState = { type: 'haul', data: {} };
   $('#req-type').innerHTML = TYPE_KEYS.map((k) =>
@@ -1687,6 +1774,7 @@
     $('#user-name').title = state.can.role_name || '';
     if (!state.can.dispatch) $('#job-form button[value=save]').textContent = 'Save work order';
     state.maps = me.maps || {};
+    window.FORMS.setCustomFields(me.custom_fields || {}); // fields admins added (Setup → Work order fields)
     $('#user-name').textContent = me.user.name;
     $('#user-initial').textContent = (me.user.name || '?').trim()[0].toUpperCase();
     $('#test-mode').classList.toggle('hidden', me.smsEnabled);

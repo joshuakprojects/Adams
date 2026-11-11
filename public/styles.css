@@ -750,3 +750,15 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 .rc-boss-note .who { font-size: 13px; color: #6b5a00; margin-top: 2px; white-space: normal; }
 .rc-boss-note { white-space: normal; }
 .rc-boss-note > div:first-child { white-space: pre-wrap; }
+
+/* Work order fields (Setup) and the reception "Details" */
+.cf-table input[name=label] { min-width: 200px; }
+.cf-table input, .cf-table select { padding: 5px 8px; border: 1px solid #c9c9c2; border-radius: 6px; font: inherit; font-size: 14px; }
+.cf-table input[name=options] { margin-top: 4px; min-width: 200px; display: block; }
+.cf-table .c { text-align: center; }
+.cf-gone { display: flex; gap: 10px; align-items: center; padding: 4px 0; }
+.rc-xfields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.rc-xf { display: flex; flex-direction: column; gap: 6px; }
+.rc-xf.wide { grid-column: 1 / -1; }
+.rc-xl { font-size: 14px; font-weight: 600; color: #444; }
+@media (max-width: 700px) { .rc-xfields { grid-template-columns: 1fr; } }

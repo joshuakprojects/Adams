@@ -39,7 +39,9 @@ function renderSheet(job) {
   const toilets = job.job_type === 'toilet' ? [1, 2, 3].map((i) => `
       <div class="ln half"><span class="lb">Type of toilet:</span><span class="val">${esc(d[`toilet${i}_type`])}</span></div>
       <div class="ln half"><span class="lb">How many:</span><span class="val">${esc(d[`toilet${i}_qty`])}</span></div>`).join('') : '';
-  const typeFields = job.job_type === 'haul' ? '' : t.fields.filter((f) => !/^toilet\d_/.test(f.key)).map((f) => renderField(f, d[f.key])).join('');
+  // Aggregates print their own layout above; fields added by admins print here for every type (removed ones only if filled in).
+  const typeFields = t.fields.filter((f) => (job.job_type === 'haul' ? f.custom : !/^toilet\d_/.test(f.key)) && (!f.hidden || d[f.key]))
+    .map((f) => renderField(f, d[f.key])).join('');
   // Aggregates: two lines, like the paper form.
   const trucks = (t.fields.find((f) => f.key === 'truck') || {}).options || [];
   const half = (label, value) => `<div class="ln half"><span class="lb">${esc(label)}:</span><span class="val">${esc(value || '')}</span></div>`;
@@ -56,12 +58,13 @@ function renderSheet(job) {
     const fields = reportFields(job.job_type);
     return `<section class="box">
       <h3>${esc(t.reportTitle || 'Driver report')} — ${esc(a.driver_name)}${a.report_at ? ` <small>(${esc(fmtStamp(a.report_at))})</small>` : ''}</h3>
-      ${fields.filter((f) => t.report.includes(f) || a.report[f.key]).map((f) => renderField(f, a.report[f.key])).join('')}
+      ${fields.filter((f) => (t.report.includes(f) && !f.hidden) || a.report[f.key]).map((f) => renderField(f, a.report[f.key])).join('')}
     </section>`;
   }).join('');
   // Blank conditions section for septic, so the printed sheet can still be filled in by hand.
-  const blankReport = !reports.length && t.report.length ? `<section class="box">
-      <h3>${esc(t.reportTitle)}</h3>${t.report.map((f) => renderField(f, '')).join('')}</section>` : '';
+  const shown = t.report.filter((f) => !f.hidden);
+  const blankReport = !reports.length && shown.length ? `<section class="box">
+      <h3>${esc(t.reportTitle || 'After the job (driver)')}</h3>${shown.map((f) => renderField(f, '')).join('')}</section>` : '';
 
   const drivers = job.assignments.filter((a) => a.status !== 'cancelled').map((a) =>
     `${esc(a.driver_name)}${a.truck_unit ? ` (${esc(a.truck_unit)})` : ''}${a.loads_done ? ` — ${a.loads_done} load${a.loads_done === 1 ? '' : 's'}` : ''}`).join(', ');

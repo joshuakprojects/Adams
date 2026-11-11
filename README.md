@@ -81,6 +81,14 @@ first written in a paper book, the paper W.O. # can be recorded too.
 - **Book pick-up** on a toilet or bin job creates the return trip on the pick-up date.
 - The fields for each type are defined in one place, `public/forms.js`. Add or change a question there and the
   office form, driver text, driver page and printout all follow.
+- **Adding your own fields (admins):** Setup → **Work order fields**. Pick a type, **+ Add a field**, give it a name and
+  a kind (short text, long text, number, yes/no, pick from a list, date), and choose who fills it in:
+  - **Office** fields go on the work order. Tick **On reception** to show them on the reception screen (under
+    "Details" once the service is picked), and **In the driver's text** to text them to the driver.
+  - **Driver** fields are asked on the driver's phone after the job, like the septic conditions.
+  - Any field can be made required under **Required fields**. Fields can be renamed and reordered at any time.
+  - **Remove** hides a field from forms, texts and the driver page. Work orders that already have an answer keep it,
+    and it still prints and exports; **Put back** restores it.
 
 Not covered yet: the **equipment rental agreement** (counter rentals with a signature). That could be added as its own type.
 
