@@ -7,7 +7,7 @@ class PriceError extends Error {
   constructor(message) { super(message); this.status = 400; }
 }
 
-const DEFAULT_START = '116 William St, Parry Sound, ON P2A 1V4';
+const DEFAULT_START = '116 William St, Parry Sound, ON P2A 1V8';
 const str = (v, max = 300) => (v == null ? '' : String(v).trim().slice(0, max));
 const money = (v) => (v == null ? 'no set price' : `$${Number(v).toFixed(2)}`);
 

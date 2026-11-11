@@ -121,3 +121,9 @@ test('intake is off without a key', async (t) => {
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(septicOrder) });
   assert.equal(res.status, 503);
 });
+
+test('a website septic order where the customer does not know the tank size says so', () => {
+  const order = { ...septicOrder, details: { ...septicOrder.details, tank_size_gallons: undefined, tank_size: 'Not sure' } };
+  const job = toJobPrefill({ id: 8, ...normalizePayload(order) }, '2026-11-10');
+  assert.equal(job.details.tank_size, 'Not sure');
+});
