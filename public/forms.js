@@ -173,14 +173,70 @@
 
   const TYPE_KEYS = Object.keys(TYPES);
 
-  // ---------- fields added by admins (Setup → Work order fields) ----------
-  // { haul: [{ key, label, kind, options, by: 'office'|'driver', sms, reception, active }], … }
-  // Office fields join the form; driver fields join the after-job report. A removed field (active: false) is hidden
-  // from forms but its values stay on old work orders, and still print.
+  // ---------- admins shape the work orders (Setup → Work order fields) ----------
+  // custom_fields = {
+  //   haul: [{ key, label, active, sms, reception, … }, …],   // every type field in order: built-in ones (builtin: true)
+  //                                                             // can be renamed, removed, reordered and given extra choices;
+  //                                                             // added ones (key x_…) also have kind / options / by
+  //   common: { haul: { customer_phone: { label, hidden } } },   // the boxes every work order has
+  // }
+  // Keys never change, so website orders, prices and old work orders keep working whatever the labels say.
+  // A removed field is hidden from forms, but a value already on a work order (or sent by the website) still shows and prints.
   const CUSTOM_KINDS = ['text', 'textarea', 'number', 'yesno', 'choice', 'date'];
-  const BUILTIN = Object.fromEntries(TYPE_KEYS.map((k) => [k, { fields: TYPES[k].fields.slice(), report: TYPES[k].report.slice() }]));
+  const BUILTIN = Object.fromEntries(TYPE_KEYS.map((k) => [k, {
+    fields: TYPES[k].fields.slice(), report: TYPES[k].report.slice(),
+    labels: { what: TYPES[k].what, from: TYPES[k].from, to: TYPES[k].to, loadsLabel: TYPES[k].loadsLabel, quantityLabel: TYPES[k].quantityLabel },
+  }]));
+  // The reception screen asks these itself (tiles and chips), so they can't also be put under its "Details".
+  const RECEPTION_ASKS = ['direction', 'until_stop', 'truck', 'service', 'tank_size', 'tank_type', 'trip', 'pickup_date', 'placement',
+    'extra_servicing', 'aggregate2_type', 'aggregate2_loads', 'aggregate2_yards', 'aggregate2_truck',
+    'toilet1_type', 'toilet1_qty', 'toilet2_type', 'toilet2_qty', 'toilet3_type', 'toilet3_qty'];
+
+  /** The boxes on every work order, for this type: [{ key, label, base, hidden, lock, when }]. */
+  function commonDefaults(type) {
+    const b = BUILTIN[type] ? BUILTIN[type].labels : BUILTIN.haul.labels;
+    const t = TYPES[type] || TYPES.haul;
+    const out = [
+      { key: 'paper_wo', base: 'Paper W.O. #' },
+      { key: 'customer', base: 'Name', lock: true },
+      { key: 'customer_phone', base: 'Phone #' },
+      { key: 'billing_address', base: 'Billing / mailing address' },
+      { key: 'po_number', base: 'PO #' },
+      { key: 'customer_email', base: 'Email' },
+    ];
+    // What / loads / quantity are priced on aggregates and bins, so they stay on those forms.
+    if (b.what) out.push({ key: 'material', base: b.what, lock: ['haul', 'bin'].includes(type), when: 'what' });
+    if (t.loads) out.push({ key: 'loads_planned', base: b.loadsLabel || 'Number of loads', lock: type === 'haul', when: 'loads' });
+    if (t.quantity) out.push({ key: 'quantity', base: b.quantityLabel || 'Quantity', lock: type === 'haul', when: 'quantity' });
+    if (b.from) out.push({ key: 'from_location', base: b.from, when: 'from' });
+    out.push(
+      { key: 'to_location', base: b.to || 'Delivery address', lock: true },
+      { key: 'municipality', base: 'Municipality' },
+      { key: 'contact_name', base: 'Site contact name' },
+      { key: 'contact_phone', base: 'Site contact phone #' },
+      { key: 'notes', base: 'Special instructions (drivers see this)' },
+    );
+    if (!t.noPricing) out.push({ key: 'payment_method', base: 'Payment method' });
+    return out;
+  }
   let custom = {};
-  function customToField(c) {
+  function commonFields(type) {
+    const o = (custom.common && custom.common[type]) || {};
+    return commonDefaults(type).map((c) => ({ ...c, label: (o[c.key] && o[c.key].label) || c.base,
+      hidden: !c.lock && Boolean(o[c.key] && o[c.key].hidden) }));
+  }
+  const commonLabel = (type, key, fallback) => (commonFields(type).find((c) => c.key === key) || {}).label || fallback;
+  const commonHidden = (type, key) => Boolean((commonFields(type).find((c) => c.key === key) || {}).hidden);
+
+  function toField(type, c) {
+    const base = BUILTIN[type].fields.concat(BUILTIN[type].report).find((f) => f.key === c.key);
+    if (base) {
+      const f = { ...base, builtin: true, label: String(c.label || '').trim() || base.label, hidden: c.active === false,
+        sms: c.sms === undefined ? Boolean(base.sms) : Boolean(c.sms),
+        reception: Boolean(c.reception) && !RECEPTION_ASKS.includes(base.key), by: BUILTIN[type].report.includes(base) ? 'driver' : 'office' };
+      if (base.options) f.options = [...new Set([...base.options, ...(c.extra_options || []).filter(Boolean)])];
+      return f;
+    }
     const f = { key: c.key, label: c.label, custom: true, hidden: c.active === false, sms: Boolean(c.sms), reception: Boolean(c.reception),
       by: c.by === 'driver' ? 'driver' : 'office' };
     if (c.kind === 'yesno') return { ...f, kind: 'choice', options: ['Yes', 'No'] };
@@ -192,11 +248,41 @@
     custom = cfg && typeof cfg === 'object' ? cfg : {};
     for (const k of TYPE_KEYS) {
       const list = Array.isArray(custom[k]) ? custom[k] : [];
-      TYPES[k].fields = [...BUILTIN[k].fields, ...list.filter((c) => c.by !== 'driver').map(customToField)];
-      TYPES[k].report = [...BUILTIN[k].report, ...list.filter((c) => c.by === 'driver').map(customToField)];
+      const b = BUILTIN[k];
+      const isBuiltin = (key) => b.fields.concat(b.report).some((f) => f.key === key);
+      // Built-in fields not in the saved list (e.g. added to the app later) go in their usual place at the end.
+      const listed = new Set(list.map((c) => c.key));
+      const all = [...list.filter((c) => c && c.key), ...b.fields.concat(b.report).filter((f) => !listed.has(f.key)).map((f) => ({ key: f.key }))]
+        .filter((c) => isBuiltin(c.key) || /^x_/.test(c.key))
+        .map((c) => toField(k, c));
+      TYPES[k].fields = all.filter((f) => f.by !== 'driver');
+      TYPES[k].report = all.filter((f) => f.by === 'driver');
+      // Renamed common boxes the rest of the app reads off the type.
+      const lb = (key, dflt) => commonLabel(k, key, dflt);
+      TYPES[k].what = b.labels.what ? lb('material', b.labels.what) : b.labels.what;
+      TYPES[k].from = b.labels.from ? lb('from_location', b.labels.from) : b.labels.from;
+      TYPES[k].to = lb('to_location', b.labels.to);
+      if (TYPES[k].loads) TYPES[k].loadsLabel = lb('loads_planned', b.labels.loadsLabel || 'Number of loads');
+      if (TYPES[k].quantity) TYPES[k].quantityLabel = lb('quantity', b.labels.quantityLabel || 'Quantity');
     }
   }
   const customFields = () => custom;
+  setCustomFields({});
+  /** Everything an admin can change for a type, for Setup: { fields: [...], common: [...] } with the defaults alongside. */
+  function layout(type) {
+    const b = BUILTIN[type];
+    const all = TYPES[type].fields.concat(TYPES[type].report).map((f) => {
+      const base = b.fields.concat(b.report).find((x) => x.key === f.key);
+      const same = base && b.fields.concat(b.report).filter((x) => x.label === base.label).length > 1;
+      const saved = (custom[type] || []).find((c) => c.key === f.key) || {};
+      return f.builtin ? { key: f.key, builtin: true, label: f.label, base: base.label, kind: base.kind, options: base.options || null,
+        extra_options: (f.options || []).filter((o) => !(base.options || []).includes(o)), by: f.by, sms: f.sms, reception: f.reception,
+        no_reception: RECEPTION_ASKS.includes(f.key) || f.by === 'driver', active: !f.hidden,
+        hint: same ? f.key.replace(/_/g, ' ').replace(/(\d)/, ' $1') : '' }
+        : { ...saved, key: f.key, label: f.label, active: !f.hidden };
+    });
+    return { fields: all, common: commonFields(type) };
+  }
   const TOILET_TYPES = ['Standard', 'Deluxe', 'Wheelchair accessible', 'Hand wash station', 'Flushing'];
   const PAYMENT_METHODS = ['Cash', 'Debit', 'Visa/MC', 'Cheque', 'On account'];
   // Truck kinds, so drivers whose usual truck fits the job type are listed first.
@@ -316,24 +402,26 @@
   /** The fields an admin can make required for a work order type: [{ key, label }] (type fields are 'd.<key>'). */
   function requirable(type) {
     const t = typeInfo(type);
+    const L = (key, dflt) => (commonHidden(type, key) ? null : { key, label: commonLabel(type, key, dflt) });
     const out = [
-      { key: 'customer', label: 'Customer name' },
-      { key: 'customer_phone', label: 'Phone #' },
-      { key: 'billing_address', label: 'Billing / mailing address' },
-      { key: 'customer_email', label: 'Email' },
-      { key: 'po_number', label: 'PO #' },
+      { key: 'customer', label: commonLabel(type, 'customer', 'Name') === 'Name' ? 'Customer name' : commonLabel(type, 'customer') },
+      L('customer_phone', 'Phone #'),
+      L('billing_address', 'Billing / mailing address'),
+      L('customer_email', 'Email'),
+      L('po_number', 'PO #'),
       { key: 'time_slot', label: 'Time (first thing / AM / PM)' },
       { key: 'to_location', label: t.to || 'Delivery address' },
-      { key: 'municipality', label: 'Municipality' },
-      { key: 'contact_name', label: 'Site contact name' },
-      { key: 'contact_phone', label: 'Site contact phone #' },
+      L('municipality', 'Municipality'),
+      L('contact_name', 'Site contact name'),
+      L('contact_phone', 'Site contact phone #'),
     ];
-    if (t.what) out.push({ key: 'material', label: t.what });
-    if (t.loads) out.push({ key: 'loads_planned', label: t.quantity ? `${t.loadsLabel || '# of loads'} (or yards)` : (t.loadsLabel || '# of loads') });
-    if (t.from) out.push({ key: 'from_location', label: t.from });
-    out.push({ key: 'notes', label: 'Special instructions' }, { key: 'payment_method', label: 'Payment method' }, { key: 'paper_wo', label: 'Paper W.O. #' });
+    if (t.what) out.push(L('material', t.what));
+    if (t.loads) out.push(commonHidden(type, 'loads_planned') ? null
+      : { key: 'loads_planned', label: t.quantity ? `${t.loadsLabel || '# of loads'} (or yards)` : (t.loadsLabel || '# of loads') });
+    if (t.from) out.push(L('from_location', t.from));
+    out.push(commonHidden(type, 'notes') ? null : { key: 'notes', label: 'Special instructions' }, t.noPricing ? null : L('payment_method', 'Payment method'), L('paper_wo', 'Paper W.O. #'));
     for (const f of t.fields) if (f.kind !== 'check' && !f.hidden) out.push({ key: 'd.' + f.key, label: f.label === 'Circle one' ? `${f.label} (${f.options.join(' / ')})` : f.label });
-    return out;
+    return out.filter(Boolean);
   }
 
   /** Required fields that are still empty: [{ key, label }]. A pinned map spot counts as the address. */
@@ -352,5 +440,5 @@
     return (keys || []).filter((k) => !has(k)).map((k) => all.find((f) => f.key === k) || { key: k, label: k });
   }
 
-  return { setCustomFields, customFields, CUSTOM_KINDS, TIME_SLOTS, slotLabel, requirable, missingRequired, TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
+  return { setCustomFields, customFields, layout, commonFields, commonLabel, commonHidden, RECEPTION_ASKS, CUSTOM_KINDS, TIME_SLOTS, slotLabel, requirable, missingRequired, TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
 });

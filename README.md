@@ -81,14 +81,19 @@ first written in a paper book, the paper W.O. # can be recorded too.
 - **Book pick-up** on a toilet or bin job creates the return trip on the pick-up date.
 - The fields for each type are defined in one place, `public/forms.js`. Add or change a question there and the
   office form, driver text, driver page and printout all follow.
-- **Adding your own fields (admins):** Setup → **Work order fields**. Pick a type, **+ Add a field**, give it a name and
-  a kind (short text, long text, number, yes/no, pick from a list, date), and choose who fills it in:
-  - **Office** fields go on the work order. Tick **On reception** to show them on the reception screen (under
-    "Details" once the service is picked), and **In the driver's text** to text them to the driver.
-  - **Driver** fields are asked on the driver's phone after the job, like the septic conditions.
-  - Any field can be made required under **Required fields**. Fields can be renamed and reordered at any time.
-  - **Remove** hides a field from forms, texts and the driver page. Work orders that already have an answer keep it,
-    and it still prints and exports; **Put back** restores it.
+- **Changing the work orders (admins):** Setup → **Work order fields**. Pick a type to see everything on it:
+  - **On every work order:** the customer and site boxes. Rename any of them, or **Remove** the ones you don't use. The
+    customer name and the address always stay, and so do the material and loads on aggregates and bins, because prices
+    use them.
+  - **The type's own fields** (tank size, bin service, toilet types…): rename, reorder, remove, add more choices to a
+    list, and choose whether each is **In the driver's text** and **On reception**.
+  - **After the job:** what the driver fills in on their phone (like the septic conditions).
+  - **+ Add a field** adds your own: short text, long text, number, yes/no, pick from a list or date, filled in by the
+    office or by the driver.
+  - Any field can be made required under **Required fields**.
+  - **Website orders keep working:** every field keeps its internal name whatever you call it, so orders from the
+    website still land in the right place. If the website fills in a field you've removed, it still shows on that work
+    order (marked "removed field") and prints. **Put back** restores a removed field.
 
 Not covered yet: the **equipment rental agreement** (counter rentals with a signature). That could be added as its own type.
 

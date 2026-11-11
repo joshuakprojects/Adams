@@ -308,7 +308,7 @@
   const jobTypeOf = (svc) => (svc === 'water' || svc === 'other' ? 'misc' : svc);
   function receptionFields(svc) {
     if (!svc) return [];
-    return window.FORMS.typeInfo(jobTypeOf(svc)).fields.filter((f) => f.custom && f.reception && !f.hidden);
+    return window.FORMS.typeInfo(jobTypeOf(svc)).fields.filter((f) => f.reception && !f.hidden && !window.FORMS.RECEPTION_ASKS.includes(f.key));
   }
   function detailsFields() {
     const list = receptionFields(W.svc);
@@ -590,7 +590,7 @@
     if (W.svc === 'toilet') Object.assign(W.f, { toilet: d.toilet1_type, qty: Number(d.toilet1_qty) || 1, trip: d.trip || 'Deliver', period: po.period || 'week', off: po.off_schedule });
     if (W.svc === 'water') W.f.qty = Number(job.loads_planned) || 1;
     if (W.svc === 'other') W.f.what = job.material;
-    W.x = Object.fromEntries(Object.entries(d).filter(([k]) => k.startsWith('x_')));
+    W.x = Object.fromEntries(receptionFields(W.svc).filter((f) => d[f.key] !== undefined).map((f) => [f.key, d[f.key]]));
     W.addr = { to_location: job.to_location || '', municipality: job.municipality || '' };
     W.dist = job.distance_km != null ? { km: job.distance_km, in_town: job.in_town, from: job.distance_from, mode: job.distance_mode } : {};
     W.cust = { phone: A.prettyPhone(job.customer_phone || ''), name: job.customer || '', email: job.customer_email || '', billing_address: job.billing_address || '', customer_id: job.customer_id || '' };
@@ -613,7 +613,7 @@
     W = freshCall();
     W.svc = j._svc || '';
     W.f = { ...W.f, ...(j._f || {}) };
-    W.x = Object.fromEntries(Object.entries(j.details || {}).filter(([k]) => k.startsWith('x_')));
+    W.x = Object.fromEntries(receptionFields(W.svc).filter((f) => (j.details || {})[f.key] !== undefined).map((f) => [f.key, j.details[f.key]]));
     W.dist = j._dist || {};
     W.pin = j._pin || null;
     W.addr = { to_location: j.to_location || '', municipality: j.municipality || '' };

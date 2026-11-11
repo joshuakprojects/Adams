@@ -32,6 +32,8 @@ async function app(t) {
   return { db, d, dave, sent, base, admin: await as('josh@adamsbros.ca'), office: await as('office@adamsbros.ca') };
 }
 
+const mine = (cfg) => ({ ...cfg, haul: cfg.haul.filter((f) => !f.builtin) });
+
 const FIELDS = {
   haul: [
     { label: 'Gate code', kind: 'text', by: 'office', sms: true, reception: true },
@@ -43,12 +45,12 @@ const FIELDS = {
 test('admins add work order fields; office logins cannot; bad ones are refused', async (t) => {
   const { admin, office } = await app(t);
   assert.equal((await office.api('POST', '/settings', { custom_fields: FIELDS })).status, 403);
-  const saved = (await admin.api('POST', '/settings', { custom_fields: FIELDS })).body.custom_fields;
+  const saved = mine((await admin.api('POST', '/settings', { custom_fields: FIELDS })).body.custom_fields);
   assert.deepEqual(saved.haul.map((f) => f.key), ['x_gate_code', 'x_dog_on_site', 'x_road_condition']);
   assert.deepEqual(saved.haul[2].options, ['Good', 'Soft', 'Washed out']);
   assert.equal(saved.haul[2].reception, false, 'driver fields are never on reception');
   // Everyone logged in sees them (reception needs them), and the form for haul now has them.
-  assert.equal((await office.api('GET', '/me')).body.custom_fields.haul.length, 3);
+  assert.equal(mine((await office.api('GET', '/me')).body.custom_fields).haul.length, 3);
   assert.ok(FORMS.typeInfo('haul').fields.some((f) => f.key === 'x_gate_code'));
   assert.ok(FORMS.typeInfo('haul').report.some((f) => f.key === 'x_road_condition'));
   assert.ok(FORMS.requirable('haul').some((r) => r.key === 'd.x_gate_code'), 'can be made required');
@@ -63,14 +65,14 @@ test('admins add work order fields; office logins cannot; bad ones are refused',
     assert.match(r.body.error, msg);
   }
   // Renaming keeps the key, so old answers stay attached.
-  const renamed = (await admin.api('POST', '/settings', { custom_fields: { haul: [{ ...saved.haul[0], label: 'Gate / lock code' }, saved.haul[1], saved.haul[2]] } })).body.custom_fields;
+  const renamed = mine((await admin.api('POST', '/settings', { custom_fields: { haul: [{ ...saved.haul[0], label: 'Gate / lock code' }, saved.haul[1], saved.haul[2]] } })).body.custom_fields);
   assert.equal(renamed.haul[0].key, 'x_gate_code');
   assert.equal(renamed.haul[0].label, 'Gate / lock code');
 });
 
 test('fields reach the text, the driver page and the print; removing one keeps old answers', async (t) => {
   const { d, dave, base, admin, sent } = await app(t);
-  const saved = (await admin.api('POST', '/settings', { custom_fields: FIELDS })).body.custom_fields;
+  const saved = mine((await admin.api('POST', '/settings', { custom_fields: FIELDS })).body.custom_fields);
   const job = (await admin.api('POST', '/jobs', { job_type: 'haul', scheduled_date: '2026-11-20', customer: 'Jane', customer_phone: '705-555-0199',
     to_location: '12 Bay St', material: 'Gravel', details: { x_gate_code: '4321', x_dog_on_site: 'Yes' }, assignments: [{ driver_id: dave.id }] })).body.job;
   assert.equal(job.details.x_gate_code, '4321');
@@ -88,7 +90,7 @@ test('fields reach the text, the driver page and the print; removing one keeps o
   assert.match(print, /opt on">SOFT/);
 
   // Remove the gate code and the road condition (leaving them out of the list does the same as switching them off).
-  const off = (await admin.api('POST', '/settings', { custom_fields: { haul: [saved.haul[1]] } })).body.custom_fields;
+  const off = mine((await admin.api('POST', '/settings', { custom_fields: { haul: [saved.haul[1]] } })).body.custom_fields);
   assert.deepEqual(off.haul.map((f) => [f.key, f.active]), [['x_dog_on_site', true], ['x_gate_code', false], ['x_road_condition', false]]);
   assert.ok(!FORMS.requirable('haul').some((r) => r.key === 'd.x_gate_code'));
 
@@ -106,7 +108,7 @@ test('fields reach the text, the driver page and the print; removing one keeps o
   assert.match(print, /opt on">SOFT/, 'old driver answers still print');
 
   // Putting it back brings the same field back.
-  const back = (await admin.api('POST', '/settings', { custom_fields: { haul: off.haul.map((f) => ({ ...f, active: true })) } })).body.custom_fields;
+  const back = mine((await admin.api('POST', '/settings', { custom_fields: { haul: off.haul.map((f) => ({ ...f, active: true })) } })).body.custom_fields);
   assert.ok(back.haul.every((f) => f.active));
   assert.equal(new Set(back.haul.map((f) => f.key)).size, 3);
 });
@@ -118,4 +120,43 @@ test('fields survive a restart (loaded from settings)', async (t) => {
   assert.ok(!FORMS.typeInfo('haul').fields.some((f) => f.custom));
   await createDispatch(db).loadCustomFields();
   assert.ok(FORMS.typeInfo('haul').fields.some((f) => f.key === 'x_gate_code'));
+});
+
+test('built-in fields: rename, remove, extra choices; common boxes: rename and remove', async (t) => {
+  const { dave, base, admin, sent } = await app(t);
+  const layout = (await admin.api('GET', '/settings')).body.form_layout.septic;
+  const fields = layout.fields.map((f) => {
+    if (f.key === 'tank_size') return { ...f, label: 'Tank size (gal)' };
+    if (f.key === 'elevation') return { ...f, active: false };
+    if (f.key === 'tank_type') return { ...f, extra_options: 'Cistern, Septic' };
+    if (f.key === 'liquid_level') return { ...f, label: 'Level' };
+    return f;
+  });
+  const common = layout.common.map((c) => (c.key === 'customer_phone' ? { ...c, label: 'Cell #' }
+    : c.key === 'po_number' || c.key === 'customer' ? { ...c, hidden: true } : c));
+  const out = (await admin.api('POST', '/settings', { custom_fields: { septic: fields, common: { septic: common } } })).body;
+  const L = out.form_layout.septic;
+  assert.equal(L.fields.find((f) => f.key === 'tank_size').label, 'Tank size (gal)');
+  assert.equal(L.fields.find((f) => f.key === 'elevation').active, false);
+  assert.deepEqual(FORMS.typeInfo('septic').fields.find((f) => f.key === 'tank_type').options, ['Septic', 'Holding', 'Pump chamber', 'Cistern']);
+  assert.equal(L.common.find((c) => c.key === 'customer_phone').label, 'Cell #');
+  assert.equal(L.common.find((c) => c.key === 'po_number').hidden, true);
+  assert.equal(L.common.find((c) => c.key === 'customer').hidden, false, 'the customer name always stays');
+  assert.equal(FORMS.typeInfo('haul').fields.find((f) => f.key === 'truck').label, 'Circle one', 'other types untouched');
+  const req = FORMS.requirable('septic').map((r) => r.label);
+  assert.ok(req.includes('Tank size (gal)') && req.includes('Cell #'));
+  assert.ok(!req.includes('Elevation') && !req.includes('PO #'));
+
+  // A work order filled in from a website order can carry a removed field: it is kept, texted only if still on, and printed.
+  const job = (await admin.api('POST', '/jobs', { job_type: 'septic', scheduled_date: '2026-11-20', customer: 'Jane', customer_phone: '705-555-0199',
+    to_location: '12 Bay St', details: { tank_size: '1000', tank_type: 'Cistern', elevation: 'Uphill' }, assignments: [{ driver_id: dave.id }] })).body.job;
+  assert.equal(job.details.elevation, 'Uphill');
+  assert.equal(job.details.tank_type, 'Cistern');
+  await admin.api('POST', `/jobs/${job.id}/send`, {});
+  assert.doesNotMatch(sent.at(-1).body, /Elevation/);
+  const print = await (await fetch(`${base}/print/${job.id}`, { headers: { cookie: admin.cookie } })).text();
+  assert.match(print, /Cell #:/);
+  assert.doesNotMatch(print, /PO #:/);
+  assert.match(print, /Elevation:<\/span><span class="val">Uphill/);
+  assert.match(print, /Level:/, 'renamed driver report field on the blank conditions section');
 });
