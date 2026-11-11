@@ -337,6 +337,11 @@ const ADDED_COLUMNS = {
     price_options: "TEXT NOT NULL DEFAULT '{}'",
     // Type-specific form fields (bin service, septic tank details, toilet types…) as JSON.
     details: "TEXT NOT NULL DEFAULT '{}'",
+    // Review texts (Setup → Review requests): when the job finished, whether the customer was asked, and a per-job opt-out.
+    completed_at: 'TEXT',
+    review_status: "TEXT NOT NULL DEFAULT ''", // '' = not yet · sent · skipped · failed
+    review_at: 'TEXT',
+    no_review: 'INTEGER NOT NULL DEFAULT 0',
   },
   users: {
     // office: prices, questions, customers, work orders (no texting) · dispatcher: + texting drivers · admin: everything

@@ -767,3 +767,10 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 .cf-table tr.cf-off td { opacity: .5; }
 .cf-table tr.cf-off td:last-child { opacity: 1; }
 .cf-table input[name=extra_options] { margin-top: 4px; min-width: 200px; display: block; }
+
+/* Review requests (Setup) */
+#review-form { display: grid; gap: 10px; max-width: 640px; }
+#review-form input[type=url], #review-form textarea { width: 100%; }
+.check-row { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.review-preview { background: #eef6ee; border: 1px solid #cfe3cf; border-radius: 12px 12px 12px 2px; padding: 10px 12px; font-size: 14px; white-space: pre-wrap; max-width: 420px; }
+#review-form button { justify-self: start; }

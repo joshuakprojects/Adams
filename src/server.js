@@ -597,6 +597,10 @@ async function main() {
     dispatch.runScheduledLineup()
       .then((out) => out && console.log(`Sent lineup for ${out.date} to ${out.results.length} driver(s)`))
       .catch((err) => console.error('Lineup send failed:', err));
+    // Review texts to customers of finished jobs (Setup → Review requests).
+    dispatch.runReviewRequests()
+      .then((out) => out?.some((r) => r.status === 'sent') && console.log(`Review texts sent: ${out.filter((r) => r.status === 'sent').map((r) => '#' + r.id).join(', ')}`))
+      .catch((err) => console.error('Review texts failed:', err));
     // Nightly backup, after 2 AM.
     backups.runScheduled()
       .then((out) => {
