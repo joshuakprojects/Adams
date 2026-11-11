@@ -228,6 +228,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       scheduled_time: '',
       first_thing: time_slot === 'first' ? 1 : 0,
       notes: str(data.notes, 1000),
+      no_review: ['on', 'true', '1', 'yes'].includes(String(data.no_review ?? '').toLowerCase()) || data.no_review === true ? 1 : 0,
       invoice_number: str(data.invoice_number, 60),
       amount_billed: str(data.amount_billed, 60),
       ...cleanDistance(data),
@@ -397,7 +398,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     return rate;
   }
 
-  const JOB_FIELDS = ['job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
+  const JOB_FIELDS = ['no_review', 'job_type', 'customer', 'material', 'quantity', 'unit', 'loads_planned', 'from_location',
     'to_location', 'contact_name', 'contact_phone', 'scheduled_date', 'scheduled_time', 'first_thing', 'time_slot', 'notes',
     'customer_phone', 'customer_email', 'billing_address', 'po_number', 'municipality', 'paper_wo',
     'quoted_price', 'payment_method', 'details', 'invoice_number', 'amount_billed', 'customer_id',
@@ -808,7 +809,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   async function autoCompleteJob(jobId) {
     const left = (await db.get(`SELECT COUNT(*) AS n FROM assignments WHERE job_id = ? AND status NOT IN ('done','cancelled')`, jobId)).n;
     if (left === 0) {
-      const r = await db.run(`UPDATE jobs SET status = 'complete', updated_at = datetime('now') WHERE id = ? AND status = 'open'`, jobId);
+      const r = await db.run(`UPDATE jobs SET status = 'complete', completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'open'`, jobId);
       if (r.changes) await logHistory(jobId, 'Job complete', 'Every driver finished', 'System');
     }
   }
@@ -1018,7 +1019,84 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       required_fields: await requiredFields(),
       custom_fields: FORMS.customFields(),
       form_layout: formLayout(),
+      reviews: await reviewSettings(),
     };
+  }
+
+  // ---------- review requests: a text asking the customer for a Google review after the job ----------
+  const REVIEW_DEFAULT = 'Hi {name}, thanks for choosing Adams Bros! If you were happy with the job, a quick Google review would mean a lot to us: {link}';
+  const REVIEW_TYPES = FORMS.TYPE_KEYS.filter((k) => k !== 'labour'); // labour jobs have no customer
+  async function reviewSettings() {
+    const types = parseJson(await getSetting('review_types', '')) ;
+    return {
+      on: (await getSetting('review_on', '')) === '1',
+      link: await getSetting('review_link', ''),
+      message: await getSetting('review_message', REVIEW_DEFAULT),
+      types: Array.isArray(types) ? types : REVIEW_TYPES.slice(),
+      since: await getSetting('review_since', ''),
+    };
+  }
+  async function saveReviewSettings(input) {
+    const before = await reviewSettings();
+    const link = str(input.link, 300);
+    if (link && !/^https:\/\/[^\s]+$/.test(link)) throw new ValidationError('The review link must start with https://');
+    const message = str(input.message, 320) || REVIEW_DEFAULT;
+    if (!message.includes('{link}')) throw new ValidationError('The message needs {link} where the review link goes');
+    const types = (Array.isArray(input.types) ? input.types : []).filter((k) => REVIEW_TYPES.includes(k));
+    const on = Boolean(input.on);
+    if (on && !link) throw new ValidationError('Paste your Google review link before switching review texts on');
+    await setSetting('review_link', link);
+    await setSetting('review_message', message);
+    await setSetting('review_types', JSON.stringify(types));
+    await setSetting('review_on', on ? '1' : '');
+    // Only jobs finished after the texts were switched on are asked, so old customers aren't texted out of the blue.
+    if (on && !before.on) await setSetting('review_since', new Date().toISOString().replace('T', ' ').slice(0, 19));
+  }
+  /** "Hi Jane" for a person; "Hi there" for a company name or a blank. */
+  function greetingName(customer) {
+    const name = String(customer || '').trim();
+    if (!name || /\b(inc|ltd|limited|corp|co|llc|construction|contracting|services|township|municipality|church|club|marina|lodge|resort)\b\.?/i.test(name) || name.split(/\s+/).length > 3) return 'there';
+    return name.split(/\s+/)[0].replace(/[^A-Za-z'\-]/g, '') || 'there';
+  }
+  function reviewText(message, job, link) {
+    return message.replace(/\{name\}/g, greetingName(job.customer)).replace(/\{link\}/g, link);
+  }
+  /**
+   * Text the customers of finished jobs (checked every minute). Sent an hour or more after the job finished,
+   * between 9 a.m. and 8 p.m.; at most one per phone number a year; never for jobs marked "don't ask".
+   */
+  async function runReviewRequests(now = new Date()) {
+    const cfg = await reviewSettings();
+    if (!cfg.on || !cfg.link || !cfg.types.length) return null;
+    const hm = nowHm(config.timeZone, now);
+    if (hm < '09:00' || hm >= '20:00') return null;
+    const sqlTime = (d) => d.toISOString().replace('T', ' ').slice(0, 19);
+    const hourAgo = sqlTime(new Date(now.getTime() - 60 * 60 * 1000));
+    const weekAgo = sqlTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+    const yearAgo = sqlTime(new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000));
+    const due = await db.all(`SELECT * FROM jobs WHERE status = 'complete' AND review_status = '' AND no_review = 0
+        AND completed_at IS NOT NULL AND completed_at <= ? AND customer_phone != '' ORDER BY completed_at LIMIT 20`, hourAgo);
+    const out = [];
+    for (const job of due) {
+      const mark = async (status, note) => {
+        await db.run(`UPDATE jobs SET review_status = ?, review_at = datetime('now') WHERE id = ?`, status, job.id);
+        if (note) await logHistory(job.id, note, '', 'System');
+        out.push({ id: job.id, status });
+      };
+      if (!cfg.types.includes(job.job_type) || (cfg.since && job.completed_at < cfg.since)) { await mark('skipped'); continue; }
+      if (job.completed_at < weekAgo) { await mark('skipped'); continue; }
+      if (!/^\+1\d{10}$/.test(job.customer_phone)) { await mark('skipped', 'Review text not sent (no mobile number)'); continue; }
+      const recent = await db.get(`SELECT id FROM jobs WHERE customer_phone = ? AND review_status = 'sent' AND review_at >= ? AND id != ? LIMIT 1`,
+        job.customer_phone, yearAgo, job.id);
+      if (recent) { await mark('skipped', `Review text not sent (asked on job #${recent.id} within the last year)`); continue; }
+      try {
+        await send(job.customer_phone, reviewText(cfg.message, job, cfg.link));
+        await mark('sent', `Review request texted to ${sms.prettyPhone(job.customer_phone)}`);
+      } catch (err) {
+        await mark('failed', `Review text failed: ${String(err.message || err).slice(0, 120)}`);
+      }
+    }
+    return out;
   }
 
   async function saveSettings(data) {
@@ -1028,6 +1106,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       await setSetting('lineup_time', t);
     }
     if ('custom_fields' in data) await saveCustomFields(data.custom_fields);
+    if ('reviews' in data) await saveReviewSettings(data.reviews || {});
     if ('required_fields' in data) await saveRequiredFields(data.required_fields);
     if ('septic_reminder_years' in data) {
       const y = Number(data.septic_reminder_years);
@@ -1208,7 +1287,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
     saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo, prices, onChange,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
-    getSettings, saveSettings, requiredFields, calendar, loadCustomFields, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
+    getSettings, saveSettings, requiredFields, calendar, loadCustomFields, runReviewRequests, reviewText, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,
   };
 }

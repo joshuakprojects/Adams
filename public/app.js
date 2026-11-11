@@ -1071,6 +1071,7 @@
       if (!input || k === 'job_type' || k === 'details' || k === 'time_slot' || !('value' in input)) continue;
       input.value = v ?? '';
     }
+    form.elements.no_review.checked = Boolean(Number(data.no_review));
     const slot = data.time_slot || (data.first_thing ? 'first' : data.scheduled_time ? (data.scheduled_time < '12:00' ? 'am' : 'pm') : '');
     $$('input[name=time_slot]', form).forEach((r) => { r.checked = r.value === slot; });
     markMissing([]);
@@ -1187,6 +1188,7 @@
     sf.elements.lineup_on.checked = Boolean(settings.lineup_time);
     sf.elements.lineup_time.value = settings.lineup_time || '17:00';
     $('#septic-form').elements.septic_reminder_years.value = settings.septic_reminder_years || '3';
+    fillReviewForm(settings.reviews || {});
     loadBackups().catch(() => {});
     reqState.data = settings.required_fields || {};
     renderRequired();
@@ -1767,6 +1769,36 @@
       toast(out.ok ? `Backed up (${out.photos} new photo${out.photos === 1 ? '' : 's'})` : `Backup failed: ${out.error}`);
       await loadBackups();
     } catch (err) { toast(err.message); } finally { e.target.disabled = false; }
+  });
+
+  // ---------- review requests (admin) ----------
+  const rf2 = $('#review-form');
+  function reviewPreview() {
+    const text = (rf2.elements.message.value || '').replace(/\{name\}/g, 'Jane').replace(/\{link\}/g, rf2.elements.link.value || 'https://g.page/r/…/review');
+    $('#review-preview').textContent = text;
+    const n = text.length;
+    $('#review-count').textContent = `${n} characters${n > 160 ? ` — sent as ${Math.ceil(n / 153)} texts` : ' — one text'}.`;
+  }
+  function fillReviewForm(r) {
+    rf2.elements.on.checked = Boolean(r.on);
+    rf2.elements.link.value = r.link || '';
+    rf2.elements.message.value = r.message || '';
+    const types = r.types || [];
+    $('#review-types').innerHTML = TYPE_KEYS.filter((k) => k !== 'labour').map((k) =>
+      `<label class="check"><input type="checkbox" name="types" value="${k}" ${types.includes(k) ? 'checked' : ''}> ${TYPES[k].icon} ${esc(TYPES[k].name)}</label>`).join('');
+    reviewPreview();
+  }
+  rf2.addEventListener('input', reviewPreview);
+  rf2.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = rf2.elements;
+    const body = { on: f.on.checked, link: f.link.value.trim(), message: f.message.value.trim(),
+      types: $$('#review-types input:checked').map((i) => i.value) };
+    try {
+      const out = await api('/settings', { method: 'POST', body: { reviews: body } });
+      fillReviewForm(out.reviews);
+      toast(out.reviews.on ? 'Review texts are on — customers of jobs finished from now on will be asked' : 'Saved — review texts are off');
+    } catch (err) { toast(err.message); }
   });
 
   $('#septic-form').addEventListener('submit', async (e) => {

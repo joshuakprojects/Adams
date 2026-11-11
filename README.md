@@ -135,6 +135,20 @@ address, municipality, W.O. # or phone.
 - **History:** a job's **More → History** shows who did what and when: office edits (field by field, by login), texts sent,
   driver replies and job-page taps, ticket photos, and completion.
 
+## Review requests (texts asking customers for a Google review)
+
+Setup → **Review requests** (admins). Paste your Google review link (Google Business Profile → **Ask for reviews**, a
+short `https://g.page/r/…/review` link), pick the work order types, and tick **Text customers asking for a review**.
+
+- When every driver on a job has marked it done, the customer's phone gets the message (default: "Hi Jane, thanks for
+  choosing Adams Bros! If you were happy with the job, a quick Google review would mean a lot to us: <link>").
+- Sent an hour or more after the job is finished, between 9 a.m. and 8 p.m. (a job finished in the evening is asked the
+  next morning), and only for jobs finished within the last week.
+- At most once a year to the same phone number; only to 10-digit phone numbers; never for labour work orders.
+- Only jobs finished **after** the texts are switched on are asked, so past customers aren't texted out of the blue.
+- To skip a customer, tick **Don't text this customer asking for a review** on their work order.
+- Each text (or why one wasn't sent) is in the job's history.
+
 ## Logins and roles
 
 Everyone has their own login. Only the owner (`OWNER_EMAIL`, default **josh@adamsbros.ca**) sees **Setup → Logins**, where

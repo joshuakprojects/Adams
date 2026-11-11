@@ -175,6 +175,25 @@
       </form>
       <p class="muted small">See them on the Customers tab under "Due for pump-out". Nothing is sent to customers automatically.</p>
     </div>
+    <div class="panel settings" id="review-panel" data-need="admin">
+      <h2>Review requests</h2>
+      <p class="muted small">When a job is finished, text the customer asking for a Google review. Sent an hour or more after
+        the job is done, between 9 a.m. and 8 p.m., and at most once a year to the same phone number. Tick
+        <b>Don't text this customer asking for a review</b> on a work order to skip it.</p>
+      <form id="review-form">
+        <label class="check"><input type="checkbox" name="on"> Text customers asking for a review</label>
+        <label>Google review link
+          <input name="link" type="url" placeholder="https://g.page/r/…/review" autocomplete="off"></label>
+        <p class="muted small">In your Google Business Profile, click <b>Ask for reviews</b> (or <b>Get more reviews</b>) and copy the link.
+          It opens straight to the review box on any phone.</p>
+        <div class="field-col"><span class="lbl">For these work orders</span><div class="check-row" id="review-types"></div></div>
+        <label class="wide">Message <textarea name="message" rows="3" maxlength="320"></textarea></label>
+        <p class="muted small"><b>{name}</b> becomes the customer's first name ("there" for a company), <b>{link}</b> the review link.
+          <span id="review-count"></span></p>
+        <div class="review-preview" id="review-preview"></div>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+    </div>
     <div class="panel settings" id="backup-panel">
       <h2>Backups</h2>
       <p class="muted small" id="backup-where"></p>
@@ -452,6 +471,7 @@
           <label class="span2">Billing / mailing address <input name="billing_address"></label>
           <label>PO # <input name="po_number"></label>
           <label class="wide">Email <input name="customer_email" type="email"></label>
+          <label class="check-field wide" id="no-review-box"><input type="checkbox" name="no_review"> Don't text this customer asking for a review</label>
         </div>
         <div id="cust-note" class="cust-note hidden"></div>
       </fieldset>
