@@ -912,7 +912,9 @@
       const cls = f.wide ? 'wide' : f.suggestions === 'toilets' ? 'span2' : '';
       return `<label class="${cls}">${esc(f.label)}<input type="${type}" name="${name}" value="${esc(v)}" ${list} ${type === 'number' ? 'min="0"' : ''}></label>`;
     };
-    const visible = t.fields.filter((f) => !f.hidden); // removed fields keep their values but leave the form
+    // Removed fields leave the form, unless this work order already has an answer (e.g. sent by the website).
+    const visible = t.fields.filter((f) => !f.hidden || !window.FORMS.isEmpty(values[f.key]))
+      .map((f) => (f.hidden ? { ...f, label: `${f.label} (removed field)` } : f));
     $('#type-fields-first').innerHTML = visible.filter((f) => f.slot === 'first').map(html).join('');
     $('#type-fields-top').innerHTML = visible.filter((f) => f.top).map(html).join('');
     $('#type-fields').innerHTML = visible.filter((f) => !f.top && !f.slot).map(html).join('');
@@ -972,12 +974,30 @@
     $('[data-when=what]', form).classList.toggle('wide', !t.fixedUnit);
     // Keep what was typed in the type-specific fields when switching back and forth.
     renderTypeFields(type, details || collectDetails());
+    applyCommon(type);
     updateAddressLabels();
     fillWhatList(type);
     // Put drivers whose usual truck matches this job type first.
     renderAssignList(type);
   }
   $('#job-type').addEventListener('change', (e) => { if (e.target.name === 'job_type') applyType(e.target.value); });
+
+  /** The boxes every work order has, as an admin named them (Setup → Work order fields); removed ones hide unless filled in. */
+  function applyCommon(type) {
+    for (const c of window.FORMS.commonFields(type)) {
+      const el = form.elements[c.key];
+      if (!el) continue;
+      const box = c.key === 'customer' ? el.closest('.cust-pick') : el.closest('label');
+      if (!box) continue;
+      const lab = c.key === 'customer' ? $('label[for=f-customer]', box) : box;
+      if (!$('[data-label]', lab)) {
+        const text = [...lab.childNodes].find((n) => n.nodeType === 3 && n.textContent.trim());
+        if (text) text.textContent = c.label + ' ';
+      }
+      const off = c.hidden && !String(el.value || '').trim();
+      if (box.dataset.when) { if (off) box.classList.add('hidden'); } else box.classList.toggle('hidden', off);
+    }
+  }
 
   let formAssignments = new Map(); // driver_id -> truck_id
   let busyByDriver = new Map();
@@ -1170,7 +1190,7 @@
     loadBackups().catch(() => {});
     reqState.data = settings.required_fields || {};
     renderRequired();
-    cf.data = JSON.parse(JSON.stringify(settings.custom_fields || {}));
+    cf.layout = JSON.parse(JSON.stringify(settings.form_layout || {}));
     renderCustomFields();
     const truckSel = $('#driver-form select[name=default_truck_id]');
     truckSel.innerHTML = '<option value="">Usual truck…</option>' + trucks.filter((t) => t.active).map((t) => `<option value="${t.id}">${esc(t.unit)} – ${esc(KIND[t.kind])}</option>`).join('');
@@ -1519,81 +1539,117 @@
   });
   $('#cust-new').addEventListener('click', () => openCustomer(null));
 
-  // ---------- work order fields added by admins ----------
-  const cf = { type: 'haul', data: {} };
-  const KIND_NAMES = { text: 'Short text', textarea: 'Long text', number: 'Number', yesno: 'Yes / No', choice: 'Pick from a list', date: 'Date' };
+  // ---------- work order fields (admin): rename, remove, reorder and add ----------
+  const cf = { type: 'haul', layout: {} };
+  const KIND_NAMES = { text: 'Short text', textarea: 'Long text', number: 'Number', yesno: 'Yes / No', choice: 'Pick from a list', date: 'Date', check: 'Tick box' };
   $('#cf-type').innerHTML = TYPE_KEYS.map((k) =>
     `<label><input type="radio" name="cf-type" value="${k}" ${k === 'haul' ? 'checked' : ''}><span>${TYPES[k].icon} ${esc(TYPES[k].name)}</span></label>`).join('');
+  const cfLayout = () => cf.layout[cf.type] || { fields: [], common: [] };
   function renderCustomFields() {
-    const list = cf.data[cf.type] || [];
-    const live = list.map((f, i) => ({ f, i })).filter(({ f }) => f.active !== false);
-    const removed = list.map((f, i) => ({ f, i })).filter(({ f }) => f.active === false);
-    $('#cf-rows').innerHTML = live.map(({ f, i }, n) => `<tr data-cf="${i}">
-      <td><input name="label" value="${esc(f.label)}" placeholder="e.g. Gate code" aria-label="Field name"></td>
-      <td><select name="kind" aria-label="Kind">${Object.entries(KIND_NAMES).map(([k, t]) => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
-        ${f.kind === 'choice' ? `<input name="options" value="${esc((f.options || []).join(', '))}" placeholder="Choices, with commas" aria-label="Choices">` : ''}</td>
-      <td><select name="by" aria-label="Filled in by"><option value="office" ${f.by !== 'driver' ? 'selected' : ''}>Office (work order)</option>
-        <option value="driver" ${f.by === 'driver' ? 'selected' : ''}>Driver (after the job)</option></select></td>
-      <td class="c"><input type="checkbox" name="sms" ${f.sms ? 'checked' : ''} ${f.by === 'driver' ? 'disabled' : ''} aria-label="In the driver's text"></td>
-      <td class="c"><input type="checkbox" name="reception" ${f.reception ? 'checked' : ''} ${f.by === 'driver' ? 'disabled' : ''} aria-label="On the reception screen"></td>
-      <td><div class="row-actions"><button class="btn tiny" data-cf-move="-1" ${n === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
-        <button class="btn tiny" data-cf-move="1" ${n === live.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
-        <button class="btn tiny danger" data-cf-remove>Remove</button></div></td></tr>`).join('')
-      || `<tr><td colspan="6" class="muted">No fields added to ${esc(TYPES[cf.type].name)} work orders yet.</td></tr>`;
-    $('#cf-removed').innerHTML = removed.length ? `<details><summary>Removed fields (${removed.length}) — old work orders still show what was filled in</summary>
-      ${removed.map(({ f, i }) => `<div class="cf-gone" data-cf="${i}">${esc(f.label)} <span class="muted small">${esc(KIND_NAMES[f.kind] || '')}</span>
-        <button class="btn tiny" data-cf-restore>Put back</button></div>`).join('')}</details>` : '';
+    const L = cfLayout();
+    const head = (title, sub) => `<tr class="cf-sec"><th colspan="6">${esc(title)} <span class="muted small">${esc(sub)}</span></th></tr>`;
+    const actions = (on, up, down, lock) => (lock ? '<span class="muted small">Always on</span>' : `<div class="row-actions">
+      ${up === null ? '' : `<button class="btn tiny" type="button" data-cf-move="-1" ${up ? '' : 'disabled'} aria-label="Move up">↑</button>
+      <button class="btn tiny" type="button" data-cf-move="1" ${down ? '' : 'disabled'} aria-label="Move down">↓</button>`}
+      ${on ? '<button class="btn tiny danger" type="button" data-cf-remove>Remove</button>' : '<button class="btn tiny" type="button" data-cf-restore>Put back</button>'}</div>`);
+    const was = (f) => (f.base && f.label !== f.base ? `<div class="muted small">was “${esc(f.base)}”</div>` : '')
+      + (f.hint ? `<div class="muted small">${esc(f.hint)}</div>` : '');
+
+    const common = L.common.map((c, i) => `<tr data-cc="${i}" class="${c.hidden ? 'cf-off' : ''}">
+      <td><input name="label" value="${esc(c.label)}" placeholder="${esc(c.base)}" aria-label="Name on the work order">${was(c)}</td>
+      <td class="muted small">On every work order</td><td></td><td></td><td></td>
+      <td>${actions(!c.hidden, null, null, c.lock)}</td></tr>`).join('');
+
+    const row = (f, i, n, count) => {
+      const kind = f.builtin
+        ? `<span class="small">${esc(KIND_NAMES[f.kind] || f.kind)}${f.options ? `: ${esc(f.options.join(', '))}` : ''}</span>
+           ${f.options ? `<input name="extra_options" value="${esc((f.extra_options || []).join(', '))}" placeholder="More choices, with commas" aria-label="More choices">` : ''}`
+        : `<select name="kind" aria-label="Kind">${Object.entries(KIND_NAMES).filter(([k]) => k !== 'check').map(([k, t]) => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+           ${f.kind === 'choice' ? `<input name="options" value="${esc((f.options || []).join(', '))}" placeholder="Choices, with commas" aria-label="Choices">` : ''}`;
+      const by = f.builtin ? `<span class="small">${f.by === 'driver' ? 'Driver (after the job)' : 'Office (work order)'}</span>`
+        : `<select name="by" aria-label="Filled in by"><option value="office" ${f.by !== 'driver' ? 'selected' : ''}>Office (work order)</option>
+           <option value="driver" ${f.by === 'driver' ? 'selected' : ''}>Driver (after the job)</option></select>`;
+      const driver = f.by === 'driver';
+      return `<tr data-cf="${i}" class="${f.active === false ? 'cf-off' : ''}">
+        <td><input name="label" value="${esc(f.label)}" placeholder="${esc(f.base || 'e.g. Gate code')}" aria-label="Field name">${was(f)}</td>
+        <td>${kind}</td><td>${by}</td>
+        <td class="c"><input type="checkbox" name="sms" ${f.sms ? 'checked' : ''} ${driver ? 'disabled' : ''} aria-label="In the driver's text"></td>
+        <td class="c"><input type="checkbox" name="reception" ${f.reception ? 'checked' : ''} ${driver || f.no_reception ? 'disabled' : ''}
+          aria-label="On the reception screen" ${f.no_reception && !driver ? 'title="The reception screen already asks this"' : ''}></td>
+        <td>${actions(f.active !== false, n > 0, n < count - 1, false)}</td></tr>`;
+    };
+    const section = (by) => {
+      const items = L.fields.map((f, i) => ({ f, i })).filter(({ f }) => (f.by === 'driver') === (by === 'driver'));
+      return items.map(({ f, i }, n) => row(f, i, n, items.length)).join('');
+    };
+    const office = section('office');
+    const driver = section('driver');
+    $('#cf-rows').innerHTML = head('On every work order', '— rename, or remove the ones you don\'t use')
+      + common
+      + head(`${TYPES[cf.type].name} work order`, '— filled in by the office')
+      + (office || '<tr><td colspan="6" class="muted">None yet.</td></tr>')
+      + head('After the job', '— the driver fills these in on their phone')
+      + (driver || '<tr><td colspan="6" class="muted">None yet — add a field and pick “Driver”.</td></tr>');
+    $('#cf-removed').innerHTML = '';
   }
-  const cfList = () => (cf.data[cf.type] = cf.data[cf.type] || []);
   $('#cf-type').addEventListener('change', (e) => { cf.type = e.target.value; renderCustomFields(); });
+  const cfItem = (el) => {
+    const tr = el.closest('[data-cf],[data-cc]');
+    if (!tr) return null;
+    return tr.dataset.cf !== undefined ? cfLayout().fields[Number(tr.dataset.cf)] : cfLayout().common[Number(tr.dataset.cc)];
+  };
   $('#fields-panel').addEventListener('input', (e) => {
-    const tr = e.target.closest('[data-cf]');
-    if (!tr) return;
-    const f = cfList()[Number(tr.dataset.cf)];
+    const f = cfItem(e.target);
+    if (!f) return;
     const n = e.target.name;
     if (n === 'label') f.label = e.target.value;
-    if (n === 'options') f.options = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
+    if (n === 'options' || n === 'extra_options') f[n] = e.target.value.split(',').map((x) => x.trim()).filter(Boolean);
   });
   $('#fields-panel').addEventListener('change', (e) => {
-    const tr = e.target.closest('[data-cf]');
-    if (!tr) return;
-    const f = cfList()[Number(tr.dataset.cf)];
+    const f = cfItem(e.target);
+    if (!f) return;
     const n = e.target.name;
     if (n === 'kind') { f.kind = e.target.value; if (f.kind === 'choice' && !f.options?.length) f.options = []; renderCustomFields(); }
     if (n === 'by') { f.by = e.target.value; if (f.by === 'driver') { f.sms = false; f.reception = false; } renderCustomFields(); }
     if (n === 'sms' || n === 'reception') f[n] = e.target.checked;
   });
   $('#fields-panel').addEventListener('click', (e) => {
-    const tr = e.target.closest('[data-cf]');
-    const list = cfList();
+    const L = cfLayout();
     if (e.target.id === 'cf-add') {
-      list.push({ label: '', kind: 'text', options: [], by: 'office', sms: true, reception: true, active: true });
+      L.fields.push({ label: '', kind: 'text', options: [], by: 'office', sms: true, reception: true, active: true });
       renderCustomFields();
-      $$('#cf-rows input[name=label]').at(-1)?.focus();
+      $$('#cf-rows tr[data-cf] input[name=label]').filter((el) => !el.value).at(-1)?.focus();
       return;
     }
+    const tr = e.target.closest('[data-cf],[data-cc]');
     if (!tr) return;
-    const i = Number(tr.dataset.cf);
+    const common = tr.dataset.cc !== undefined;
+    const list = common ? L.common : L.fields;
+    const i = Number(common ? tr.dataset.cc : tr.dataset.cf);
+    const f = list[i];
     if (e.target.closest('[data-cf-remove]')) {
-      if (!list[i].key) list.splice(i, 1); else list[i].active = false; // never saved: just drop it
+      if (common) f.hidden = true;
+      else if (!f.key) list.splice(i, 1); // never saved: just drop it
+      else f.active = false;
       renderCustomFields();
     }
-    if (e.target.closest('[data-cf-restore]')) { list[i].active = true; renderCustomFields(); }
+    if (e.target.closest('[data-cf-restore]')) { if (common) f.hidden = false; else f.active = true; renderCustomFields(); }
     const mv = e.target.closest('[data-cf-move]');
-    if (mv) {
-      const live = list.map((f, k) => k).filter((k) => list[k].active !== false);
-      const pos = live.indexOf(i);
-      const j = live[pos + Number(mv.dataset.cfMove)];
+    if (mv && !common) {
+      const same = list.map((x, k) => k).filter((k) => (list[k].by === 'driver') === (f.by === 'driver'));
+      const j = same[same.indexOf(i) + Number(mv.dataset.cfMove)];
       if (j !== undefined) { [list[i], list[j]] = [list[j], list[i]]; renderCustomFields(); }
     }
   });
   $('#cf-save').addEventListener('click', async () => {
-    for (const list of Object.values(cf.data)) {
-      for (let k = list.length - 1; k >= 0; k--) if (!list[k].key && !String(list[k].label || '').trim()) list.splice(k, 1); // empty new rows
+    const body = { common: {} };
+    for (const [type, L] of Object.entries(cf.layout)) {
+      body[type] = L.fields.filter((f) => f.key || String(f.label || '').trim()); // drop empty new rows
+      body.common[type] = L.common;
     }
     try {
-      const out = await api('/settings', { method: 'POST', body: { custom_fields: cf.data } });
-      cf.data = JSON.parse(JSON.stringify(out.custom_fields));
+      const out = await api('/settings', { method: 'POST', body: { custom_fields: body } });
+      cf.layout = JSON.parse(JSON.stringify(out.form_layout));
       window.FORMS.setCustomFields(out.custom_fields);
       reqState.data = out.required_fields || reqState.data;
       requiredCache = null;

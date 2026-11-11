@@ -55,7 +55,7 @@ function cleanFields(fields, input) {
       if (['yes', 'on', 'true', '1'].includes(v.toLowerCase())) out[f.key] = 'Yes';
       continue;
     }
-    if (f.kind === 'choice' && !f.options.includes(v)) throw new ValidationError(`${f.label}: pick one of ${f.options.join(', ')}`);
+    if (f.kind === 'choice' && !f.options.includes(v) && !f.hidden) throw new ValidationError(`${f.label}: pick one of ${f.options.join(', ')}`);
     if (f.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new ValidationError(`${f.label} must be a date`);
     if (f.kind === 'number') {
       const n = Number(v);
@@ -307,34 +307,65 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   async function saveCustomFields(input) {
     const before = FORMS.customFields();
     const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 24) || 'field';
-    const out = {};
+    const splitList = (v) => (Array.isArray(v) ? v : String(v || '').split(/[,\n]/)).map((o) => str(o, 60)).filter(Boolean);
+    const out = { common: {} };
     for (const type of FORMS.TYPE_KEYS) {
-      const list = Array.isArray(input?.[type]) ? input[type].slice(0, 40) : [];
-      const used = new Set(FORMS.typeInfo(type).fields.concat(FORMS.typeInfo(type).report).filter((f) => !f.custom).map((f) => f.key));
+      const builtins = FORMS.layout(type).fields.filter((f) => f.builtin);
+      const list = Array.isArray(input?.[type]) ? input[type].slice(0, 80) : [];
+      const used = new Set();
       const fields = [];
       for (const c of list) {
-        const label = str(c.label, 60);
+        const base = builtins.find((f) => f.key === c?.key);
+        if (base) { // a field the app came with: rename, remove, reorder, extra choices
+          if (used.has(base.key)) continue;
+          used.add(base.key);
+          const extra = base.options ? splitList(c.extra_options).filter((o) => !base.options.includes(o)).slice(0, 20) : [];
+          fields.push({ key: base.key, builtin: true, label: str(c.label, 60) || base.base, active: c.active !== false,
+            sms: base.by === 'driver' ? false : Boolean(c.sms), reception: !base.no_reception && Boolean(c.reception), extra_options: extra });
+          continue;
+        }
+        const label = str(c?.label, 60);
         if (!label) throw new ValidationError('Every field needs a name');
         const kind = FORMS.CUSTOM_KINDS.includes(c.kind) ? c.kind : 'text';
-        const options = kind === 'choice'
-          ? [...new Set((Array.isArray(c.options) ? c.options : String(c.options || '').split(/[,\n]/)).map((o) => str(o, 60)).filter(Boolean))].slice(0, 30) : [];
+        const options = kind === 'choice' ? [...new Set(splitList(c.options))].slice(0, 30) : [];
         if (kind === 'choice' && options.length < 2) throw new ValidationError(`"${label}": a pick-list needs at least two choices`);
+        const taken = (k) => used.has(k) || builtins.some((f) => f.key === k);
         let key = /^x_[a-z0-9_]{1,40}$/.test(String(c.key || '')) ? c.key : '';
-        if (!key) { key = `x_${slug(label)}`; for (let n = 2; used.has(key); n++) key = `x_${slug(label)}_${n}`; }
+        if (!key) { key = `x_${slug(label)}`; for (let n = 2; taken(key); n++) key = `x_${slug(label)}_${n}`; }
         if (used.has(key)) throw new ValidationError(`"${label}" is listed twice`);
         used.add(key);
-        fields.push({ key, label, kind, options, by: c.by === 'driver' ? 'driver' : 'office', sms: Boolean(c.sms), reception: c.by !== 'driver' && Boolean(c.reception),
-          active: c.active !== false });
+        fields.push({ key, label, kind, options, by: c.by === 'driver' ? 'driver' : 'office', sms: c.by !== 'driver' && Boolean(c.sms),
+          reception: c.by !== 'driver' && Boolean(c.reception), active: c.active !== false });
       }
-      // A field left out entirely is kept, switched off, so old work orders still show what was filled in.
-      for (const old of before[type] || []) if (!used.has(old.key)) fields.push({ ...old, active: false });
+      // Left out entirely: built-in fields keep their place at the end; added fields are kept, switched off,
+      // so old work orders still show what was filled in.
+      for (const f of builtins) if (!used.has(f.key)) fields.push({ key: f.key, builtin: true, label: f.label, active: f.active, sms: f.sms, reception: f.reception, extra_options: f.extra_options });
+      for (const old of before[type] || []) if (!used.has(old.key) && !old.builtin && /^x_/.test(old.key)) fields.push({ ...old, active: false });
       out[type] = fields;
+
+      // The boxes every work order has: rename, or remove the ones that aren't needed for dispatch or prices.
+      const cin = input?.common?.[type];
+      const cmn = {};
+      for (const c of FORMS.commonFields(type)) {
+        const given = Array.isArray(cin) ? cin.find((x) => x?.key === c.key) : cin?.[c.key];
+        const prev = before.common?.[type]?.[c.key];
+        const src = given || prev;
+        if (!src) continue;
+        const label = str(src.label, 60);
+        const entry = {};
+        if (label && label !== c.base) entry.label = label;
+        if (!c.lock && src.hidden) entry.hidden = true;
+        if (Object.keys(entry).length) cmn[c.key] = entry;
+      }
+      out.common[type] = cmn;
     }
     await setSetting('custom_fields', JSON.stringify(out));
     FORMS.setCustomFields(out);
     reqCache = null;
     return out;
   }
+  /** Everything Setup → Work order fields shows, per type. */
+  const formLayout = () => Object.fromEntries(FORMS.TYPE_KEYS.map((k) => [k, FORMS.layout(k)]));
 
   // ---------- required fields (Setup → Required fields) ----------
   const DEFAULT_REQUIRED = Object.fromEntries(FORMS.TYPE_KEYS.map((k) => [k, FORMS.typeInfo(k).noPricing ? ['to_location', 'material']
@@ -986,6 +1017,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       septic_reminder_years: await getSetting('septic_reminder_years', '3'),
       required_fields: await requiredFields(),
       custom_fields: FORMS.customFields(),
+      form_layout: formLayout(),
     };
   }
 

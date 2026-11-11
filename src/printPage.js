@@ -36,6 +36,12 @@ function renderSheet(job) {
   const d = job.details || {};
   const c = config.company;
   const created = fmtStamp(job.created_at).split(',').slice(0, 2).join(',');
+  // The boxes on every work order, as named in Setup; removed ones print only if filled in.
+  const renamed = (key, dflt) => { const c = FORMS.commonFields(job.job_type).find((x) => x.key === key); return c && c.label !== c.base ? c.label : dflt; };
+  const box = (key, dflt, value, cls = '') => (FORMS.commonHidden(job.job_type, key) && FORMS.isEmpty(value) ? ''
+    : line(renamed(key, dflt), value, cls));
+  const fl = (key, dflt) => (t.fields.find((f) => f.key === key) || {}).label || dflt;
+  const off = (key) => (t.fields.find((f) => f.key === key) || {}).hidden && FORMS.isEmpty(d[key]);
   const toilets = job.job_type === 'toilet' ? [1, 2, 3].map((i) => `
       <div class="ln half"><span class="lb">Type of toilet:</span><span class="val">${esc(d[`toilet${i}_type`])}</span></div>
       <div class="ln half"><span class="lb">How many:</span><span class="val">${esc(d[`toilet${i}_qty`])}</span></div>`).join('') : '';
@@ -50,8 +56,13 @@ function renderSheet(job) {
   const aggregateRows = job.job_type === 'haul' ? haulOptions + [
     [job.material, d.truck, job.loads_planned, job.quantity],
     [d.aggregate2_type, d.aggregate2_truck, d.aggregate2_loads, d.aggregate2_yards],
-  ].map(([type, truck, loads, yards]) => half('Aggregate type', type) + circled('Circle one', trucks, truck) +
-    half('# of loads', loads) + half('OR # of yards', yards)).join('<div class="sep"></div>') : '';
+  ].map(([type, truck, loads, yards], i) => {
+    if (i === 1 && ['aggregate2_type', 'aggregate2_truck', 'aggregate2_loads', 'aggregate2_yards'].every(off)) return '';
+    const k = i ? 'aggregate2_' : '';
+    return half(i ? fl('aggregate2_type', 'Aggregate type') : t.what || 'Aggregate type', type)
+      + circled(fl(i ? 'aggregate2_truck' : 'truck', 'Circle one'), (t.fields.find((f) => f.key === (i ? 'aggregate2_truck' : 'truck')) || {}).options || trucks, truck)
+      + half(i ? fl(k + 'loads', '# of loads') : t.loadsLabel || '# of loads', loads) + half(i ? fl(k + 'yards', 'OR # of yards') : t.quantityLabel || 'OR # of yards', yards);
+  }).filter(Boolean).join('<div class="sep"></div>') : '';
 
   const reports = job.assignments.filter((a) => a.report && Object.keys(a.report).length);
   const reportHtml = reports.map((a) => {
@@ -93,19 +104,21 @@ function renderSheet(job) {
 
   <section class="grid2">
     <div>
-      ${line('Name', job.customer)}
-      ${line('Billing / mailing address', job.billing_address, 'wide')}
-      ${line('Phone #', sms.prettyPhone(job.customer_phone))}
-      ${line('Email', job.customer_email)}
-      ${line('PO #', job.po_number)}
+      ${box('customer', 'Name', job.customer)}
+      ${box('billing_address', 'Billing / mailing address', job.billing_address, 'wide')}
+      ${box('customer_phone', 'Phone #', sms.prettyPhone(job.customer_phone))}
+      ${box('customer_email', 'Email', job.customer_email)}
+      ${box('po_number', 'PO #', job.po_number)}
     </div>
     <div>
       ${line('Date', created)}
       ${line(job.job_type === 'septic' ? 'Pump-out date' : 'Delivery date', sms.formatDate(job.scheduled_date))}
       ${line('Time', sms.formatJobTime(job) || 'Any time')}
       ${line(FORMS.labels(job).to, job.to_location, 'wide')}
-      ${line('Municipality', job.municipality)}
-      ${line('Site contact name / phone #', [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' / '))}
+      ${box('municipality', 'Municipality', job.municipality)}
+      ${FORMS.commonHidden(job.job_type, 'contact_name') && FORMS.commonHidden(job.job_type, 'contact_phone') && !job.contact_name && !job.contact_phone ? ''
+    : line([renamed('contact_name', 'Site contact name'), renamed('contact_phone', 'phone #')].join(' / '),
+      [job.contact_name, sms.prettyPhone(job.contact_phone)].filter(Boolean).join(' / '))}
     </div>
   </section>
 
@@ -117,7 +130,7 @@ function renderSheet(job) {
     ${FORMS.labels(job).from ? line(FORMS.labels(job).from, job.from_location, 'wide') : ''}
     ${toilets}
     ${typeFields}
-    ${line('Special instructions', job.notes, 'wide tall')}
+    ${box('notes', 'Special instructions', job.notes, 'wide tall')}
     ${line('Driver / truck', drivers, 'wide')}
   </section>
 
