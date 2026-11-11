@@ -213,7 +213,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 
   api.get('/me', (req, res) => res.json({ user: req.user, can: permissions(req.user), smsEnabled: config.smsEnabled, today: dispatch.today(),
     maps: { key: config.maps.key, mapId: config.maps.mapId, yard: config.maps.yard, distance: Boolean(config.maps.serverKey) },
-    owner_email: config.ownerEmail }));
+    owner_email: config.ownerEmail, custom_fields: require('../public/forms').customFields() }));
 
   // ---------- price book ----------
   api.get('/prices', json(async () => ({
@@ -571,6 +571,7 @@ async function main() {
   console.log(db.kind === 'pg' ? 'Database: PostgreSQL (DATABASE_URL)' : `Database: SQLite file ${config.dbPath}`);
   await auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
+  await dispatch.loadCustomFields();
   const priced = await dispatch.prices.seed();
   if (priced) console.log(`Price book: loaded ${priced} prices from the price sheets.`);
   const linked = await dispatch.customers.backfill();

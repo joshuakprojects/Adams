@@ -72,12 +72,12 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
     .map((f) => row(f.label, f.kind === 'date' ? sms.formatDate(d[f.key]) : d[f.key])).join('');
 
   // After-job report: the form's own questions (septic conditions) and notes. Payments are handled by the office.
-  const fields = reportFields(job.job_type);
-  const typeReport = t.report.length > 0;
+  const fields = reportFields(job.job_type).filter((f) => !f.hidden);
+  const typeReport = t.report.some((f) => !f.hidden);
   const r = a.report || {};
   const reportForm = cancelled ? '' : `
     <form method="post" action="/j/${esc(a.token)}/report" id="report" class="report ${typeReport ? '' : 'compact'}">
-      <h2>${esc(t.reportTitle || 'Notes for the office')}</h2>
+      <h2>${esc(t.reportTitle || (typeReport ? 'After the job' : 'Notes for the office'))}</h2>
       ${saved ? '<div class="banner saved">✔ Saved — thanks!</div>' : ''}
       ${fields.map((f) => fieldInput(f, r[f.key])).join('')}
       <button class="btn primary" type="submit">Save${typeReport ? ' report' : ''}</button>

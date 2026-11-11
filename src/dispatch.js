@@ -298,6 +298,44 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     return out;
   }
 
+  // ---------- fields added by admins (Setup → Work order fields) ----------
+  async function loadCustomFields() {
+    const row = await db.get("SELECT value FROM settings WHERE key = 'custom_fields'");
+    FORMS.setCustomFields(row ? parseJson(row.value) : {});
+    return FORMS.customFields();
+  }
+  async function saveCustomFields(input) {
+    const before = FORMS.customFields();
+    const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 24) || 'field';
+    const out = {};
+    for (const type of FORMS.TYPE_KEYS) {
+      const list = Array.isArray(input?.[type]) ? input[type].slice(0, 40) : [];
+      const used = new Set(FORMS.typeInfo(type).fields.concat(FORMS.typeInfo(type).report).filter((f) => !f.custom).map((f) => f.key));
+      const fields = [];
+      for (const c of list) {
+        const label = str(c.label, 60);
+        if (!label) throw new ValidationError('Every field needs a name');
+        const kind = FORMS.CUSTOM_KINDS.includes(c.kind) ? c.kind : 'text';
+        const options = kind === 'choice'
+          ? [...new Set((Array.isArray(c.options) ? c.options : String(c.options || '').split(/[,\n]/)).map((o) => str(o, 60)).filter(Boolean))].slice(0, 30) : [];
+        if (kind === 'choice' && options.length < 2) throw new ValidationError(`"${label}": a pick-list needs at least two choices`);
+        let key = /^x_[a-z0-9_]{1,40}$/.test(String(c.key || '')) ? c.key : '';
+        if (!key) { key = `x_${slug(label)}`; for (let n = 2; used.has(key); n++) key = `x_${slug(label)}_${n}`; }
+        if (used.has(key)) throw new ValidationError(`"${label}" is listed twice`);
+        used.add(key);
+        fields.push({ key, label, kind, options, by: c.by === 'driver' ? 'driver' : 'office', sms: Boolean(c.sms), reception: c.by !== 'driver' && Boolean(c.reception),
+          active: c.active !== false });
+      }
+      // A field left out entirely is kept, switched off, so old work orders still show what was filled in.
+      for (const old of before[type] || []) if (!used.has(old.key)) fields.push({ ...old, active: false });
+      out[type] = fields;
+    }
+    await setSetting('custom_fields', JSON.stringify(out));
+    FORMS.setCustomFields(out);
+    reqCache = null;
+    return out;
+  }
+
   // ---------- required fields (Setup → Required fields) ----------
   const DEFAULT_REQUIRED = Object.fromEntries(FORMS.TYPE_KEYS.map((k) => [k, FORMS.typeInfo(k).noPricing ? ['to_location', 'material']
     : ['customer', 'customer_phone', 'to_location']]));
@@ -462,6 +500,14 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (id) {
         const before = await t.get('SELECT * FROM jobs WHERE id = ?', id);
         if (!before) throw new ValidationError('Job not found');
+        // Fields an admin has since removed aren't on the form any more: keep what was filled in.
+        const hiddenKeys = FORMS.typeInfo(fields.job_type).fields.filter((f) => f.hidden).map((f) => f.key);
+        if (hiddenKeys.length) {
+          const old = parseJson(before.details);
+          const now = parseJson(fields.details);
+          for (const k of hiddenKeys) if (old[k] !== undefined && now[k] === undefined) now[k] = old[k];
+          fields.details = JSON.stringify(now);
+        }
         const changed = JOB_FIELDS.some((f) => !OFFICE_ONLY.has(f) && String(before[f] ?? '') !== String(fields[f] ?? ''));
         for (const f of JOB_FIELDS) {
           if (['customer_id', 'distance_from', 'distance_mode', 'in_town', 'price_options', 'scheduled_time', 'first_thing', 'draft'].includes(f)) continue;
@@ -663,6 +709,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     const a = await assignmentByToken(token);
     if (!a) throw new ValidationError('Job not found');
     const report = cleanFields(reportFields(a.job.job_type), data);
+    for (const f of reportFields(a.job.job_type)) if (f.hidden && a.report?.[f.key] !== undefined) report[f.key] = a.report[f.key];
     await db.run(`UPDATE assignments SET report = ?, report_at = datetime('now'),
          ack_at = COALESCE(ack_at, datetime('now')), ack_via = COALESCE(ack_via, ?),
          status = CASE WHEN status IN ('pending','sent') THEN 'acknowledged' ELSE status END
@@ -938,6 +985,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       lineup_time: await getSetting('lineup_time', config.lineupTime || ''),
       septic_reminder_years: await getSetting('septic_reminder_years', '3'),
       required_fields: await requiredFields(),
+      custom_fields: FORMS.customFields(),
     };
   }
 
@@ -947,6 +995,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new ValidationError('Time must look like 17:00');
       await setSetting('lineup_time', t);
     }
+    if ('custom_fields' in data) await saveCustomFields(data.custom_fields);
     if ('required_fields' in data) await saveRequiredFields(data.required_fields);
     if ('septic_reminder_years' in data) {
       const y = Number(data.septic_reminder_years);
@@ -1127,7 +1176,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
     assignmentByToken, otherJobsForDriver, driverAction, handleInbound,
     saveReport, bookPickup, reportFields, findJobs, moveJob, logHistory, historyFor, customers, setJobLocation, geo, prices, onChange,
     saveTicket, getTicket, ticketsForAssignment, attachTicket, deleteTicket,
-    getSettings, saveSettings, requiredFields, calendar, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
+    getSettings, saveSettings, requiredFields, calendar, loadCustomFields, lineupFor, lineupStatus, sendLineup, runScheduledLineup,
     listMessages, markMessagesSeen, board, suggestions, today,
   };
 }

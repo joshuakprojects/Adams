@@ -129,6 +129,19 @@
       <p class="muted small">Drivers who already got their day by text are only texted again if a job was added or changed.
         You can also send it any time with the "Text drivers their day" button on the board.</p>
     </div>
+    <div class="panel settings" id="fields-panel" data-need="admin">
+      <h2>Work order fields</h2>
+      <p class="muted small">Add your own questions to a work order type. <b>Office</b> fields are filled in on the work order
+        (tick <b>On reception</b> to show them on the reception screen too, and <b>In the driver's text</b> to text them to the
+        driver). <b>Driver</b> fields are filled in by the driver on their phone after the job. Make a field required under
+        <b>Required fields</b> below. Removing a field hides it; work orders that already have it keep what was filled in.</p>
+      <div class="segmented small-seg" id="cf-type"></div>
+      <table class="table compact cf-table"><thead><tr><th>Field</th><th>Kind</th><th>Filled in by</th><th class="c">In the driver's text</th>
+        <th class="c">On reception</th><th></th></tr></thead><tbody id="cf-rows"></tbody></table>
+      <div id="cf-removed"></div>
+      <div class="row-actions"><button class="btn" type="button" id="cf-add">+ Add a field</button>
+        <button class="btn primary" type="button" id="cf-save">Save fields</button></div>
+    </div>
     <div class="panel settings" id="required-panel">
       <h2>Required fields</h2>
       <p class="muted small">Tick what must be filled in before a work order can be saved. Staff can still <b>Save as draft</b>

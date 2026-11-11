@@ -38,7 +38,7 @@
 
   function freshCall() {
     return { step: 1, svc: '', f: { truck: 'Triaxle', qty: 1, trip: 'Deliver', period: 'week', service: 'Deliver bin', waste: 'mixed' },
-      addr: { to_location: '', municipality: '' }, dist: {}, distError: '', distBusy: false, pin: null,
+      addr: { to_location: '', municipality: '' }, dist: {}, distError: '', distBusy: false, pin: null, x: {},
       cust: { phone: '', name: '', email: '', billing_address: '', customer_id: '' }, match: null,
       day: '', slot: '', notes: '', editId: null, quoteId: null, existing: null, error: '', missing: null };
   }
@@ -227,6 +227,11 @@
     } else {
       Object.assign(j, { job_type: 'misc', material: f.what || '' });
     }
+    // Details fields for this type (only the ones still shown on reception, so a changed service doesn't carry stray answers).
+    for (const f of receptionFields(W.svc)) {
+      if (W.x[f.key] !== undefined && String(W.x[f.key]).trim() !== '') details[f.key] = String(W.x[f.key]).trim();
+      else delete details[f.key];
+    }
     j.details = details;
     if (W.pin) { j.pin_lat = W.pin.lat; j.pin_lng = W.pin.lng; }
     return j;
@@ -296,7 +301,28 @@
     } else if (W.svc === 'other') {
       more = `<div class="rc-label">What do they need?</div><textarea class="rc-input" rows="3" data-text="what" placeholder="e.g. float the excavator to Seguin, haul away old asphalt">${esc(f.what || '')}</textarea>`;
     }
-    return `<h2 class="rc-h2">What does the caller need?</h2>${tiles}${more}`;
+    return `<h2 class="rc-h2">What does the caller need?</h2>${tiles}${more}${detailsFields()}`;
+  }
+
+  // Fields admins added and set to show on reception (Setup → Work order fields).
+  const jobTypeOf = (svc) => (svc === 'water' || svc === 'other' ? 'misc' : svc);
+  function receptionFields(svc) {
+    if (!svc) return [];
+    return window.FORMS.typeInfo(jobTypeOf(svc)).fields.filter((f) => f.custom && f.reception && !f.hidden);
+  }
+  function detailsFields() {
+    const list = receptionFields(W.svc);
+    if (!list.length) return '';
+    const v = (k) => W.x[k] ?? '';
+    return `<div class="rc-label" style="margin-top:20px">Details</div><div class="rc-xfields">${list.map((f) => {
+      if (f.kind === 'choice') {
+        return `<div class="rc-xf"><span class="rc-xl">${esc(f.label)}</span><div class="rc-chips">${f.options.map((o) =>
+          `<button type="button" class="rc-chip ${v(f.key) === o ? 'on' : ''}" data-xset="${esc(f.key)}" data-val="${esc(o)}">${esc(o)}</button>`).join('')}</div></div>`;
+      }
+      if (f.kind === 'textarea') return `<label class="rc-xf wide"><span class="rc-xl">${esc(f.label)}</span><textarea class="rc-input" rows="2" data-xf="${esc(f.key)}">${esc(v(f.key))}</textarea></label>`;
+      const type = f.kind === 'number' ? 'number' : f.kind === 'date' ? 'date' : 'text';
+      return `<label class="rc-xf"><span class="rc-xl">${esc(f.label)}</span><input class="rc-input" type="${type}" data-xf="${esc(f.key)}" value="${esc(v(f.key))}"></label>`;
+    }).join('')}</div>`;
   }
 
   function whereSection() {
@@ -466,6 +492,7 @@
     }));
     $('[data-text=what]', r)?.addEventListener('input', (e) => { W.f.what = e.target.value; });
     $('[data-text-notes]', r)?.addEventListener('input', (e) => { W.notes = e.target.value; });
+    $$('[data-xf]', r).forEach((el) => el.addEventListener('input', () => { W.x[el.dataset.xf] = el.value; }));
     $('[data-pick-date]', r)?.addEventListener('change', (e) => { if (e.target.value) { W.day = e.target.value; renderCall(); } });
     $('[data-set-select]', r)?.addEventListener('change', (e) => { if (e.target.value) { W.f.material = e.target.value; renderCall(); } });
     $('#rc-ask-side', r)?.addEventListener('input', (e) => { $('#rc-ask-side-out').innerHTML = answersHtml(e.target.value, W.svc); });
@@ -563,6 +590,7 @@
     if (W.svc === 'toilet') Object.assign(W.f, { toilet: d.toilet1_type, qty: Number(d.toilet1_qty) || 1, trip: d.trip || 'Deliver', period: po.period || 'week', off: po.off_schedule });
     if (W.svc === 'water') W.f.qty = Number(job.loads_planned) || 1;
     if (W.svc === 'other') W.f.what = job.material;
+    W.x = Object.fromEntries(Object.entries(d).filter(([k]) => k.startsWith('x_')));
     W.addr = { to_location: job.to_location || '', municipality: job.municipality || '' };
     W.dist = job.distance_km != null ? { km: job.distance_km, in_town: job.in_town, from: job.distance_from, mode: job.distance_mode } : {};
     W.cust = { phone: A.prettyPhone(job.customer_phone || ''), name: job.customer || '', email: job.customer_email || '', billing_address: job.billing_address || '', customer_id: job.customer_id || '' };
@@ -585,6 +613,7 @@
     W = freshCall();
     W.svc = j._svc || '';
     W.f = { ...W.f, ...(j._f || {}) };
+    W.x = Object.fromEntries(Object.entries(j.details || {}).filter(([k]) => k.startsWith('x_')));
     W.dist = j._dist || {};
     W.pin = j._pin || null;
     W.addr = { to_location: j.to_location || '', municipality: j.municipality || '' };
@@ -597,10 +626,11 @@
   // One click handler for the whole reception view.
   document.addEventListener('click', async (e) => {
     if (!document.body.classList.contains('reception')) return;
-    const el = e.target.closest('[data-go],[data-mode],[data-svc],[data-set],[data-step],[data-day],[data-next],[data-back],[data-step-to],[data-book],[data-draft],[data-save-quote],[data-pin],[data-use-match],[data-quote],[data-drop-quote],[data-edit],[data-cancel],[data-again],[data-cust-jobs],[data-call-for],[data-find-back]');
+    const el = e.target.closest('[data-xset],[data-go],[data-mode],[data-svc],[data-set],[data-step],[data-day],[data-next],[data-back],[data-step-to],[data-book],[data-draft],[data-save-quote],[data-pin],[data-use-match],[data-quote],[data-drop-quote],[data-edit],[data-cancel],[data-again],[data-cust-jobs],[data-call-for],[data-find-back]');
     if (!el || !root().contains(el)) return;
     const ds = el.dataset;
     try {
+      if (ds.xset) { W.x[ds.xset] = W.x[ds.xset] === ds.val ? '' : ds.val; return renderCall(); }
       if (ds.go) return go(ds.go);
       if (ds.mode) { store.set('mode', ds.mode); return renderCall(); }
       if (ds.svc) { W.svc = ds.svc; W.error = ''; if (ds.svc === 'haul' && !W.f.material) W.f.material = ''; return renderCall(); }

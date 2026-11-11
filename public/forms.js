@@ -172,6 +172,31 @@
   };
 
   const TYPE_KEYS = Object.keys(TYPES);
+
+  // ---------- fields added by admins (Setup → Work order fields) ----------
+  // { haul: [{ key, label, kind, options, by: 'office'|'driver', sms, reception, active }], … }
+  // Office fields join the form; driver fields join the after-job report. A removed field (active: false) is hidden
+  // from forms but its values stay on old work orders, and still print.
+  const CUSTOM_KINDS = ['text', 'textarea', 'number', 'yesno', 'choice', 'date'];
+  const BUILTIN = Object.fromEntries(TYPE_KEYS.map((k) => [k, { fields: TYPES[k].fields.slice(), report: TYPES[k].report.slice() }]));
+  let custom = {};
+  function customToField(c) {
+    const f = { key: c.key, label: c.label, custom: true, hidden: c.active === false, sms: Boolean(c.sms), reception: Boolean(c.reception),
+      by: c.by === 'driver' ? 'driver' : 'office' };
+    if (c.kind === 'yesno') return { ...f, kind: 'choice', options: ['Yes', 'No'] };
+    if (c.kind === 'choice') return { ...f, kind: 'choice', options: (c.options || []).filter(Boolean) };
+    if (c.kind === 'textarea') return { ...f, kind: 'textarea', wide: true };
+    return { ...f, kind: CUSTOM_KINDS.includes(c.kind) ? c.kind : 'text', wide: c.kind === 'text' };
+  }
+  function setCustomFields(cfg) {
+    custom = cfg && typeof cfg === 'object' ? cfg : {};
+    for (const k of TYPE_KEYS) {
+      const list = Array.isArray(custom[k]) ? custom[k] : [];
+      TYPES[k].fields = [...BUILTIN[k].fields, ...list.filter((c) => c.by !== 'driver').map(customToField)];
+      TYPES[k].report = [...BUILTIN[k].report, ...list.filter((c) => c.by === 'driver').map(customToField)];
+    }
+  }
+  const customFields = () => custom;
   const TOILET_TYPES = ['Standard', 'Deluxe', 'Wheelchair accessible', 'Hand wash station', 'Flushing'];
   const PAYMENT_METHODS = ['Cash', 'Debit', 'Visa/MC', 'Cheque', 'On account'];
   // Truck kinds, so drivers whose usual truck fits the job type are listed first.
@@ -272,7 +297,7 @@
     const d = parseDetails(job);
     const out = [];
     for (const f of t.fields) {
-      if (!f.sms) continue;
+      if (!f.sms || f.hidden) continue;
       if (/^toilet\d_/.test(f.key)) continue;
       if (['service', 'trip', 'tank_type', 'tank_size', 'truck', 'direction', 'until_stop'].includes(f.key) || /^aggregate2_/.test(f.key)) continue; // already in the summary line
       if (!isEmpty(d[f.key])) out.push([f.label, d[f.key]]);
@@ -307,7 +332,7 @@
     if (t.loads) out.push({ key: 'loads_planned', label: t.quantity ? `${t.loadsLabel || '# of loads'} (or yards)` : (t.loadsLabel || '# of loads') });
     if (t.from) out.push({ key: 'from_location', label: t.from });
     out.push({ key: 'notes', label: 'Special instructions' }, { key: 'payment_method', label: 'Payment method' }, { key: 'paper_wo', label: 'Paper W.O. #' });
-    for (const f of t.fields) if (f.kind !== 'check') out.push({ key: 'd.' + f.key, label: f.label === 'Circle one' ? `${f.label} (${f.options.join(' / ')})` : f.label });
+    for (const f of t.fields) if (f.kind !== 'check' && !f.hidden) out.push({ key: 'd.' + f.key, label: f.label === 'Circle one' ? `${f.label} (${f.options.join(' / ')})` : f.label });
     return out;
   }
 
@@ -327,5 +352,5 @@
     return (keys || []).filter((k) => !has(k)).map((k) => all.find((f) => f.key === k) || { key: k, label: k });
   }
 
-  return { TIME_SLOTS, slotLabel, requirable, missingRequired, TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
+  return { setCustomFields, customFields, CUSTOM_KINDS, TIME_SLOTS, slotLabel, requirable, missingRequired, TYPES, TYPE_KEYS, TOILET_TYPES, PAYMENT_METHODS, totalLoads, isHaulAway, labels, driverInstructions, aggregateLine, TRUCK_KINDS, YES_NO, typeInfo, parseDetails, summary, smsLines, toiletSummary, isEmpty };
 });
