@@ -246,7 +246,7 @@ test('price book: everyone reads, admins edit, changes logged, old jobs keep the
   const list = (await office('GET', '/prices')).body;
   const base = list.items.find((i) => i.key === 'septic.base');
   assert.equal(base.price, 395.57);
-  assert.equal(list.settings.start_address, '116 William St, Parry Sound, ON P2A 1V4');
+  assert.equal(list.settings.start_address, '116 William St, Parry Sound, ON P2A 1V8');
   const job = (await runAs('Josh', () => d.saveJob({ job_type: 'septic', scheduled_date: '2026-11-12', customer: 'Old price',
     lines: [{ item_key: 'septic.base', description: base.name, qty: 1, unit_price: base.price, taxable: 1 }] }))).job;
 

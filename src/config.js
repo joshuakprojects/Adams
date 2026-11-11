@@ -20,7 +20,7 @@ module.exports = {
   // Printed on work orders, as on the paper forms.
   company: {
     legalName: env.COMPANY_LEGAL_NAME || 'Adams Bros. Construction Ltd.',
-    address: env.COMPANY_ADDRESS || '116 William St., P.O. Box 324, Parry Sound, ON  P2A 2X4',
+    address: env.COMPANY_ADDRESS || '116 William St., Parry Sound, ON  P2A 1V8',
     phone: env.COMPANY_PHONE || '(705) 746-2962',
     email: env.COMPANY_EMAIL || 'info@adamsbros.ca',
     website: env.COMPANY_WEBSITE || 'www.adamsbros.ca',
@@ -33,7 +33,7 @@ module.exports = {
     // website-restricted keys from a server, so this one is restricted by API instead.
     serverKey: env.GOOGLE_MAPS_SERVER_KEY || '',
     mapId: env.GOOGLE_MAPS_MAP_ID || 'DEMO_MAP_ID',
-    yard: env.YARD_ADDRESS || '116 William St, Parry Sound, ON P2A 1V4',
+    yard: env.YARD_ADDRESS || '116 William St, Parry Sound, ON P2A 1V8',
   },
   dispatchPhone: env.DISPATCH_PHONE || '+17057462962',
   twilio: {
