@@ -427,7 +427,8 @@
       body = fieldHtml('pm-name', 'Name', `<input id="pm-name" value="${v('name')}" placeholder="e.g. Cat 308">`)
         + fieldHtml('pm-kind', 'Kind', `<input id="pm-kind" value="${v('kind')}" list="dl-pm-kinds" placeholder="Excavator"><datalist id="dl-pm-kinds">${['Excavator', 'Mini excavator', 'Loader', 'Skid steer', 'Dozer', 'Roller', 'Grader'].map((k) => `<option value="${k}">`).join('')}</datalist>`, 'What site heads call it when they ask ("mini ex", "loader").')
         + fieldHtml('pm-unit', 'Unit #', `<input id="pm-unit" value="${v('unit')}" placeholder="EX-3">`, 'The number or code on the machine, if it has one.')
-        + (item ? fieldHtml('pm-where', 'Where it is now', `<select id="pm-where"><option value="">The yard</option>${d.sites.filter((s) => s.active || s.id === loc).map((s) => `<option value="${s.id}" ${s.id === loc ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`, 'Changing this makes no float. Use it when starting out, or if it was moved without the app.') : '')
+        + fieldHtml('pm-where', 'Where it is now', `<select id="pm-where"><option value="">The yard</option>${d.sites.filter((s) => s.active || s.id === loc).map((s) => `<option value="${s.id}" ${s.id === loc ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`,
+          item ? 'Changing this makes no float. Use it if the machine was moved without the app.' : 'Where the machine is today. No float is made; from now on the app keeps track as it moves.')
         + switchHtml('pm-shop', 'In the shop', item?.in_shop)
         + switchHtml('pm-active', 'In use', item ? item.active : true);
     }
@@ -443,8 +444,8 @@
         if (kind === 'site') await api('/sites/sites', { method: 'POST', body: { id: item?.id, name: val('ps-name'), address: val('ps-address'), municipality: val('ps-muni'), head_id: val('ps-head') || null, active: chk('ps-active') } });
         if (kind === 'machine') {
           const saved = await api('/sites/equipment', { method: 'POST', body: { id: item?.id, name: val('pm-name'), kind: val('pm-kind'), unit: val('pm-unit'), in_shop: chk('pm-shop'), active: chk('pm-active') } });
-          const where = item ? val('pm-where') : '';
-          if (item && String(where) !== String(d.locations?.[item.id]?.site_id || '')) await api(`/sites/equipment/${saved.id}/place`, { method: 'POST', body: { site_id: where || null } });
+          const where = val('pm-where');
+          if (String(where) !== String((item && d.locations?.[item.id]?.site_id) || '')) await api(`/sites/equipment/${saved.id}/place`, { method: 'POST', body: { site_id: where || null } });
         }
         toast('Saved ✓');
         await reloadParts();
