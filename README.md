@@ -451,6 +451,24 @@ Run the dispatch app as its own Replit project, next to the website, on a subdom
 For the demo, add yourself (and your boss) as drivers with your real cell numbers and assign them a job; the sample drivers
 have made-up 555 numbers that never receive texts.
 
+### Updating on Replit (never lose data)
+
+In the project's **Shell**, run this one line, then click **Republish**:
+
+```
+npm run update
+```
+
+It downloads the latest version and brings the editor's (development) database up to date. That matters because
+**Publish makes the live database match the editor's database**: if the editor's database is missing a newer table,
+Publish offers to *delete* it from the live database. (The project also does this every time it starts, as a backstop.)
+
+On the Publish screen, the database changes should only **add** tables or columns. **If it ever lists a DROP, cancel
+the publish** and run `npm run db:sync` in the Shell first.
+
+If data was lost that way: Setup → Backups (owner) → pick an hourly backup from before → **Restore only Our sites…**
+puts back the site heads, sites, equipment and site requests without touching anything else (a safety copy is saved first).
+
 ### Database on Replit (keeps data permanently)
 
 Replit doesn't keep files across republishes, so on Replit the app stores everything, ticket photos included, in

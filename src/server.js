@@ -446,7 +446,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.post('/backups/restore', needOwner, json(async (req) => {
     if (!backups) throw new ValidationError('Backups are off');
     if (req.body?.confirm !== 'RESTORE') throw new ValidationError('Type RESTORE to confirm');
-    return afterRestore(req, await backups.restoreNow({ target: req.body.target, name: req.body.name }));
+    return afterRestore(req, await backups.restoreNow({ target: req.body.target, name: req.body.name, only: req.body.only === 'sites' ? 'sites' : '' }));
   }));
   api.post('/backups/restore-upload', needOwner, h(async (req, res) => {
     if (!backups) throw new ValidationError('Backups are off');

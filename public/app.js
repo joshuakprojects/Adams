@@ -1735,6 +1735,22 @@
       + `${out.photos} photos.${out.safety ? '\n\nThe safety copy from just before is in the list, if you need to undo this.' : ''}\n\nPlease log in again.`);
     location.href = '/login';
   }
+  // Only the Our sites data (site heads, sites, equipment, requests): everything else stays as it is now.
+  $('#restore-sites').addEventListener('click', async (e) => {
+    const v = $('#restore-pick').value;
+    if (!v) return toast('Pick a backup first');
+    const [target, name] = v.split('|');
+    const typed = prompt(`Put back the Our sites data (site heads, sites, equipment, requests) from ${$('#restore-pick').selectedOptions[0].textContent}?\n\n`
+      + 'Work orders, drivers, customers and everything else stay exactly as they are now. A safety copy is saved first.\n\nType RESTORE to go ahead:');
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== 'RESTORE') return toast('Not restored — you need to type RESTORE');
+    e.target.disabled = true;
+    try {
+      const out = await api('/backups/restore', { method: 'POST', body: { target, name, confirm: 'RESTORE', only: 'sites' } });
+      alert(`Put back ${out.counts.site_heads ?? 0} site heads, ${out.counts.sites ?? 0} sites and ${out.counts.equipment ?? 0} machines.`);
+      showTab('sites');
+    } catch (err) { toast(err.message); } finally { e.target.disabled = false; }
+  });
   $('#restore-go').addEventListener('click', async (e) => {
     const v = $('#restore-pick').value;
     if (!v) return toast('Pick a backup first');

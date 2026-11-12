@@ -15,6 +15,8 @@
     "twilio": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/twilio.js",
     "test": "node --experimental-sqlite --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
     "test:pg": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgres://localhost/dispatch_test} npm test",
+    "update": "git fetch origin main && git reset --hard FETCH_HEAD && npm install --silent --no-audit --no-fund && npm run db:sync",
+    "db:sync": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/db-sync.js",
     "restore": "node --experimental-sqlite --disable-warning=ExperimentalWarning scripts/restore.js"
   },
   "dependencies": {

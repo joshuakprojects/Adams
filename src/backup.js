@@ -141,6 +141,43 @@ const gunzipJson = (buf) => {
  * Load a backup into an empty database (same or newer version of the app).
  * photoFor(ticketId) → Buffer|null fills in the ticket photos.
  */
+// "Our sites" data, which can be put back on its own (e.g. after the tables were dropped by a Replit publish).
+const SITE_TABLES = ['site_heads', 'sites', 'equipment', 'site_days', 'job_equipment', 'equipment_moves'];
+
+/** Put back only the "Our sites" tables from a backup, leaving everything else as it is now. */
+async function restoreSites(db, backup) {
+  const inBackup = SITE_TABLES.filter((n) => Array.isArray(backup.tables[n]));
+  if (!inBackup.includes('sites')) throw Object.assign(new Error('That backup was made before Our sites existed: pick a later one'), { status: 400 });
+  const counts = {};
+  const jobIds = new Set((await db.all('SELECT id FROM jobs')).map((r) => Number(r.id)));
+  await db.tx(async (t) => {
+    for (const name of [...inBackup].reverse()) await t.run(`DELETE FROM ${name}`);
+    for (const name of inBackup) {
+      let rows = backup.tables[name] || [];
+      // Machines on work orders that have since been deleted are skipped.
+      if (name === 'job_equipment') rows = rows.filter((r) => jobIds.has(Number(r.job_id)));
+      for (const row of rows) {
+        const cols = Object.keys(row);
+        if (!cols.length) continue;
+        await t.run(`INSERT INTO ${name} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, ...cols.map((c) => row[c]));
+      }
+      counts[name] = rows.length;
+    }
+    // Which work orders belonged to which site.
+    let linked = 0;
+    for (const j of backup.tables.jobs || []) {
+      if (j.site_id && jobIds.has(Number(j.id))) { await t.run('UPDATE jobs SET site_id = ? WHERE id = ? AND site_id IS NULL', j.site_id, j.id); linked++; }
+    }
+    counts.jobs_linked = linked;
+  });
+  if (db.kind === 'pg') {
+    for (const name of inBackup) {
+      await db.get(`SELECT setval(pg_get_serial_sequence('${name}', 'id'), GREATEST(COALESCE((SELECT MAX(id) FROM ${name}), 0), 1))`);
+    }
+  }
+  return { counts, photos: 0 };
+}
+
 async function restore(db, backup, { photoFor = null, force = false } = {}) {
   const have = await db.get('SELECT (SELECT COUNT(*) FROM jobs) AS jobs, (SELECT COUNT(*) FROM drivers) AS drivers');
   if (!force && (Number(have.jobs) || Number(have.drivers))) {
@@ -391,7 +428,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
   }
 
   /** Replace the live data with a stored copy (or a "Download a copy" zip): a safety copy is made first. */
-  async function restoreNow({ target: kind, name, zipFile } = {}) {
+  async function restoreNow({ target: kind, name, zipFile, only = '' } = {}) {
     if (restoring) throw Object.assign(new Error('A restore is already running'), { status: 400 });
     restoring = true;
     try {
@@ -411,7 +448,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
       }
       try {
         const safety = await safetyCopy();
-        const out = await restore(db, backup, { photoFor, force: true });
+        const out = only === 'sites' ? await restoreSites(db, backup) : await restore(db, backup, { photoFor, force: true });
         return { ...out, safety, created_at: backup.created_at };
       } finally {
         zip?.close();
@@ -424,4 +461,4 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
   return { run, runScheduled, prune, status, download, downloadZip, stored, restoreNow, storage, server, targets };
 }
 
-module.exports = { createBackups, dump, restore, gzipJson, gunzipJson, localStorageAt, replitStorage, chooseStorage, loadZipBackup, TABLES, DB_PREFIX, PHOTO_PREFIX, HOURLY_PREFIX };
+module.exports = { createBackups, dump, restore, restoreSites, SITE_TABLES, gzipJson, gunzipJson, localStorageAt, replitStorage, chooseStorage, loadZipBackup, TABLES, DB_PREFIX, PHOTO_PREFIX, HOURLY_PREFIX };
