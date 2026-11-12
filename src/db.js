@@ -338,6 +338,15 @@ CREATE TABLE IF NOT EXISTS site_days (
   confirmed_at TEXT,
   UNIQUE (site_id, day)
 );
+-- A machine sent back to the yard (site_id NULL) or moved by hand; job_id: the float that took it, if any.
+CREATE TABLE IF NOT EXISTS equipment_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  equipment_id INTEGER NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  site_id INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+  job_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS job_equipment (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,

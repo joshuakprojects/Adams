@@ -1015,6 +1015,8 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
   async function getSettings() {
     return {
       lineup_time: await getSetting('lineup_time', config.lineupTime || ''),
+      // 'morning': at lineup_time, drivers get today's jobs; 'evening': tomorrow's.
+      lineup_when: (await getSetting('lineup_when', 'evening')) === 'morning' ? 'morning' : 'evening',
       septic_reminder_years: await getSetting('septic_reminder_years', '3'),
       required_fields: await requiredFields(),
       custom_fields: FORMS.customFields(),
@@ -1105,6 +1107,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw new ValidationError('Time must look like 17:00');
       await setSetting('lineup_time', t);
     }
+    if ('lineup_when' in data) await setSetting('lineup_when', data.lineup_when === 'morning' ? 'morning' : 'evening');
     if ('custom_fields' in data) await saveCustomFields(data.custom_fields);
     if ('reviews' in data) await saveReviewSettings(data.reviews || {});
     if ('required_fields' in data) await saveRequiredFields(data.required_fields);
@@ -1172,12 +1175,13 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * Called every minute. Once the set time has passed each day, texts everyone their jobs for tomorrow.
    */
   async function runScheduledLineup() {
-    const time = (await getSettings()).lineup_time;
+    const time = await getSetting('lineup_time', config.lineupTime || '');
     if (!time) return null;
     const day = today();
     if (nowHm() < time || await getSetting('lineup_auto_last') === day) return null;
     await setSetting('lineup_auto_last', day);
-    return sendLineup(addDays(day, 1), { auto: true });
+    const morning = (await getSetting('lineup_when', 'evening')) === 'morning';
+    return sendLineup(morning ? day : addDays(day, 1), { auto: true });
   }
 
   // ---------- records (search & export, e.g. for tax season) ----------

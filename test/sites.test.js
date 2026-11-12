@@ -139,12 +139,41 @@ test('hauling: material and loads from the text, the link and the office; confir
   const job = await d.getJob(row.job_id);
   assert.equal(job.details.hauling, 'T4: A Gravel 3/4", 4 loads');
   sent.length = 0;
-  const out = await sites.confirm('2026-11-16', { siteIds: [seguin.id], textCrew: true });
-  assert.equal(out.crew.length, 1, 'Dave is texted his job');
+  await sites.confirm('2026-11-16', { siteIds: [seguin.id] });
+  assert.deepEqual(sent.map((m) => m.to), [mike.phone], 'only the site head: drivers are told the morning of');
+  assert.match(sent[0].body, /T4 with Dave Thompson \(A Gravel 3\/4", 4 loads\)/);
+
+  // The morning text: at the set time, each driver gets that day's jobs, the site job included.
+  const morning = createDispatch(db, { send: async (to, body) => { sent.push({ to, body }); return { sid: 'x' }; }, today: () => '2026-11-16', nowHm: () => '06:35' });
+  await morning.saveSettings({ lineup_time: '06:30', lineup_when: 'morning' });
+  sent.length = 0;
+  const out = await morning.runScheduledLineup();
+  assert.equal(out.date, '2026-11-16', "today's jobs, not tomorrow's");
   const daveText = sent.find((m) => m.to === '+17055550101');
   assert.match(daveText.body, /Hauling: T4: A Gravel 3\/4", 4 loads/);
-  assert.match(sent.find((m) => m.to === mike.phone).body, /T4 with Dave Thompson \(A Gravel 3\/4", 4 loads\)/);
-  const again = await sites.confirm('2026-11-16', { siteIds: [seguin.id], textCrew: true });
-  assert.equal(again.crew.length, 0, 'not texted twice');
+  assert.equal(await morning.runScheduledLineup(), null, 'once a morning');
   void db;
+});
+
+test('machines stay on a site until moved: the card shows since when and from where; back to the yard books the float', async (t) => {
+  const { sites, seguin, carling } = await setup(t);
+  const [ex] = await sites.listEquipment();
+  await sites.give(carling.id, '2026-11-11', { equipment: [ex.id] });           // Wed: given to Carling
+  let b = await sites.board('2026-11-13');                                         // Fri: still there, not re-given
+  let row = b.sites.find((s) => s.site.id === carling.id);
+  assert.deepEqual(row.on_site.map((m) => [m.name, m.since, m.days, m.from]), [['Excavator 1', '2026-11-11', 2, '']]);
+  assert.equal(b.equipment.find((e) => e.id === ex.id).at, 'Carling');
+
+  await sites.bookFloat(seguin.id, '2026-11-16', ex.id);                          // Mon: floated to Seguin
+  b = await sites.board('2026-11-17');
+  row = b.sites.find((s) => s.site.id === seguin.id);
+  assert.deepEqual(row.on_site.map((m) => [m.since, m.how, m.from]), [['2026-11-16', 'float', 'Carling']]);
+  assert.equal(b.sites.find((s) => s.site.id === carling.id).on_site.length, 0);
+
+  const back = await sites.backToYard(seguin.id, '2026-11-18', ex.id);            // Wed: back to the yard
+  assert.equal(back.job_type, 'float');
+  assert.equal(back.from_location, '12 Lake Rd, Seguin');
+  b = await sites.board('2026-11-18');
+  assert.equal(b.sites.find((s) => s.site.id === seguin.id).on_site.length, 0);
+  assert.equal(b.equipment.find((e) => e.id === ex.id).site_id, null, 'in the yard');
 });

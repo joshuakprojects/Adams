@@ -25,6 +25,7 @@ const PLACEHOLDER_EQUIPMENT = [
   ['Excavator 1', 'Excavator'], ['Excavator 2', 'Excavator'], ['Mini excavator 1', 'Mini excavator'],
   ['Loader 1', 'Loader'], ['Skid steer 1', 'Skid steer'], ['Dozer 1', 'Dozer'], ['Roller 1', 'Roller'],
 ];
+const YARD = 'Yard - 116 William St, Parry Sound';
 const TRUCK_TYPES = ['Tandem', 'Triaxle', 'Float', 'Water truck', 'Vac truck', 'Pickup'];
 const SLOTS = { first: 'first thing', am: 'AM', pm: 'PM', all: 'all day' };
 
@@ -224,12 +225,38 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
   async function equipmentOnJob(jobId) {
     return db.all('SELECT e.* FROM job_equipment je JOIN equipment e ON e.id = je.equipment_id WHERE je.job_id = ? ORDER BY e.sort, e.name', jobId);
   }
-  /** Where a machine was last sent before `day` (a site, or the yard). */
+  // ---------- where each machine is ----------
+  // A machine stays where it was last sent until it's moved: handed to a site, floated to a site, or sent back to the yard.
+  async function machineEvents() {
+    const ev = [];
+    for (const r of await db.all(`SELECT je.equipment_id, j.scheduled_date AS day, j.site_id, j.id AS job_id FROM job_equipment je
+        JOIN jobs j ON j.id = je.job_id WHERE j.status != 'cancelled' AND j.site_id IS NOT NULL`)) ev.push({ ...r, how: 'given', order: 1 });
+    // Floats to a site and trips back to the yard (a cancelled float doesn't count).
+    for (const r of await db.all(`SELECT m.id, m.equipment_id, m.day, m.site_id, m.job_id FROM equipment_moves m
+        LEFT JOIN jobs j ON j.id = m.job_id WHERE j.id IS NULL OR j.status != 'cancelled'`)) {
+      ev.push({ ...r, how: r.site_id ? (r.job_id ? 'float' : 'moved') : 'yard', order: r.site_id ? 0 : 2, seq: r.id });
+    }
+    ev.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.order - b.order || (a.seq || 0) - (b.seq || 0)));
+    const by = new Map();
+    for (const e of ev) (by.get(e.equipment_id) || by.set(e.equipment_id, []).get(e.equipment_id)).push(e);
+    return by;
+  }
+  /** Where a machine is on `day` (or, with inclusive=false, just before it): site (null = the yard), since when, from where. */
+  function locate(events, day, inclusive = true) {
+    const list = (events || []).filter((e) => (inclusive ? e.day <= day : e.day < day));
+    if (!list.length) return { site_id: null, since: null, from_site_id: null, moved_before: false, how: '' };
+    const cur = list[list.length - 1].site_id ?? null;
+    let i = list.length - 1;
+    while (i > 0 && (list[i - 1].site_id ?? null) === cur) i--;
+    return { site_id: cur, since: list[i].day, how: list[i].how, from_site_id: i > 0 ? list[i - 1].site_id ?? null : null, moved_before: i > 0 };
+  }
+  async function siteNames() {
+    return new Map((await db.all('SELECT id, name, address FROM sites')).map((s) => [s.id, s]));
+  }
   async function whereIs(equipmentId, day) {
-    const r = await db.get(`SELECT j.id AS job_id, j.scheduled_date, j.site_id, j.to_location, s.name AS site_name FROM job_equipment je
-        JOIN jobs j ON j.id = je.job_id LEFT JOIN sites s ON s.id = j.site_id
-        WHERE je.equipment_id = ? AND j.scheduled_date < ? AND j.status != 'cancelled' ORDER BY j.scheduled_date DESC, j.id DESC LIMIT 1`, equipmentId, day);
-    return r || null;
+    const loc = locate((await machineEvents()).get(Number(equipmentId)), day, false);
+    const s = loc.site_id ? (await siteNames()).get(loc.site_id) : null;
+    return { ...loc, site_name: s?.name || '', address: s?.address || '' };
   }
 
   /** Everything the Sites tab shows for a day. */
@@ -239,6 +266,9 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     const trucks = await dispatch.listTrucks();
     const people = await dispatch.listDrivers();
     const equipment = await listEquipment();
+    const events = await machineEvents();
+    const names = await siteNames();
+    const nameOf = (id) => (id ? names.get(id)?.name || 'another site' : 'the yard');
     // Who and what is busy that day, and whether for a customer or one of our sites.
     const truckUse = new Map(); const personUse = new Map(); const machineUse = new Map();
     for (const j of jobs) {
@@ -258,15 +288,20 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
         trucks: job.assignments.filter((a) => a.status !== 'cancelled' && a.driver_kind !== 'labourer').map((a) => ({ driver_id: a.driver_id, driver_name: a.driver_name,
           truck_id: a.truck_id, truck_unit: a.truck_unit, material: d.truck_notes?.[a.driver_id]?.material || '', loads: d.truck_notes?.[a.driver_id]?.loads || '' })),
         labourers: job.assignments.filter((a) => a.status !== 'cancelled' && a.driver_kind === 'labourer').map((a) => ({ driver_id: a.driver_id, driver_name: a.driver_name })),
-        equipment: await Promise.all((await equipmentOnJob(job.id)).map(async (e) => {
-          const was = await whereIs(e.id, day);
-          const moved = was && was.site_id !== s.id;
-          const float = moved ? jobs.find((j) => j.job_type === 'float' && j.site_id === s.id && (j.details?.equipment_id === e.id || j.material === e.name)) : null;
-          return { ...e, from: was ? (was.site_name || was.to_location || 'another job') : 'the yard', needs_float: Boolean(moved), float_job_id: float?.id || null };
-        })),
+        equipment: (await equipmentOnJob(job.id)).map((e) => {
+          const was = locate(events.get(e.id), day, false);
+          const moved = was.site_id !== s.id;
+          const float = moved ? (events.get(e.id) || []).find((x) => x.how === 'float' && x.day === day && x.site_id === s.id) : null;
+          return { ...e, from: nameOf(was.site_id), needs_float: moved, float_job_id: float?.job_id || null };
+        }),
         note: job.notes,
       } : null;
-      out.push({ site: { ...s, link: linkFor(s) }, day: d, job_id: job?.id || null, given, asked: d ? describeNeeds(d.request) : '' });
+      // Machines sitting at this site that day, how long they've been there, and where they came from.
+      const onSite = equipment.map((e) => ({ e, loc: locate(events.get(e.id), day, true) })).filter(({ loc }) => loc.site_id === s.id)
+        .map(({ e, loc }) => ({ id: e.id, name: e.name, kind: e.kind, unit: e.unit, in_shop: e.in_shop, since: loc.since, since_label: loc.since ? dayLabel(loc.since) : '',
+          days: loc.since ? Math.round((Date.parse(day) - Date.parse(loc.since)) / 86400000) : 0,
+          how: loc.how, from: loc.moved_before ? nameOf(loc.from_site_id) : '' }));
+      out.push({ site: { ...s, link: linkFor(s) }, day: d, job_id: job?.id || null, given, on_site: onSite, asked: d ? describeNeeds(d.request) : '' });
     }
     const usage = (m, id) => m.get(id) || [];
     return {
@@ -274,10 +309,10 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       sites: out,
       trucks: trucks.map((t) => ({ ...t, use: usage(truckUse, t.id) })),
       people: people.map((p) => ({ id: p.id, name: p.name, kind: p.kind || 'driver', default_truck_id: p.default_truck_id, use: usage(personUse, p.id) })),
-      equipment: await Promise.all(equipment.map(async (e) => {
-        const was = await whereIs(e.id, day);
-        return { ...e, use: usage(machineUse, e.id), last_at: was ? (was.site_name || was.to_location) : '' };
-      })),
+      equipment: equipment.map((e) => {
+        const loc = locate(events.get(e.id), day, true);
+        return { ...e, use: usage(machineUse, e.id), site_id: loc.site_id, at: loc.site_id ? nameOf(loc.site_id) : '', since_label: loc.since ? dayLabel(loc.since) : '' };
+      }),
       truck_types: TRUCK_TYPES, haul_types: HAUL_TYPES, materials: await materials(), slots: SLOTS, ask_time: await getSetting('sites_ask_time', ''),
     };
   }
@@ -430,7 +465,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     const machine = await db.get('SELECT * FROM equipment WHERE id = ?', equipmentId);
     if (!site || !machine) throw new SiteError('Site or equipment not found');
     const was = await whereIs(equipmentId, day);
-    const from = was ? (was.site_id ? (await db.get('SELECT address FROM sites WHERE id = ?', was.site_id))?.address || was.to_location : was.to_location) : 'Yard - 116 William St, Parry Sound';
+    const from = was.site_id ? was.address || was.site_name : YARD;
     const saved = await dispatch.saveJob({
       job_type: 'float', scheduled_date: day, time_slot: 'first', material: machine.name,
       from_location: from || '', to_location: site.address, municipality: site.municipality,
@@ -438,23 +473,32 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       details: { equipment_id: machine.id }, assignments: [],
     }, userId);
     await db.run('UPDATE jobs SET site_id = ? WHERE id = ?', siteId, saved.job.id);
+    await db.run('INSERT INTO equipment_moves (equipment_id, day, site_id, job_id) VALUES (?, ?, ?, ?)', machine.id, day, siteId, saved.job.id);
+    return saved.job;
+  }
+
+  /** A machine done at a site: back to the yard on `day`, with the float booked to bring it. */
+  async function backToYard(siteId, day, equipmentId, userId = null) {
+    checkDay(day);
+    const site = await db.get('SELECT * FROM sites WHERE id = ?', siteId);
+    const machine = await db.get('SELECT * FROM equipment WHERE id = ?', equipmentId);
+    if (!site || !machine) throw new SiteError('Site or equipment not found');
+    const saved = await dispatch.saveJob({
+      job_type: 'float', scheduled_date: day, time_slot: '', material: machine.name,
+      from_location: site.address, to_location: YARD, municipality: site.municipality,
+      customer: '', notes: `Bring ${machine.name} back to the yard from our site: ${site.name}.`,
+      details: { equipment_id: machine.id }, assignments: [],
+    }, userId);
+    await db.run('INSERT INTO equipment_moves (equipment_id, day, site_id, job_id) VALUES (?, ?, NULL, ?)', machine.id, day, saved.job.id);
     return saved.job;
   }
 
   /** Text site heads what they're getting (all sites given something that day, or just `siteIds`). */
-  async function confirm(day, { siteIds = null, textCrew = false } = {}) {
+  /** Site heads only: drivers and labourers hear what they're doing in the morning jobs text (Setup). */
+  async function confirm(day, { siteIds = null } = {}) {
     checkDay(day);
     const b = await board(day);
     const results = [];
-    const crew = [];
-    // Drivers and labourers on the site work orders get their usual job text too (only those not texted yet, or changed).
-    if (textCrew) {
-      for (const row of b.sites) {
-        if ((siteIds && !siteIds.includes(row.site.id)) || !row.job_id) continue;
-        const out = await dispatch.sendJob(row.job_id);
-        crew.push(...out.results.map((r) => ({ site_id: row.site.id, ...r })));
-      }
-    }
     for (const row of b.sites) {
       if (siteIds && !siteIds.includes(row.site.id)) continue;
       if (!row.site.head_phone) continue;
@@ -477,7 +521,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
         results.push({ site_id: row.site.id, ok: true, text });
       } catch (err) { results.push({ site_id: row.site.id, ok: false, error: err.message }); }
     }
-    return { day, results, crew };
+    return { day, results };
   }
 
   // ---------- the phone page behind the link ----------
@@ -492,7 +536,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
 
   return {
     askTime: () => getSetting('sites_ask_time', ''), ensureSetup, listHeads, saveHead, listSites, saveSite, listEquipment, saveEquipment, board, ask, runScheduledAsk, saveAskTime,
-    saveRequest, handleReply, give, bookFloat, confirm, pageFor, whereIs,
+    saveRequest, handleReply, give, bookFloat, backToYard, confirm, pageFor, whereIs,
   };
 }
 

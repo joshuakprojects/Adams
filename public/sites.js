@@ -55,10 +55,9 @@
       return `<option value="${p.id}" ${Number(sel) === p.id ? 'selected' : ''}>${esc(p.name)}${busy ? ` — ${esc(busy)}` : ''}</option>`;
     }).join('');
   }
-  function machineOptions(siteName, taken) {
-    return '<option value="">+ Add a machine…</option>' + data.equipment.filter((e) => !taken.includes(e.id)).map((e) => {
-      const busy = busyText(e.use, siteName);
-      const where = e.in_shop ? 'in the shop' : busy || (e.last_at ? `last at ${e.last_at}` : 'in the yard');
+  function machineOptions(siteName, taken, siteId) {
+    return '<option value="">+ Add a machine…</option>' + data.equipment.filter((e) => !taken.includes(e.id) && e.site_id !== siteId).map((e) => {
+      const where = e.in_shop ? 'in the shop' : e.site_id ? `at ${e.at} since ${e.since_label}` : 'in the yard';
       return `<option value="${e.id}" ${e.in_shop ? 'disabled' : ''}>${esc(e.name)} (${esc(e.kind)}) — ${esc(where)}</option>`;
     }).join('');
   }
@@ -99,6 +98,13 @@
         <form class="took" data-took="${s.id}"><input name="text" placeholder="Took it on the phone? Type what they need, e.g. tandem AM, loader" aria-label="What they need">
           <button class="btn tiny">Save</button></form>
       </section>
+      ${row.on_site?.length ? `<section class="on-site">
+        <div class="lbl">On site now</div>
+        ${row.on_site.map((m) => `<div class="on-row">
+          <span class="nm">🚜 ${esc(m.name)}${m.unit ? ` <span class="muted small">#${esc(m.unit)}</span>` : ''}</span>
+          <span class="muted small">since ${esc(m.since_label)}${m.days > 0 ? ` (${m.days} day${m.days === 1 ? '' : 's'})` : ' (today)'}${m.from ? ` · ${m.how === 'float' ? 'floated' : 'came'} from ${esc(m.from)}` : ''}</span>
+          <button class="btn tiny" data-yard="${m.id}" title="Books the float to bring it back">Back to the yard</button></div>`).join('')}
+      </section>` : ''}
       <section class="given">
         <div class="lbl">Trucks &amp; drivers</div>
         ${e.trucks.map((t, i) => `<div class="truck-row" data-i="${i}">
@@ -111,7 +117,7 @@
         <button class="btn tiny" data-add-truck>+ Truck</button>
         <div class="lbl">Machines</div>
         <div class="chips">${machines}</div>
-        <select data-add-machine aria-label="Add a machine">${machineOptions(s.name, e.equipment)}</select>
+        <select data-add-machine aria-label="Add a machine">${machineOptions(s.name, e.equipment, s.id)}</select>
         <div class="lbl">Labourers</div>
         <div class="chips">${labourers}</div>
         <select data-add-lab aria-label="Add a labourer">${personOptions('labourer', '', s.name, '+ Add a labourer…')}</select>
@@ -129,13 +135,17 @@
     const freeTrucks = data.trucks.filter((t) => !t.use.length);
     const custTrucks = data.trucks.filter((t) => t.use.some((u) => !u.own));
     const siteTrucks = data.trucks.filter((t) => t.use.some((u) => u.own));
-    const freeMachines = data.equipment.filter((e) => !e.use.length && !e.in_shop);
+    const yardMachines = data.equipment.filter((e) => !e.site_id && !e.in_shop);
+    const siteMachines = data.equipment.filter((e) => e.site_id);
+    const shop = data.equipment.filter((e) => e.in_shop);
     const list = (xs, f) => xs.map(f).join(', ') || '<span class="muted">none</span>';
     return `<div class="yard">
       <div><span class="lbl">Trucks free</span> ${list(freeTrucks, (t) => esc(t.unit))}</div>
       <div><span class="lbl">Out to customers</span> ${list(custTrucks, (t) => esc(t.unit))}</div>
       <div><span class="lbl">At our sites</span> ${list(siteTrucks, (t) => esc(t.unit))}</div>
-      <div><span class="lbl">Machines free</span> ${list(freeMachines, (e) => esc(e.name) + (e.last_at ? ` <span class="muted">(${esc(e.last_at)})</span>` : ''))}</div>
+      <div><span class="lbl">Machines in the yard</span> ${list(yardMachines, (e) => esc(e.name))}</div>
+      <div><span class="lbl">Machines at sites</span> ${list(siteMachines, (e) => `${esc(e.name)} <span class="muted">(${esc(e.at)} since ${esc(e.since_label)})</span>`)}</div>
+      ${shop.length ? `<div><span class="lbl">In the shop</span> ${list(shop, (e) => esc(e.name))}</div>` : ''}
     </div>`;
   }
 
@@ -151,7 +161,7 @@
         <h2>${esc(dateLong(day))}</h2>
         <div class="row-actions">
           <button class="btn" data-ask-all>Text all site heads</button>
-          <button class="btn primary" data-confirm-all title="Texts each site head what they're getting${A.state.can?.dispatch ? ', and the drivers and labourers their job' : ''}">Send confirmations</button>
+          <button class="btn primary" data-confirm-all title="Texts each site head what they're getting. Drivers and labourers are told the morning of.">Send confirmations</button>
           <button class="btn" data-print>Print</button>
         </div>
       </div>
@@ -187,8 +197,7 @@
       if (t.closest('[data-confirm-all]')) {
         if ([...edits.values()].some((x) => x.dirty)) return toast('Save the sites you changed first');
         const out = await api('/sites/confirm', { method: 'POST', body: { day } });
-        const crew = (out.crew || []).filter((r) => r.ok).length;
-        toast(out.results.length ? `Sent ${out.results.filter((r) => r.ok).length} site head confirmation(s)${crew ? ` and texted ${crew} driver(s)/labourer(s) their job` : ''}`
+        toast(out.results.length ? `Sent ${out.results.filter((r) => r.ok).length} site head confirmation(s). Drivers get their jobs in the morning text.`
           : 'Nothing to confirm yet — give the sites what they need first');
         return load(day);
       }
@@ -198,6 +207,13 @@
       if (t.closest('[data-rm-truck]')) { e.trucks.splice(Number(t.closest('[data-rm-truck]').dataset.rmTruck), 1); return dirty(id); }
       if (t.closest('[data-rm-machine]')) { e.equipment = e.equipment.filter((x) => x !== Number(t.closest('[data-rm-machine]').dataset.rmMachine)); return dirty(id); }
       if (t.closest('[data-rm-lab]')) { e.labourers = e.labourers.filter((x) => x !== Number(t.closest('[data-rm-lab]').dataset.rmLab)); return dirty(id); }
+      if (t.closest('[data-yard]')) {
+        const m = data.equipment.find((x) => x.id === Number(t.closest('[data-yard]').dataset.yard));
+        if (!confirm(`Send ${m?.name || 'this machine'} back to the yard on ${dateLong(day)}? A float work order is made to bring it.`)) return;
+        const job = await api(`/sites/${id}/yard`, { method: 'POST', body: { day, equipment_id: m.id } });
+        toast(`Back to the yard: float work order #${job.id} — pick the float truck and driver on the board`);
+        return load(day);
+      }
       if (t.closest('[data-float]')) {
         const job = await api(`/sites/${id}/float`, { method: 'POST', body: { day, equipment_id: Number(t.closest('[data-float]').dataset.float) } });
         toast(`Float booked: work order #${job.id} — pick the float truck and driver on the board`);
@@ -207,7 +223,7 @@
         const missing = e.trucks.some((x) => !x.driver_id);
         if (missing) return toast('Pick a driver for each truck (or remove the row)');
         await api(`/sites/${id}/give`, { method: 'POST', body: { day, trucks: e.trucks.map(({ truck_id, driver_id, material, loads }) => ({ truck_id, driver_id, material, loads })), equipment: e.equipment, labourers: e.labourers, note: e.note } });
-        toast('Saved — drivers get the job when you text them from the board');
+        toast('Saved — the drivers are told in the morning jobs text');
         return load(day);
       }
     } catch (err) { toast(err.message); }
