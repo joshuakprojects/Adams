@@ -177,3 +177,28 @@ test('machines stay on a site until moved: the card shows since when and from wh
   assert.equal(b.sites.find((s) => s.site.id === seguin.id).on_site.length, 0);
   assert.equal(b.equipment.find((e) => e.id === ex.id).site_id, null, 'in the yard');
 });
+
+test('a backup can put back just the Our sites data, leaving everything else as it is now', async (t) => {
+  const { db, d, sites, dave, t4, seguin } = await setup(t);
+  const { dump, restoreSites } = require('../src/backup');
+  const [ex] = await sites.listEquipment();
+  const b0 = await sites.give(seguin.id, '2026-11-16', { trucks: [{ truck_id: t4.id, driver_id: dave.id }], equipment: [ex.id] });
+  const siteJob = b0.sites.find((s) => s.site.id === seguin.id).job_id;
+  const backup = await dump(db);
+  // What a Replit publish did: the site tables emptied (dropped and re-made), jobs.site_id gone.
+  for (const n of ['equipment_moves', 'job_equipment', 'site_days', 'equipment', 'sites', 'site_heads']) await db.run(`DELETE FROM ${n}`);
+  await db.run('UPDATE jobs SET site_id = NULL');
+  const later = (await d.saveJob({ job_type: 'misc', scheduled_date: '2026-11-17', material: 'Made after the backup', assignments: [] })).job;
+
+  const out = await restoreSites(db, backup);
+  assert.equal(out.counts.sites, 2);
+  assert.equal(out.counts.site_heads, 1);
+  assert.equal((await sites.listSites()).length, 2);
+  assert.equal((await d.getJob(siteJob)).site_id, seguin.id, 'site work orders linked again');
+  assert.ok(await d.getJob(later.id), 'work made after the backup is kept');
+  const row = (await sites.board('2026-11-16')).sites.find((s) => s.site.id === seguin.id);
+  assert.equal(row.given.equipment[0].id, ex.id);
+  // New ids keep counting from the restored ones.
+  const s3 = await sites.saveSite({ name: 'Third' });
+  assert.ok(s3.id > seguin.id);
+});

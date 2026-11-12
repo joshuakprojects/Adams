@@ -2,6 +2,9 @@
 # Secrets (TWILIO_*, ADMIN_PASSWORD…) go in the Replit "Secrets" tool, not in this file.
 modules = ["nodejs-22"]
 run = "npm install && npm start"
+# Every time the project starts, bring the editor's database up to date (new tables / columns), so Publish never
+# offers to delete tables from the live database. See README "Updating on Replit".
+onBoot = "npm install --silent --no-audit --no-fund && npm run db:sync"
 
 [[ports]]
 localPort = 3000
