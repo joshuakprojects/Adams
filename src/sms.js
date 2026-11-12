@@ -86,6 +86,7 @@ function buildJobText(job, assignment, { updated = false } = {}) {
   lines.push(`${config.companyName} - ${updated ? 'UPDATED ' : ''}${t.title} #${job.id}`);
   lines.push(formatJobWhen(job));
   if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
+  if (assignment.note) lines.push(`Your load: ${assignment.note}`);
   const cargo = cargoSummary(job);
   if (cargo) lines.push(`${t.what || 'Job'}: ${cargo}`);
   const lb = FORMS.labels(job);
@@ -139,6 +140,7 @@ function buildLineupText(date, items) {
       if (site) lines.push(`${lb.to}: ${site}`);
     }
     if (assignment.truck_unit) lines.push(`Truck: ${assignment.truck_unit}`);
+    if (assignment.note) lines.push(`Your load: ${assignment.note}`);
     lines.push(`Details: ${jobLink(assignment.token)}`);
   });
   lines.push('');

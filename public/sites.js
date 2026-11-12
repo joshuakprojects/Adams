@@ -222,8 +222,11 @@
       if (t.closest('[data-save]')) {
         const missing = e.trucks.some((x) => !x.driver_id);
         if (missing) return toast('Pick a driver for each truck (or remove the row)');
-        await api(`/sites/${id}/give`, { method: 'POST', body: { day, trucks: e.trucks.map(({ truck_id, driver_id, material, loads }) => ({ truck_id, driver_id, material, loads })), equipment: e.equipment, labourers: e.labourers, note: e.note } });
-        toast('Saved — the drivers are told in the morning jobs text');
+        const saved = await api(`/sites/${id}/give`, { method: 'POST', body: { day, trucks: e.trucks.map(({ truck_id, driver_id, material, loads }) => ({ truck_id, driver_id, material, loads })), equipment: e.equipment, labourers: e.labourers, note: e.note } });
+        const f = saved.floats || { made: [], dropped: [] };
+        toast(['Saved — the drivers are told in the morning jobs text',
+          f.made.length ? `Float work order${f.made.length === 1 ? '' : 's'} made to deliver the machine${f.made.length === 1 ? '' : 's'}: ${f.made.map((j) => '#' + j.id).join(', ')} — pick the float truck and driver on the board` : '',
+          f.dropped.length ? `Float${f.dropped.length === 1 ? '' : 's'} no longer needed, removed: ${f.dropped.map((n) => '#' + n).join(', ')}` : ''].filter(Boolean).join('. '));
         return load(day);
       }
     } catch (err) { toast(err.message); }

@@ -171,8 +171,9 @@
       noPricing: true,
       fields: [
         { key: 'site_head', label: 'Site head', kind: 'text', sms: true },
-        { key: 'hauling', label: 'Hauling', kind: 'text', wide: true, sms: true },
-        { key: 'equipment', label: 'Equipment', kind: 'text', wide: true, sms: true },
+        // Office and print only: each driver's own load is in their text (assignment note).
+        { key: 'hauling', label: 'Hauling', kind: 'text', wide: true },
+        { key: 'equipment', label: 'Equipment', kind: 'text', wide: true },
       ],
       report: [],
     },

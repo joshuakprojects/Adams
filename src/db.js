@@ -420,6 +420,8 @@ const ADDED_COLUMNS = {
     // What the driver filled in after the job (septic conditions, payment collected, notes) as JSON.
     report: "TEXT NOT NULL DEFAULT '{}'",
     report_at: 'TEXT',
+    // Just for this driver, in their text (e.g. "A Gravel 3/4", 4 loads" on an Our site job).
+    note: "TEXT NOT NULL DEFAULT ''",
   },
   customers: {
     // The same customer in QuickBooks Online (QuickBooks is the master customer list).
