@@ -1258,7 +1258,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
       trucks: await listTrucks(),
       alerts: await listMessages({ unhandledOnly: true, limit: 50 }),
       unmatched_tickets: await unmatchedTickets(),
-      lineup: { ...(await lineupStatus(date)), auto_time: (await getSettings()).lineup_time },
+      lineup: { ...(await lineupStatus(date)), auto_time: (await getSettings()).lineup_time, auto_when: (await getSettings()).lineup_when },
       // Jobs from before today that were never marked done (missed DONEs, multi-day hauls).
       stale_jobs: await findJobs({ from: '0000-01-01', to: addDays(today(), -1), status: 'open', limit: 100 }),
     };

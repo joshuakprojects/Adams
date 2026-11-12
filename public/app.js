@@ -206,6 +206,16 @@
 
   const minutesSince = (sqlUtc) => (sqlUtc ? (Date.now() - new Date(sqlUtc.replace(' ', 'T') + 'Z').getTime()) / 60000 : 0);
 
+  /** True when the automatic drivers' day text hasn't gone out yet for this job's day (it will text them). */
+  function autoTextWillSend(job) {
+    const lu = state.board?.lineup;
+    if (!lu?.auto_time || !job.scheduled_date) return false;
+    const sendDay = lu.auto_when === 'morning' ? job.scheduled_date : addDays(job.scheduled_date, -1);
+    const now = new Date();
+    const hm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    return sendDay > state.today || (sendDay === state.today && hm < lu.auto_time);
+  }
+
   /** Why a job needs the office's attention (empty = it doesn't). */
   function attentionReasons(job) {
     if (job.status !== 'open') return [];
@@ -213,7 +223,7 @@
     if (Number(job.draft)) out.push('Draft — finish it');
     const live = job.assignments.filter((a) => a.status !== 'cancelled');
     if (!live.length) out.push('No driver');
-    if (live.some((a) => a.status === 'pending')) out.push('Not texted');
+    if (live.some((a) => a.status === 'pending') && !autoTextWillSend(job)) out.push('Not texted');
     if (live.some((a) => a.needs_resend && a.status !== 'done')) out.push('Needs update text');
     if (live.some((a) => a.status === 'sent' && !a.needs_resend && minutesSince(a.sent_at) > 30)) out.push('No OK yet');
     if ((state.board?.alerts || []).some((m) => m.job_id === job.id)) out.push('Driver texted');
@@ -1090,6 +1100,7 @@
     const slot = data.time_slot || (data.first_thing ? 'first' : data.scheduled_time ? (data.scheduled_time < '12:00' ? 'am' : 'pm') : '');
     $$('input[name=time_slot]', form).forEach((r) => { r.checked = r.value === slot; });
     markMissing([]);
+    delete form.dataset.zeroOk;
     $('#job-form-error').innerHTML = '';
     if (data.contact_phone) form.elements.contact_phone.value = prettyPhone(data.contact_phone);
     if (data.customer_phone) form.elements.customer_phone.value = prettyPhone(data.customer_phone);
@@ -1146,7 +1157,18 @@
     if (!asDraft) {
       const missing = window.FORMS.missingRequired({ ...body, has_pin: Boolean(body.pin_lat) || body.lat != null }, await requiredFor(body.job_type));
       if (missing.length) return showMissing(missing);
+      // A priced job type with nothing priced: say so once before saving it at $0.
+      const priced = !window.FORMS.TYPES?.[body.job_type]?.noPricing;
+      const total = (body.lines || []).reduce((sum, l) => sum + (Number(l.qty ?? l.quantity ?? 1) || 0) * (Number(l.price ?? l.unit_price) || 0), 0);
+      if (priced && !total && !Number(body.amount_billed) && !Number(body.quoted_price) && form.dataset.zeroOk !== '1') {
+        $('#job-form-error').innerHTML = `This work order has no price ($0). Check the details the price needs (e.g. tank size).
+          <button type="button" class="btn tiny" id="save-zero">Save at $0 anyway</button>`;
+        $('#save-zero').addEventListener('click', () => { form.dataset.zeroOk = '1'; form.requestSubmit(form.querySelector('button[value=save]')); });
+        $('#f-lines')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
     }
+    delete form.dataset.zeroOk;
     try {
       const id = body.id;
       const out = await api(id ? '/jobs/' + id : '/jobs', { method: id ? 'PUT' : 'POST', body });

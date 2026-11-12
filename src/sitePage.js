@@ -12,16 +12,16 @@ function head(title) {
   .need:last-child { border-bottom: 0; }
   .need .nm { font-size: 19px; font-weight: 700; }
   .step { display: flex; align-items: center; gap: 8px; }
-  .step button { width: 46px; height: 46px; border-radius: 50%; border: 2px solid #1d3a2b; background: #fff; font-size: 24px; font-weight: 800; color: #1d3a2b; }
+  .step button { width: 46px; height: 46px; border-radius: 50%; border: 2px solid #111; background: #fff; font-size: 24px; font-weight: 800; color: #111; }
   .step output { min-width: 26px; text-align: center; font-size: 22px; font-weight: 800; }
   textarea { width: 100%; font: inherit; font-size: 18px; padding: 10px; border-radius: 10px; border: 2px solid #ccc; box-sizing: border-box; }
   .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 18px; }
-  .quick .btn { font-size: 18px; padding: 16px; background: #fff; border: 3px solid #1d3a2b; color: #1d3a2b; }
+  .quick .btn { font-size: 18px; padding: 16px; background: #fff; border: 3px solid #111; color: #111; }
   h2 { margin: 22px 0 6px; font-size: 18px; text-transform: uppercase; letter-spacing: .04em; color: #555; }
   .haul { display: none; gap: 8px; padding: 0 0 12px; grid-template-columns: 1fr 110px; }
   .haul.on { display: grid; }
   .haul input { font: inherit; font-size: 17px; padding: 10px; border-radius: 10px; border: 2px solid #ccc; min-width: 0; box-sizing: border-box; }
-  .saved { background: #e7f4ea; border: 2px solid #1d7a3d; color: #1d3a2b; padding: 14px; border-radius: 12px; font-size: 18px; margin: 12px 0; }
+  .saved { background: #e7f4ea; border: 2px solid #1d7a3d; color: #111; padding: 14px; border-radius: 12px; font-size: 18px; margin: 12px 0; }
 </style></head><body>`;
 }
 
