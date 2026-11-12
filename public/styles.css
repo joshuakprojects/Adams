@@ -940,3 +940,5 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .sw span, .sw span::after { transition: none; } }
 .drawer-form[hidden], .drawer-layer[hidden], .setup-section[hidden] { display: none !important; }
 .setup-section[data-section="fields"] #fields-panel > p.muted:first-of-type { display: none; }
+#pm-place[hidden] { display: none !important; }
+#pm-place { margin-top: 6px; }

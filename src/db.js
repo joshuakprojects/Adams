@@ -405,6 +405,10 @@ const ADDED_COLUMNS = {
     // One of our own job sites (Sites tab), for "Our site" work orders and the floats that move our machines.
     site_id: 'INTEGER',
   },
+  // A machine somewhere that isn't one of our sites or the yard ("Sundridge shop", "Cat dealer for repairs").
+  equipment_moves: {
+    place: "TEXT NOT NULL DEFAULT ''",
+  },
   // What each truck on a site's day is hauling: { driver_id: { material, loads } } (Sites tab).
   site_days: {
     truck_notes: "TEXT NOT NULL DEFAULT '{}'",
