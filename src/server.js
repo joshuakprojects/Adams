@@ -522,7 +522,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   const dayParam = (req) => (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || req.body?.day || '')) ? String(req.query.day || req.body.day) : null);
   api.get('/sites/board', json(async (req) => sites.board(dayParam(req) || require('./sites').nextWorkDay(dispatch.today()))));
   api.get('/sites/setup', json(async () => ({ heads: await sites.listHeads({ all: true }), sites: await sites.listSites({ all: true }),
-    equipment: await sites.listEquipment({ all: true }), ask_time: await sites.askTime() })));
+    equipment: await sites.listEquipment({ all: true }), locations: await sites.locations(), ask_time: await sites.askTime() })));
+  api.post('/sites/equipment/:id/place', need('admin'), json((req) => sites.placeMachine(Number(req.params.id), req.body?.site_id ? Number(req.body.site_id) : null)));
   api.post('/sites/heads', need('admin'), json((req) => sites.saveHead(req.body || {})));
   api.post('/sites/sites', need('admin'), json((req) => sites.saveSite(req.body || {})));
   api.post('/sites/equipment', need('admin'), json((req) => sites.saveEquipment(req.body || {})));

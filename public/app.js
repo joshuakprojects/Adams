@@ -97,6 +97,18 @@
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
+  // "How this page works" notes: hidden once someone presses Got it (on this computer). The Guide link brings the long version.
+  const helpHidden = () => { try { return JSON.parse(localStorage.getItem('help-hidden') || '[]'); } catch { return []; } };
+  function applyHelp() { const h = helpHidden(); $$('.help-strip').forEach((el) => el.classList.toggle('hidden', h.includes(el.dataset.help))); }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-help-hide]');
+    if (!b) return;
+    try { localStorage.setItem('help-hidden', JSON.stringify([...new Set([...helpHidden(), b.dataset.helpHide])])); } catch { /* private window */ }
+    applyHelp();
+  });
+  applyHelp();
+  window.APP_HELP = { applyHelp, helpHidden };
+
   // ---------- board ----------
   async function loadBoard() {
     const data = await api('/board?date=' + state.date);

@@ -211,3 +211,16 @@ test('a backup can put back just the Our sites data, leaving everything else as 
   const s3 = await sites.saveSite({ name: 'Third' });
   assert.ok(s3.id > seguin.id);
 });
+
+test('Setup can say where a machine really is (no float); then giving it to that site needs no float', async (t) => {
+  const { sites, seguin } = await setup(t);
+  const [ex] = await sites.listEquipment();
+  assert.equal((await sites.locations())[ex.id].site_id, null, 'starts in the yard');
+  await sites.placeMachine(ex.id, seguin.id);
+  assert.equal((await sites.locations())[ex.id].site_id, seguin.id);
+  const b = await sites.give(seguin.id, '2026-11-16', { equipment: [ex.id] });
+  assert.equal(b.floats.made.length, 0, 'already there: no float');
+  assert.equal(b.sites.find((s) => s.site.id === seguin.id).on_site[0].id, ex.id);
+  await sites.placeMachine(ex.id, null);
+  assert.equal((await sites.locations())[ex.id].site_id, null, 'back in the yard by hand');
+});

@@ -305,16 +305,21 @@
       </tbody></table>
       <p class="muted small">Untick <b>Active</b> when a job wraps up: the site head stops getting the afternoon text.</p>
       <h3>Equipment</h3>
-      <table class="table compact"><thead><tr><th>Name</th><th>Kind</th><th>Unit #</th><th></th><th></th><th></th></tr></thead><tbody>
+      <table class="table compact"><thead><tr><th>Name</th><th>Kind</th><th>Unit #</th><th>Where it is now</th><th></th><th></th><th></th></tr></thead><tbody>
         ${[...d.equipment, { id: '', name: '', kind: '', unit: '', in_shop: 0, active: 1 }].map((x) => `<tr data-s-equip="${x.id}">
           <td><input name="name" value="${esc(x.name)}" placeholder="${x.id ? '' : 'e.g. Cat 308'}"></td>
           <td><input name="kind" value="${esc(x.kind)}" list="dl-equip-kinds" placeholder="Excavator"></td>
           <td><input name="unit" value="${esc(x.unit)}"></td>
+          <td>${x.id ? `<select name="where" data-s-place="${x.id}" aria-label="Where ${esc(x.name)} is now">
+            <option value="">The yard</option>${d.sites.filter((s) => s.active || s.id === d.locations?.[x.id]?.site_id).map((s) => `<option value="${s.id}" ${d.locations?.[x.id]?.site_id === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+            </select>` : '<span class="muted small">the yard</span>'}</td>
           <td><label class="check"><input type="checkbox" name="in_shop" ${x.in_shop ? 'checked' : ''}> In the shop</label></td>
           <td>${act(x.active)}</td><td><button class="btn tiny" data-s-save="equip">${x.id ? 'Save' : 'Add'}</button></td></tr>`).join('')}
       </tbody></table>
       <datalist id="dl-equip-kinds">${['Excavator', 'Mini excavator', 'Loader', 'Skid steer', 'Dozer', 'Roller', 'Grader'].map((k) => `<option value="${k}">`).join('')}</datalist>
-      <p class="muted small">The "Kind" is what site heads ask for ("mini ex", "loader"). Placeholder machines are listed to start — rename them, or untick Active.</p>`;
+      <p class="muted small">The "Kind" is what site heads ask for ("mini ex", "loader"). Placeholder machines are listed to start — rename them, or untick Active.
+        <b>Where it is now</b>: set where each machine really is when you start (or if it was moved without the app). It changes right away and no float is made;
+        after that the app keeps track as machines are given to sites, floated and sent back.</p>`;
   }
   document.addEventListener('click', async (ev) => {
     if (!setupEl || !setupEl.contains(ev.target)) return;
@@ -331,6 +336,14 @@
     try {
       await api(kind === 'head' ? '/sites/heads' : kind === 'site' ? '/sites/sites' : '/sites/equipment', { method: 'POST', body });
       toast('Saved'); await mountSetup(setupEl);
+    } catch (err) { toast(err.message); }
+  });
+  document.addEventListener('change', async (ev) => {
+    if (!setupEl || !setupEl.contains(ev.target) || !ev.target.matches('[data-s-place]')) return;
+    const sel = ev.target;
+    try {
+      const out = await api(`/sites/equipment/${sel.dataset.sPlace}/place`, { method: 'POST', body: { site_id: sel.value || null } });
+      toast(out.unchanged ? 'No change' : `Noted: it's at ${sel.selectedOptions[0].textContent} now (no float made)`);
     } catch (err) { toast(err.message); }
   });
   document.addEventListener('submit', async (ev) => {
