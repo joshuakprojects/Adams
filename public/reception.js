@@ -65,7 +65,7 @@
     const mode = store.get('mode', 'steps');
     const b = (v, label) => `<button class="rc-nav ${view === v ? 'on' : ''}" data-go="${v}">${label}</button>`;
     return `<div class="rc-bar">
-      ${b('home', '⌂ Home')}${b('call', '📞 New call')}${b('find', '🔎 Find')}${b('asks', '💬 Customer asks')}
+      ${b('home', '⌂ Home')}${b('call', '📞 New call')}${b('find', '🔎 Find')}${b('asks', '💬 Customer asks')}${b('sites', '🏗️ Our sites')}
       <span class="sp"></span>
       ${view === 'call' ? `<div class="rc-mode" role="group" aria-label="Layout">
         <button data-mode="steps" class="${mode === 'steps' ? 'on' : ''}">Step by step</button>
@@ -79,6 +79,10 @@
     if (view === 'find') return renderFind();
     if (view === 'asks') return renderAsks();
     if (view === 'call') return renderCall();
+    if (view === 'sites') {
+      root().innerHTML = nav() + '<div class="rc-wrap"><div id="rc-sites"></div></div>';
+      return window.SITES?.mount(document.getElementById('rc-sites')).catch((err) => A.toast(err.message));
+    }
   }
 
   // =====================================================================

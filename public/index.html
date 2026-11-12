@@ -19,6 +19,7 @@
     </div>
     <nav class="tabs" aria-label="Main">
       <button data-tab="board" class="active">Board</button>
+      <button data-tab="sites" title="Trucks, drivers, machines and labourers for our own job sites">Our sites</button>
       <button data-tab="customers">Customers <span id="due-count" class="count hidden"></span></button>
       <button data-tab="prices">Prices</button>
       <button data-tab="faq">Questions</button>
@@ -175,6 +176,10 @@
       </form>
       <p class="muted small">See them on the Customers tab under "Due for pump-out". Nothing is sent to customers automatically.</p>
     </div>
+    <div class="panel settings" id="sites-panel" data-need="admin">
+      <h2>Our sites</h2>
+      <div id="sites-setup"></div>
+    </div>
     <div class="panel settings" id="review-panel" data-need="admin">
       <h2>Review requests</h2>
       <p class="muted small">When a job is finished, text the customer asking for a Google review. Sent an hour or more after
@@ -289,6 +294,8 @@
 
   <!-- RECORDS (search & export) -->
   <!-- CUSTOMERS (address book + septic reminders) -->
+  <section id="tab-sites" class="tab hidden"><div id="sites-root"></div></section>
+
   <section id="tab-customers" class="tab hidden">
     <div class="toolbar">
       <h2>Customers</h2>
@@ -598,6 +605,7 @@
   <script src="/app.js"></script>
   <script src="/pricing-ui.js"></script>
   <script src="/qbo-ui.js"></script>
+  <script src="/sites.js"></script>
   <script src="/reception.js"></script>
 </body>
 </html>

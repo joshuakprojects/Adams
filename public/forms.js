@@ -157,6 +157,24 @@
       ],
       report: [],
     },
+    // Trucks, drivers, labourers and machines sent to one of our own job sites (Sites tab): not billed, not a customer.
+    site: {
+      name: 'Our site',
+      title: 'Our Job Site',
+      icon: '🏗️',
+      what: 'Site',
+      whatSuggestions: [],
+      quantity: false,
+      loads: false,
+      from: null,
+      to: 'Site address',
+      noPricing: true,
+      fields: [
+        { key: 'site_head', label: 'Site head', kind: 'text', sms: true },
+        { key: 'equipment', label: 'Equipment', kind: 'text', wide: true, sms: true },
+      ],
+      report: [],
+    },
     misc: {
       name: 'Misc',
       title: 'Miscellaneous Work Order',

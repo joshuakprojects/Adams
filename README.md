@@ -135,6 +135,25 @@ address, municipality, W.O. # or phone.
 - **History:** a job's **More → History** shows who did what and when: office edits (field by field, by login), texts sent,
   driver replies and job-page taps, ticket photos, and completion.
 
+## Our sites (trucks, drivers, machines and labourers for our own job sites)
+
+For the people running our own jobs (site heads), instead of calling round at the end of the day.
+
+1. **Setup → Our sites** (admins): add the **site heads** (name, cell), the **sites** (name, address, who runs it) and the
+   **equipment** (name, kind, unit #; placeholder machines are listed to start). Tick **Text site heads automatically
+   at…** (e.g. 2:30 PM) to text them every work day. Untick a site's **Active** when the job wraps up.
+2. Each work day at that time, every active site's head gets: *"Hi Mike - what do you need at Seguin on Mon Nov 16? Reply
+   e.g. "tandem AM, mini ex, 2 labourers", or "same", or "nothing". Or tap: <link>"*. Friday asks about Monday.
+   They answer by text (read into trucks / machines / labourers / a note; the text itself is kept too) or on the link
+   (a phone form with + / − buttons). Took it on the phone? Type it into the site's card.
+3. **Our sites** tab (dashboard, and reception's 🏗️ Our sites): one card per site for the day, showing what they asked
+   for. Give each site trucks + drivers (a driver's usual truck is filled in), machines and labourers, and a note; each
+   list says what's already out that day — *customer: Smith* or *at Carling*. **Save** makes the day's **Our site**
+   work order (marked OUR SITE on the board, never priced or sent to QuickBooks); text the drivers from the board as usual.
+4. A machine last sent to a different site shows **Book the float from Carling**, which makes the float work order.
+5. **Send confirmations** texts each site head what they're getting. The strip at the bottom shows trucks free, out to
+   customers and at our sites, and machines free (and where they were last).
+
 ## Review requests (texts asking customers for a Google review)
 
 Setup → **Review requests** (admins). Paste your Google review link (Google Business Profile → **Ask for reviews**, a
@@ -462,6 +481,7 @@ Times use Eastern (`TZ_NAME=America/Toronto`). The company details printed on wo
 | `public/pricing.js` | The pricing rules: works out a work order's price lines (shared by the server and the dashboard) |
 | `src/distance.js` | Driving distance (Google Geocoding + Routes) and the Parry Sound town boundary check |
 | `src/roles.js` | Office / Dispatcher / Admin permissions |
+| `src/sites.js`, `src/sitePage.js`, `public/sites.js` | Our sites: site heads, equipment, the afternoon text, the Sites tab |
 | `src/sunwire.js`, `src/httpOut.js` | Texting through Sunwire (SolSwitch), and the fixed-IP relay for outgoing requests |
 | `src/quickbooks.js`, `public/qbo-ui.js` | QuickBooks Online: pending Estimates per work order, customer import, the Setup panel |
 | `public/pricing-ui.js` | Prices tab, job-form price panel, Questions, Logins |

@@ -92,6 +92,8 @@
     if (tab === 'people' && state.can?.owner) window.PRICE_UI?.loadUsers();
     if (tab === 'people') window.QBO_UI?.loadQbo().catch(() => {});
     if (tab === 'board') loadBoard();
+    if (tab === 'sites') window.SITES?.mount($('#sites-root')).catch((err) => toast(err.message));
+    if (tab === 'people' && state.can?.admin) window.SITES?.mountSetup($('#sites-setup')).catch(() => {});
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
@@ -620,7 +622,7 @@
         ${Number(job.draft) ? '<span class="tag st-draft" title="Not finished — can\'t be texted yet">DRAFT</span>' : ''}
         ${statusTag}
         <span class="spacer"></span>
-        <span class="tag type" title="${esc(t.title)}">${esc(t.name)}</span>
+        ${job.job_type === 'site' ? '<span class="tag own-site" title="One of our own job sites, not a customer">OUR SITE</span>' : `<span class="tag type" title="${esc(t.title)}">${esc(t.name)}</span>`}
       </div>
       ${stale ? `<div class="stale-date">From ${esc(longDate(job.scheduled_date))}</div>` : ''}
       ${attentionReasons(job).length ? `<div class="attention">${attentionReasons(job).map(esc).join(' · ')}</div>` : ''}
