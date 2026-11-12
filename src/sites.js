@@ -416,6 +416,8 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     const site = await db.get('SELECT s.*, h.name AS head_name, h.phone AS head_phone FROM sites s LEFT JOIN site_heads h ON h.id = s.head_id WHERE s.id = ?', siteId);
     if (!site) throw new SiteError('Site not found');
     const d = await siteDay(siteId, day, true);
+    // A change after the site head was told means they need telling again.
+    await db.run('UPDATE site_days SET confirmed_at = NULL WHERE id = ?', d.id);
     const trucks = (Array.isArray(given.trucks) ? given.trucks : []).filter((t) => t && t.driver_id)
       .map((t) => ({ driver_id: Number(t.driver_id), truck_id: t.truck_id ? Number(t.truck_id) : null,
         material: str(t.material, 100), loads: Math.max(0, Math.min(99, Number(t.loads) || 0)) || '' }));

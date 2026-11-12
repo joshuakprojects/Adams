@@ -1,272 +1,391 @@
 /* Our sites: what each site head asked for on a day, and what the office gives them (trucks + drivers, machines,
-   labourers). Shown on the dashboard's Sites tab and on reception. Uses app.js (window.APP). */
+   labourers). Three steps across the top (ask, hand out, confirm), the day's sites on the left, one site at a time on
+   the right. Changes save as they're made. Shown on the dashboard's Our sites tab and on reception. Uses app.js (window.APP). */
 (function () {
   const A = window.APP;
   const { api, esc, toast } = A;
   let root = null;
   let data = null;
   let day = null;
-  const edits = new Map(); // site id → what's being given (unsaved)
+  let current = null; // the site shown on the right
+  let picked = false; // phones: showing one site rather than the list
+  let pick = null; // the open "Add a truck / machine / labourer" panel
+  const edits = new Map(); // site id → what it's being given
 
   const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
   const time = (sql) => (sql ? new Date(sql.replace(' ', 'T') + 'Z').toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '');
   const hm12 = (hm) => { const [h, m] = hm.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
   const dateLong = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  const first = (name) => String(name || '').split(' ')[0] || 'the site head';
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   async function mount(el) {
     root = el;
-    if (!day) day = null;
     await load(day);
   }
-  async function load(d) {
+  async function load(d, keep = true) {
     data = await api('/sites/board' + (d ? '?day=' + d : ''));
     day = data.day;
     edits.clear();
-    for (const s of data.sites) edits.set(s.site.id, fromGiven(s.given, s.day?.request));
+    for (const s of data.sites) edits.set(s.site.id, fromGiven(s.given));
+    if (!keep || !data.sites.some((s) => s.site.id === current)) current = data.sites[0]?.site.id ?? null;
     render();
   }
-  function fromGiven(g, request) {
-    // Nothing given yet: start a row for each truck they asked for, with what it's hauling.
-    const asked = !g && request?.trucks ? request.trucks.flatMap((t) => Array.from({ length: Math.min(t.count || 1, 9) },
-      () => ({ truck_id: '', driver_id: '', material: t.material || '', loads: t.loads || '', asked: t.type }))) : [];
+  function fromGiven(g) {
     return {
-      trucks: g ? (g.trucks || []).map((t) => ({ truck_id: t.truck_id || '', driver_id: t.driver_id, material: t.material || '', loads: t.loads || '' })) : asked,
+      trucks: (g?.trucks || []).map((t) => ({ truck_id: t.truck_id || '', driver_id: t.driver_id, material: t.material || '', loads: t.loads || '' })),
       equipment: (g?.equipment || []).map((e) => e.id),
       labourers: (g?.labourers || []).map((l) => l.driver_id),
       note: g?.note || '',
-      dirty: false,
     };
   }
+  const row = () => data.sites.find((s) => s.site.id === current);
+  const truckBy = (id) => data.trucks.find((t) => t.id === Number(id));
+  const personBy = (id) => data.people.find((p) => p.id === Number(id));
+  const machineBy = (id) => data.equipment.find((e) => e.id === Number(id));
+
+  // Where a site stands today.
+  function status(r) {
+    const d = r.day;
+    if (d?.status === 'nothing') return d.confirmed_at ? 'confirmed' : 'nothing';
+    if (r.given) return d?.confirmed_at ? 'confirmed' : 'ready';
+    if (d?.replied_at) return 'replied';
+    if (d?.asked_at) return 'noreply';
+    return 'notasked';
+  }
+  const STATUS = { notasked: 'Not asked yet', noreply: 'No reply yet', replied: 'Replied', ready: 'Ready', confirmed: 'Told', nothing: 'Nothing needed' };
+  const chip = (st) => `<span class="schip ${st}">${STATUS[st]}</span>`;
+  const isReady = (st) => ['ready', 'confirmed', 'nothing'].includes(st);
 
   // What's busy elsewhere that day (for a customer, or another of our sites).
   function busyText(use, siteName) {
-    const other = use.filter((u) => u.label !== siteName);
+    const other = (use || []).filter((u) => u.label !== siteName);
     if (!other.length) return '';
     return other.map((u) => (u.own ? `at ${u.label}` : `customer: ${u.label}`)).join('; ');
   }
-  function truckOptions(sel, siteName) {
-    return '<option value="">No truck</option>' + data.trucks.map((t) => {
-      const busy = busyText(t.use, siteName);
-      return `<option value="${t.id}" ${Number(sel) === t.id ? 'selected' : ''}>${esc(t.unit)}${t.description ? ' · ' + esc(t.description) : ''}${busy ? ` — ${esc(busy)}` : ''}</option>`;
-    }).join('');
-  }
-  function personOptions(kind, sel, siteName, placeholder) {
-    return `<option value="">${placeholder}</option>` + data.people.filter((p) => (kind === 'labourer' ? p.kind === 'labourer' : p.kind !== 'labourer')).map((p) => {
-      const busy = busyText(p.use, siteName);
-      return `<option value="${p.id}" ${Number(sel) === p.id ? 'selected' : ''}>${esc(p.name)}${busy ? ` — ${esc(busy)}` : ''}</option>`;
-    }).join('');
-  }
-  function machineOptions(siteName, taken, siteId) {
-    return '<option value="">+ Add a machine…</option>' + data.equipment.filter((e) => !taken.includes(e.id) && e.site_id !== siteId).map((e) => {
-      const where = e.in_shop ? 'in the shop' : e.site_id || e.place ? `at ${e.at} since ${e.since_label}` : 'in the yard';
-      return `<option value="${e.id}" ${e.in_shop ? 'disabled' : ''}>${esc(e.name)} (${esc(e.kind)}) — ${esc(where)}</option>`;
-    }).join('');
+
+  function summary(r) {
+    const st = status(r);
+    if (st === 'notasked') return 'Not asked yet';
+    if (st === 'noreply') return `Asked at ${time(r.day.asked_at)}`;
+    if (r.day?.status === 'nothing') return 'Said nothing needed';
+    const g = r.given;
+    if (!g) return r.asked ? `Asked for: ${r.asked}` : 'Replied';
+    const bits = [...g.trucks.map((t) => t.truck_unit || t.driver_name), ...g.equipment.map((e) => e.name),
+      g.labourers.length ? plural(g.labourers.length, 'labourer') : ''].filter(Boolean);
+    return `Sending ${bits.join(', ') || 'a note'}`;
   }
 
-  function statusChip(row) {
-    const d = row.day;
-    if (!d || (!d.asked_at && !d.replied_at)) return '<span class="chip">Not asked yet</span>';
-    if (d.status === 'nothing') return `<span class="chip done">Nothing needed</span>`;
-    if (d.replied_at) return `<span class="chip done">Replied ${d.reply_via === 'link' ? 'on the link' : d.reply_via === 'text' ? 'by text' : '(office)'} ${esc(time(d.replied_at))}</span>`;
-    return `<span class="chip sent">Asked ${esc(time(d.asked_at))} · no reply yet</span>`;
-  }
-
-  function siteCard(row) {
-    const s = row.site;
-    const e = edits.get(s.id);
-    const given = row.given;
-    const machines = e.equipment.map((id) => {
-      const m = data.equipment.find((x) => x.id === id) || { name: 'Machine', kind: '' };
-      const g = given?.equipment.find((x) => x.id === id);
-      const float = g?.needs_float ? (g.float_job_id ? `<span class="muted small">float booked (#${g.float_job_id})</span>`
-        : `<button class="btn tiny" data-float="${id}">Book the float from ${esc(g.from)}</button>`) : '';
-      return `<span class="gchip">${esc(m.name)} ${float}<button class="x" data-rm-machine="${id}" aria-label="Remove ${esc(m.name)}">×</button></span>`;
-    }).join('');
-    const labourers = e.labourers.map((id) => {
-      const p = data.people.find((x) => x.id === id) || { name: '?' };
-      return `<span class="gchip">${esc(p.name)}<button class="x" data-rm-lab="${id}" aria-label="Remove ${esc(p.name)}">×</button></span>`;
-    }).join('');
-    return `<article class="site-card ${row.job_id ? 'has-job' : ''}" data-site="${s.id}">
-      <header>
-        <div><h3>🏗️ ${esc(s.name)}</h3><div class="muted small">${esc(s.address || '')}</div></div>
-        <div class="head">${s.head_name ? `<b>${esc(s.head_name)}</b> ${s.head_phone ? `<a href="tel:${esc(s.head_phone)}">${esc(A.prettyPhone(s.head_phone))}</a>` : ''}` : '<span class="muted">No site head</span>'}</div>
-      </header>
-      <section class="asked">
-        <div class="row-actions">${statusChip(row)} ${row.day?.confirmed_at ? `<span class="chip done">Confirmed ${esc(time(row.day.confirmed_at))}</span>` : ''}
-          ${s.head_phone ? `<button class="btn tiny" data-ask="${s.id}" title="Sends the 'what do you need?' text to just this site head">Ask ${esc(String(s.head_name || '').split(' ')[0])} again</button>` : ''}</div>
-        ${row.day?.reply_text ? `<blockquote>${esc(row.day.reply_text)}</blockquote>` : ''}
-        ${row.asked ? `<div class="need-line"><span class="lbl">Asked for</span> ${esc(row.asked)}</div>` : ''}
-        <form class="took" data-took="${s.id}"><input name="text" placeholder="Took it on the phone? Type what they need, e.g. tandem AM, loader" aria-label="What they need">
-          <button class="btn tiny">Save</button></form>
-      </section>
-      ${row.on_site?.length ? `<section class="on-site">
-        <div class="lbl">On site now</div>
-        ${row.on_site.map((m) => `<div class="on-row">
-          <span class="nm">🚜 ${esc(m.name)}${m.unit ? ` <span class="muted small">#${esc(m.unit)}</span>` : ''}</span>
-          <span class="muted small">since ${esc(m.since_label)}${m.days > 0 ? ` (${m.days} day${m.days === 1 ? '' : 's'})` : ' (today)'}${m.from ? ` · ${m.how === 'float' ? 'floated' : 'came'} from ${esc(m.from)}` : ''}</span>
-          <button class="btn tiny" data-yard="${m.id}" title="Books the float to bring it back">Back to the yard</button></div>`).join('')}
-      </section>` : ''}
-      <section class="given">
-        <div class="lbl">Trucks &amp; drivers</div>
-        ${e.trucks.map((t, i) => `<div class="truck-row" data-i="${i}">
-          ${t.asked ? `<div class="asked-for muted small">Asked: ${esc(t.asked)}</div>` : ''}
-          <select data-truck aria-label="Truck">${truckOptions(t.truck_id, s.name)}</select>
-          <select data-driver aria-label="Driver">${personOptions('driver', t.driver_id, s.name, 'Driver…')}</select>
-          <button class="x" data-rm-truck="${i}" aria-label="Remove">×</button>
-          <input data-mat list="dl-site-mat" value="${esc(t.material || '')}" placeholder="Hauling (e.g. A Gravel 3/4&quot;)" aria-label="Material">
-          <input data-loads type="number" min="0" max="99" value="${t.loads || ''}" placeholder="Loads" aria-label="Loads"></div>`).join('')}
-        <button class="btn tiny" data-add-truck>+ Truck</button>
-        <div class="lbl">Machines</div>
-        <div class="chips">${machines}</div>
-        <select data-add-machine aria-label="Add a machine">${machineOptions(s.name, e.equipment, s.id)}</select>
-        <div class="lbl">Labourers</div>
-        <div class="chips">${labourers}</div>
-        <select data-add-lab aria-label="Add a labourer">${personOptions('labourer', '', s.name, '+ Add a labourer…')}</select>
-        <div class="lbl">Note for the site head</div>
-        <input data-note value="${esc(e.note)}" placeholder="e.g. float arrives 7:30">
-        <div class="row-actions save-row">
-          <button class="btn primary" data-save ${e.dirty ? '' : 'disabled'}>${e.dirty ? 'Save' : 'Saved'}</button>
-          ${row.job_id ? `<a class="muted small" href="#" data-open-job="${row.job_id}">Work order #${row.job_id}</a>` : ''}
-        </div>
-      </section>
-    </article>`;
-  }
-
-  function yard() {
-    const freeTrucks = data.trucks.filter((t) => !t.use.length);
-    const custTrucks = data.trucks.filter((t) => t.use.some((u) => !u.own));
-    const siteTrucks = data.trucks.filter((t) => t.use.some((u) => u.own));
-    const yardMachines = data.equipment.filter((e) => !e.site_id && !e.place && !e.in_shop);
-    const elsewhere = data.equipment.filter((e) => !e.site_id && e.place && !e.in_shop);
-    const siteMachines = data.equipment.filter((e) => e.site_id);
-    const shop = data.equipment.filter((e) => e.in_shop);
-    const list = (xs, f) => xs.map(f).join(', ') || '<span class="muted">none</span>';
-    return `<div class="yard">
-      <div><span class="lbl">Trucks free</span> ${list(freeTrucks, (t) => esc(t.unit))}</div>
-      <div><span class="lbl">Out to customers</span> ${list(custTrucks, (t) => esc(t.unit))}</div>
-      <div><span class="lbl">At our sites</span> ${list(siteTrucks, (t) => esc(t.unit))}</div>
-      <div><span class="lbl">Machines in the yard</span> ${list(yardMachines, (e) => esc(e.name))}</div>
-      ${elsewhere.length ? `<div><span class="lbl">Machines elsewhere</span> ${list(elsewhere, (e) => `${esc(e.name)} <span class="muted">(${esc(e.place)})</span>`)}</div>` : ''}
-      <div><span class="lbl">Machines at sites</span> ${list(siteMachines, (e) => `${esc(e.name)} <span class="muted">(${esc(e.at)} since ${esc(e.since_label)})</span>`)}</div>
-      ${shop.length ? `<div><span class="lbl">In the shop</span> ${list(shop, (e) => esc(e.name))}</div>` : ''}
+  function steps() {
+    const n = data.sites.length;
+    const sts = data.sites.map(status);
+    const replied = data.sites.filter((s) => s.day?.replied_at || s.day?.status === 'nothing').length;
+    const waiting = data.sites.filter((s, i) => !['replied', 'ready', 'confirmed', 'nothing'].includes(sts[i]) && s.site.head_phone).length;
+    const ready = sts.filter(isReady).length;
+    const told = sts.filter((x) => x === 'confirmed').length;
+    const toTell = ready - told;
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    const step = (num, label, done, value, bar, body) => `<div class="sstep2 ${done ? 'done' : ''}">
+      <div class="n"><b>${done ? '✓' : num}</b>${label}</div><div class="v">${value}</div>
+      <div class="bar" aria-hidden="true"><i style="width:${bar}%"></i></div>${body}</div>`;
+    return `<div class="ssteps">
+      ${step(1, 'Ask', n && replied === n, `${replied} of ${n} replied`, pct(replied, n),
+        `<p>${data.ask_time ? `Asked automatically at ${esc(hm12(data.ask_time))} on work days.` : 'The automatic afternoon text is off (Setup → Our sites).'}</p>
+        ${waiting ? `<div><button class="btn tiny" data-ask-all>Ask the ${waiting} who haven't replied</button></div>` : ''}`)}
+      ${step(2, 'Hand out', n && ready === n, `${ready} of ${n} ready`, pct(ready, n), '<p>Give each site what it needs. It saves as you go.</p>')}
+      ${step(3, 'Confirm', ready > 0 && told === ready, `${told} of ${ready} told`, pct(told, ready),
+        `<div><button class="btn primary tiny" data-confirm-all ${toTell ? '' : 'disabled'}>${toTell ? `Tell ${toTell === 1 ? 'the site head' : `${toTell} site heads`} what's coming` : 'Tell site heads what\'s coming'}</button></div>
+        <p>Drivers are told in the morning.</p>`)}
     </div>`;
   }
 
+  function siteList() {
+    return `<div class="slist" role="list">${data.sites.map((r) => `<button class="sitem ${r.site.id === current ? 'on' : ''}" data-site="${r.site.id}" role="listitem">
+      <span class="top"><span class="nm">${esc(r.site.name)}</span>${chip(status(r))}</span>
+      <span class="who">${esc(r.site.head_name || 'No site head')}</span><span class="sum">${esc(summary(r))}</span></button>`).join('')}</div>`;
+  }
+
+  function detail(r) {
+    const s = r.site;
+    const e = edits.get(s.id);
+    const st = status(r);
+    const name = first(s.head_name);
+    const asked = r.day?.request || {};
+    const tags = [
+      ...(asked.trucks || []).map((t) => `${t.count > 1 ? t.count + ' × ' : ''}${t.type || 'Truck'}${t.slot ? ` (${String(t.slot).toUpperCase()})` : ''}${t.material ? ` – ${t.material}` : ''}${t.loads ? `, ${plural(Number(t.loads), 'load')}` : ''}`),
+      ...(asked.equipment || []).map((x) => `${x.kind}${x.slot ? ` (${String(x.slot).toUpperCase()})` : ''}`),
+      asked.labourers ? plural(Number(asked.labourers), 'labourer') : '',
+    ].filter(Boolean);
+    const gEquip = new Map((r.given?.equipment || []).map((x) => [x.id, x]));
+    const items = [
+      ...e.trucks.map((t, i) => {
+        const tr = truckBy(t.truck_id); const p = personBy(t.driver_id);
+        return `<div class="sitem-row"><span class="ic" aria-hidden="true">🚚</span><button class="body" data-edit-truck="${i}" title="Change">
+          <span class="t">${tr ? esc(tr.unit) + ' with ' : ''}${esc(p?.name || 'Driver')}</span>
+          <span class="s">${t.material ? esc(t.material) + (t.loads ? `, ${plural(Number(t.loads), 'load')}` : '') : 'Nothing to haul'}</span></button>
+          <button class="x" data-rm="trucks" data-i="${i}" aria-label="Remove ${esc(tr?.unit || p?.name || 'truck')}">×</button></div>`;
+      }),
+      ...e.equipment.map((id, i) => {
+        const m = machineBy(id) || { name: 'Machine' }; const g = gEquip.get(id);
+        const line = !g ? '' : !g.needs_float ? '<span class="ok">Already on site</span>'
+          : g.float_job_id ? `<span class="float">Float booked</span> from ${esc(g.from)} · <a href="#" data-open-job="${g.float_job_id}">work order #${g.float_job_id}</a>`
+            : `<span class="float">Needs a float</span> from ${esc(g.from)} <button class="btn tiny" data-float="${id}">Book it</button>`;
+        return `<div class="sitem-row"><span class="ic" aria-hidden="true">🚜</span><div class="body"><span class="t">${esc(m.name)}${m.unit ? ` <span class="muted">#${esc(m.unit)}</span>` : ''}</span>
+          <span class="s">${line}</span></div><button class="x" data-rm="equipment" data-i="${i}" aria-label="Remove ${esc(m.name)}">×</button></div>`;
+      }),
+      ...e.labourers.map((id, i) => {
+        const p = personBy(id) || { name: 'Labourer' };
+        return `<div class="sitem-row"><span class="ic" aria-hidden="true">👷</span><div class="body"><span class="t">${esc(p.name)}</span><span class="s">Labourer</span></div>
+          <button class="x" data-rm="labourers" data-i="${i}" aria-label="Remove ${esc(p.name)}">×</button></div>`;
+      }),
+    ];
+    // Machines being sent show under Sending, not twice.
+    const onSite = (r.on_site || []).filter((m) => !e.equipment.includes(m.id));
+    const canTell = s.head_phone && (r.given || r.day?.status === 'nothing') && st !== 'confirmed';
+    return `<section class="sdetail" aria-label="${esc(s.name)}">
+      <div class="dhead"><div><button class="btn tiny sback" data-back>‹ All sites</button><h2>${esc(s.name)}</h2><div class="muted small">${esc(s.address || '')}</div></div>
+        <div class="dhead-r">${s.head_name ? `<b>${esc(s.head_name)}${s.head_phone ? ` · ${esc(A.prettyPhone(s.head_phone))}` : ''}</b>` : '<span class="muted">No site head (Setup → Our sites)</span>'}
+          ${s.head_phone ? `<button class="btn tiny" data-ask="${s.id}">${r.day?.asked_at ? `Ask ${esc(name)} again` : `Ask ${esc(name)}`}</button>` : ''}</div></div>
+
+      <div class="sblock"><h3>They asked for ${chip(st)}</h3>
+        <div class="sasked">
+          ${r.day?.reply_text ? `<div class="bubble">“${esc(r.day.reply_text)}”<span class="muted small"> ${r.day.reply_via === 'link' ? 'on the link' : r.day.reply_via === 'text' ? 'by text' : 'taken by the office'} ${esc(time(r.day.replied_at))}</span></div>`
+            : `<div class="muted">${r.day?.asked_at ? 'No reply yet. Call them, or wait for their text.' : 'Not asked yet.'}</div>`}
+          ${tags.length ? `<div class="stags">${tags.map((x) => `<span class="stag">${esc(x)}</span>`).join('')}</div>` : r.asked && !r.day?.reply_text ? `<div class="stags"><span class="stag">${esc(r.asked)}</span></div>` : ''}
+          ${asked.note ? `<div class="small">Their note: ${esc(asked.note)}</div>` : ''}
+          <form class="stook" data-took="${s.id}"><input name="text" placeholder="Took it on the phone? Type what they need, e.g. tandem AM, loader" aria-label="What they need"><button class="btn tiny">Add</button></form>
+        </div></div>
+
+      ${onSite.length ? `<div class="sblock"><h3>Already on site</h3><div class="sonsite">${onSite.map((m) => `<div class="r">
+          <span><b>${esc(m.name)}</b>${m.unit ? ` <span class="muted small">#${esc(m.unit)}</span>` : ''} <span class="muted small">since ${esc(m.since_label)}${m.days > 0 ? ` (${plural(m.days, 'day')})` : ' (today)'}${m.from ? ` · from ${esc(m.from)}` : ''}</span></span>
+          <button class="btn tiny" data-yard="${m.id}">Back to the yard</button></div>`).join('')}</div></div>` : ''}
+
+      <div class="sblock"><h3>Sending <span class="ssaved" id="sites-saved" role="status"></span></h3>
+        <div class="ssending">${items.join('') || `<div class="muted">${r.day?.status === 'nothing' ? 'They said nothing is needed.' : 'Nothing yet. Add what they asked for.'}</div>`}</div>
+        <div class="sadds"><button class="btn" data-pick="truck">+ Truck</button><button class="btn" data-pick="machine">+ Machine</button><button class="btn" data-pick="labourer">+ Labourer</button></div></div>
+
+      <div class="sblock"><h3><label for="sites-note">Note for ${esc(name)}</label></h3><input id="sites-note" class="snote" data-note value="${esc(e.note)}" placeholder="e.g. float arrives 7:30"></div>
+
+      <div class="sfoot"><span class="muted small">${st === 'confirmed' ? `${esc(name)} was told${r.day?.confirmed_at ? ' at ' + esc(time(r.day.confirmed_at)) : ''}. Change anything and you can tell them again.` : canTell ? 'Ready to tell the site head.' : ''}
+          ${r.job_id ? ` <a href="#" data-open-job="${r.job_id}">Work order #${r.job_id}</a>` : ''}</span>
+        <button class="btn primary" data-confirm-one ${canTell ? '' : 'disabled'}>${st === 'confirmed' ? `${esc(name)} has been told ✓` : `Tell ${esc(name)} what's coming`}</button></div>
+    </section>`;
+  }
+
+  function yard() {
+    const free = (xs) => xs.filter((t) => !t.use.length);
+    const freeTrucks = free(data.trucks);
+    const custTrucks = data.trucks.filter((t) => t.use.some((u) => !u.own));
+    const freePeople = data.people.filter((p) => p.kind !== 'labourer' && !p.use.length);
+    const yardMachines = data.equipment.filter((e) => !e.site_id && !e.place && !e.in_shop && !e.use?.length);
+    const elsewhere = data.equipment.filter((e) => !e.site_id && e.place && !e.in_shop);
+    const shop = data.equipment.filter((e) => e.in_shop);
+    const list = (xs, f) => xs.map(f).join(', ') || '<span class="muted">none</span>';
+    return `<details class="sfree"><summary>What's free on ${esc(dateLong(day).split(',')[0])}</summary><dl>
+      <dt>Trucks</dt><dd>${list(freeTrucks, (t) => esc(t.unit))}</dd>
+      <dt>Out to customers</dt><dd>${list(custTrucks, (t) => esc(t.unit))}</dd>
+      <dt>Drivers</dt><dd>${list(freePeople, (p) => esc(p.name))}</dd>
+      <dt>Machines in the yard</dt><dd>${list(yardMachines, (e) => esc(e.name))}</dd>
+      ${elsewhere.length ? `<dt>Machines elsewhere</dt><dd>${list(elsewhere, (e) => `${esc(e.name)} <span class="muted">(${esc(e.place)})</span>`)}</dd>` : ''}
+      ${shop.length ? `<dt>In the shop</dt><dd>${list(shop, (e) => esc(e.name))}</dd>` : ''}
+    </dl></details>`;
+  }
+
   function render() {
-    const replied = data.sites.filter((s) => s.day?.replied_at).length;
-    const asked = data.sites.filter((s) => s.day?.asked_at).length;
+    const r = row();
     root.innerHTML = `<div class="sites-page">
-      <div class="sites-top">
+      <div class="sdayrow">
         <div class="day-nav"><button class="btn" data-day="-1" aria-label="Day before">‹</button>
-          <input type="date" value="${day}" data-pick aria-label="Day">
-          <button class="btn" data-day="1" aria-label="Day after">›</button>
-          ${day !== data.next_work_day ? `<button class="btn" data-goto="${data.next_work_day}">Next work day</button>` : ''}</div>
+          <input type="date" value="${day}" data-pickday aria-label="Day"><button class="btn" data-day="1" aria-label="Day after">›</button></div>
         <h2>${esc(dateLong(day))}</h2>
-        <div class="row-actions"><button class="btn" data-print>Print</button></div>
+        ${day === data.next_work_day ? '<span class="muted">Next work day</span>' : `<button class="btn tiny" data-goto="${data.next_work_day}">Go to the next work day</button>`}
+        <button class="btn tiny sprint" data-print>Print</button>
       </div>
-      <div class="site-steps">
-        <div class="sstep">
-          <button class="btn" data-ask-all>1 · Ask site heads what they need</button>
-          <span>Texts each site head "what do you need on ${esc(dateLong(day).split(',')[0])}?"${data.ask_time ? ` Goes out by itself at ${esc(hm12(data.ask_time))} on work days; use this to send it now.` : ' (The automatic afternoon text is off: Setup → Our sites.)'}</span>
-        </div>
-        <div class="sstep">
-          <button class="btn primary" data-confirm-all ${data.sites.some((s) => s.given || s.day?.status === 'nothing') ? '' : 'disabled title="Give at least one site what it needs and Save first"'}>2 · Tell site heads what they're getting</button>
-          <span>After you've saved each site: texts each site head their list. Drivers are told in the morning.</span>
-        </div>
-      </div>
-      <p class="muted small">${data.sites.length} site${data.sites.length === 1 ? '' : 's'} · asked ${asked} · replied ${replied}</p>
-      ${data.sites.length ? '' : '<div class="empty">No sites yet. Add site heads and sites under Setup → Our sites.</div>'}
-      <div class="site-grid">${data.sites.map(siteCard).join('')}</div>
-      <datalist id="dl-site-mat">${(data.materials || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist>
+      ${steps()}
+      ${data.sites.length ? `<div class="swork ${picked ? 'picked' : ''}">${siteList()}${r ? detail(r) : ''}</div>`
+        : '<div class="empty">No sites yet. Add site heads and sites under Setup → Our sites.</div>'}
+      <div class="sprint-only">${data.sites.map(printCard).join('')}</div>
       ${yard()}
     </div>`;
   }
 
-  function cardEdit(el) { const card = el.closest('[data-site]'); return card ? [Number(card.dataset.site), edits.get(Number(card.dataset.site))] : [null, null]; }
-  function dirty(id) { const e = edits.get(id); e.dirty = true; render(); }
+  // Print: every site on one sheet.
+  function printCard(r) {
+    const g = r.given;
+    const lines = g ? [...g.trucks.map((t) => `${t.truck_unit ? t.truck_unit + ' with ' : ''}${t.driver_name}${t.material ? ` – ${t.material}${t.loads ? `, ${plural(Number(t.loads), 'load')}` : ''}` : ''}`),
+      ...g.equipment.map((x) => x.name + (x.needs_float ? ` (float from ${x.from})` : '')), ...g.labourers.map((l) => `${l.driver_name} (labourer)`)] : [];
+    return `<div class="pcard"><h3>${esc(r.site.name)} <small>${esc(r.site.head_name || '')} · ${STATUS[status(r)]}</small></h3>
+      ${r.asked ? `<div>Asked for: ${esc(r.asked)}</div>` : ''}${lines.length ? `<ul>${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}${g?.note ? `<div>Note: ${esc(g.note)}</div>` : ''}</div>`;
+  }
+
+  // ---------- saving (as you go) ----------
+  let saving = Promise.resolve();
+  function save(siteId, { reload = true } = {}) {
+    const e = edits.get(siteId);
+    saving = saving.then(async () => {
+      const out = await api(`/sites/${siteId}/give`, { method: 'POST', body: { day,
+        trucks: e.trucks.map(({ truck_id, driver_id, material, loads }) => ({ truck_id, driver_id, material, loads })), equipment: e.equipment, labourers: e.labourers, note: e.note } });
+      const f = out.floats || { made: [], dropped: [] };
+      if (f.made.length) toast(`Float work order${f.made.length === 1 ? '' : 's'} ${f.made.map((j) => '#' + j.id).join(', ')} made to bring the machine${f.made.length === 1 ? '' : 's'}. Pick the float truck and driver on the Board.`);
+      else if (f.dropped.length) toast(`Float${f.dropped.length === 1 ? '' : 's'} no longer needed, removed: ${f.dropped.map((n) => '#' + n).join(', ')}`);
+      if (reload) {
+        const keepFocus = document.activeElement?.id;
+        data = out; for (const s of data.sites) edits.set(s.site.id, fromGiven(s.given));
+        render();
+        if (keepFocus) document.getElementById(keepFocus)?.focus();
+      }
+      const el = document.getElementById('sites-saved');
+      if (el) { el.textContent = 'Saved ✓'; setTimeout(() => { if (el.isConnected) el.textContent = ''; }, 1800); }
+    }).catch((err) => { toast(err.message); return load(day); });
+    return saving;
+  }
+
+  // ---------- the "Add a truck / machine / labourer" panel ----------
+  function openPicker(kind, editIndex = null) {
+    const r = row(); const e = edits.get(r.site.id);
+    const t = editIndex != null ? e.trucks[editIndex] : null;
+    // A new truck starts with what the next asked-for truck is hauling.
+    const askedTruck = (r.day?.request?.trucks || []).flatMap((x) => Array.from({ length: Math.min(x.count || 1, 9) }, () => x))[e.trucks.length];
+    pick = { kind, edit: editIndex, truck: t?.truck_id || '', driver: t?.driver_id || '', id: '',
+      material: t ? t.material : askedTruck?.material || '', loads: t ? t.loads : askedTruck?.loads || '' };
+    drawPicker();
+  }
+  function opt(attr, val, title, sub, busy, sel, disabled = false) {
+    return `<button type="button" class="popt ${busy ? 'busy' : ''} ${sel ? 'sel' : ''}" data-${attr}="${val}" ${disabled ? 'disabled' : ''} aria-pressed="${sel ? 'true' : 'false'}">
+      <span><span class="t">${esc(title)}</span>${sub ? `<span class="s">${esc(sub)}</span>` : ''}</span>${sel ? '<span aria-hidden="true">✓</span>' : ''}</button>`;
+  }
+  function drawPicker() {
+    const r = row(); const s = r.site; const e = edits.get(s.id);
+    const usedHere = (field) => e.trucks.filter((_, i) => i !== pick.edit).map((x) => Number(x[field]));
+    let body = '';
+    if (pick.kind === 'truck') {
+      const tOpts = data.trucks.map((t) => ({ t, busy: busyText(t.use, s.name) || (usedHere('truck_id').includes(t.id) ? 'already on this site' : '') }));
+      const dOpts = data.people.filter((p) => p.kind !== 'labourer').map((p) => ({ p, busy: busyText(p.use, s.name) || (usedHere('driver_id').includes(p.id) || e.labourers.includes(p.id) ? 'already on this site' : '') }));
+      const byFree = (a, b) => Number(Boolean(a.busy)) - Number(Boolean(b.busy));
+      body = `<div class="pgl">Driver</div><div class="popts">${dOpts.sort(byFree).map(({ p, busy }) => opt('pdriver', p.id, p.name,
+          busy || (truckBy(p.default_truck_id) ? `Free · usual truck ${truckBy(p.default_truck_id).unit}` : 'Free'), Boolean(busy), Number(pick.driver) === p.id)).join('') || '<span class="muted">No drivers yet (Setup → People)</span>'}</div>
+        <div class="pgl">Truck</div><div class="popts">${opt('ptruck', '', 'No truck', 'The driver goes without one', false, !pick.truck)}${tOpts.sort(byFree).map(({ t, busy }) => opt('ptruck', t.id,
+          `${t.unit}${t.description ? ' · ' + t.description : ''}`, busy || 'Free', Boolean(busy), Number(pick.truck) === t.id)).join('')}</div>
+        <div class="pgl">Hauling (optional)</div>
+        <div class="ptwo"><div class="pfield"><label for="pk-mat">Material</label><input id="pk-mat" list="dl-site-mat" value="${esc(pick.material || '')}" placeholder="e.g. A Gravel 3/4&quot;"></div>
+          <div class="pfield"><label for="pk-loads">Loads</label><input id="pk-loads" type="number" min="0" max="99" value="${esc(pick.loads || '')}"></div></div>
+        <datalist id="dl-site-mat">${(data.materials || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist>`;
+    }
+    if (pick.kind === 'machine') {
+      const list = data.equipment.filter((m) => !e.equipment.includes(m.id));
+      const here = list.filter((m) => m.site_id === s.id && !m.in_shop);
+      const yardM = list.filter((m) => !m.site_id && !m.place && !m.in_shop);
+      const away = list.filter((m) => (m.site_id && m.site_id !== s.id) || (!m.site_id && m.place)).filter((m) => !m.in_shop);
+      const shop = list.filter((m) => m.in_shop);
+      const sub = (m, extra) => [m.kind, busyText(m.use, s.name), extra].filter(Boolean).join(' · ');
+      const group = (label, ms, extra, busy, disabled = false) => (ms.length ? `<div class="pgl">${label}</div><div class="popts">${ms.map((m) => opt('pid', m.id, m.name + (m.unit ? ` #${m.unit}` : ''),
+        sub(m, typeof extra === 'function' ? extra(m) : extra), busy || Boolean(busyText(m.use, s.name)), Number(pick.id) === m.id, disabled)).join('')}</div>` : '');
+      body = group('Already on this site', here, 'no float needed', false)
+        + group('In the yard', yardM, 'a float is booked from the yard', false)
+        + group('Somewhere else', away, (m) => `at ${m.at} since ${m.since_label} · a float is booked from there`, true)
+        + group('In the shop', shop, "can't be sent", true, true)
+        || '<span class="muted">No machines yet (Setup → Our sites → Equipment)</span>';
+    }
+    if (pick.kind === 'labourer') {
+      const list = data.people.filter((p) => p.kind === 'labourer' && !e.labourers.includes(p.id)).map((p) => ({ p, busy: busyText(p.use, s.name) }))
+        .sort((a, b) => Number(Boolean(a.busy)) - Number(Boolean(b.busy)));
+      body = `<div class="popts">${list.map(({ p, busy }) => opt('pid', p.id, p.name, busy || 'Free', Boolean(busy), Number(pick.id) === p.id)).join('') || '<span class="muted">No labourers yet (Setup → People)</span>'}</div>`;
+    }
+    const title = pick.edit != null ? 'Change the truck' : { truck: 'Add a truck', machine: 'Add a machine', labourer: 'Add a labourer' }[pick.kind];
+    const ready = pick.kind === 'truck' ? pick.driver : pick.id;
+    let layer = document.getElementById('sites-layer');
+    if (!layer) { layer = document.createElement('div'); layer.id = 'sites-layer'; document.body.append(layer); }
+    const scroll = layer.querySelector('.pbody')?.scrollTop || 0;
+    layer.innerHTML = `<div class="pscrim" data-pclose></div><aside class="ppanel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <header><h3>${esc(title)}</h3><button type="button" class="x" data-pclose aria-label="Close">×</button></header>
+      <div class="pbody">${body}</div>
+      <footer><button type="button" class="btn" data-pclose>Cancel</button><button type="button" class="btn primary" data-padd ${ready ? '' : 'disabled'}>${pick.edit != null ? 'Save' : `Add to ${esc(s.name.split(' –')[0])}`}</button></footer></aside>`;
+    layer.querySelector('.pbody').scrollTop = scroll;
+    if (!layer.contains(document.activeElement)) layer.querySelector('.ppanel header .x').focus();
+  }
+  function closePicker() { pick = null; document.getElementById('sites-layer')?.replaceChildren(); }
+  function keepFields() { const m = document.getElementById('pk-mat'); const l = document.getElementById('pk-loads'); if (m) pick.material = m.value; if (l) pick.loads = l.value; }
 
   document.addEventListener('click', async (ev) => {
-    if (!root || !root.contains(ev.target)) return;
     const t = ev.target;
-    const [id, e] = cardEdit(t);
+    const layer = document.getElementById('sites-layer');
+    if (pick && layer?.contains(t)) {
+      if (t.closest('[data-pclose]')) return closePicker();
+      keepFields();
+      const d = t.closest('[data-pdriver]');
+      if (d) {
+        pick.driver = Number(d.dataset.pdriver);
+        const p = personBy(pick.driver); const usual = truckBy(p?.default_truck_id);
+        if (!pick.truck && usual && !busyText(usual.use, row().site.name)) pick.truck = usual.id; // their usual truck
+        return drawPicker();
+      }
+      const tr = t.closest('[data-ptruck]'); if (tr) { pick.truck = tr.dataset.ptruck ? Number(tr.dataset.ptruck) : ''; return drawPicker(); }
+      const pid = t.closest('[data-pid]'); if (pid) { pick.id = Number(pid.dataset.pid); return drawPicker(); }
+      if (t.closest('[data-padd]')) {
+        const r = row(); const e = edits.get(r.site.id);
+        if (pick.kind === 'truck') {
+          const item = { truck_id: pick.truck || '', driver_id: pick.driver, material: pick.material.trim(), loads: pick.loads };
+          if (pick.edit != null) e.trucks[pick.edit] = item; else e.trucks.push(item);
+        }
+        if (pick.kind === 'machine') e.equipment.push(pick.id);
+        if (pick.kind === 'labourer') e.labourers.push(pick.id);
+        closePicker();
+        return save(r.site.id);
+      }
+      return;
+    }
+    if (!root || !root.contains(t)) return;
     try {
+      const siteBtn = t.closest('[data-site]');
+      if (siteBtn) { current = Number(siteBtn.dataset.site); picked = true; render(); if (window.matchMedia('(max-width: 860px)').matches) root.scrollIntoView({ block: 'start' }); return; }
+      if (t.closest('[data-back]')) { picked = false; return render(); }
       if (t.closest('[data-day]')) return load(addDays(day, Number(t.closest('[data-day]').dataset.day)));
       if (t.closest('[data-goto]')) return load(t.closest('[data-goto]').dataset.goto);
       if (t.closest('[data-print]')) return window.print();
+      if (t.closest('[data-open-job]')) { ev.preventDefault(); return A.openJobForm(await api('/jobs/' + t.closest('[data-open-job]').dataset.openJob)); }
       if (t.closest('[data-ask-all]')) {
-        const out = await api('/sites/ask', { method: 'POST', body: { day } });
-        toast(`Texted ${out.results.filter((r) => r.ok).length} site head(s) about ${dateLong(day)}`);
+        const ids = data.sites.filter((s) => !s.day?.replied_at && s.day?.status !== 'nothing' && !s.given).map((s) => s.site.id);
+        const out = await api('/sites/ask', { method: 'POST', body: { day, site_ids: ids } });
+        toast(`Texted ${plural(out.results.filter((x) => x.ok).length, 'site head')} about ${dateLong(day)}`);
         return load(day);
       }
       if (t.closest('[data-ask]')) {
         await api('/sites/ask', { method: 'POST', body: { day, site_ids: [Number(t.closest('[data-ask]').dataset.ask)] } });
-        toast('Texted'); return load(day);
+        toast(`Texted ${first(row()?.site.head_name)}`); return load(day);
       }
-      if (t.closest('[data-confirm-all]')) {
-        if ([...edits.values()].some((x) => x.dirty)) return toast('Save the sites you changed first');
-        const out = await api('/sites/confirm', { method: 'POST', body: { day } });
-        toast(out.results.length ? `Sent ${out.results.filter((r) => r.ok).length} site head confirmation(s). Drivers get their jobs in the morning text.`
-          : 'Nothing to confirm yet — give the sites what they need first');
+      if (t.closest('[data-confirm-all], [data-confirm-one]')) {
+        await saving;
+        const one = t.closest('[data-confirm-one]');
+        const ids = one ? [current] : data.sites.filter((s) => ['ready', 'nothing'].includes(status(s))).map((s) => s.site.id);
+        const out = await api('/sites/confirm', { method: 'POST', body: { day, site_ids: ids } });
+        const ok = out.results.filter((x) => x.ok).length;
+        toast(ok ? `Texted ${one ? first(row()?.site.head_name) : plural(ok, 'site head')} what's coming. Drivers get their jobs in the morning text.` : 'Nothing to tell yet. Give the site what it needs first.');
         return load(day);
       }
-      if (t.closest('[data-open-job]')) { ev.preventDefault(); return A.openJobForm(await api('/jobs/' + t.closest('[data-open-job]').dataset.openJob)); }
-      if (!e) return;
-      if (t.closest('[data-add-truck]')) { e.trucks.push({ truck_id: '', driver_id: '' }); return dirty(id); }
-      if (t.closest('[data-rm-truck]')) { e.trucks.splice(Number(t.closest('[data-rm-truck]').dataset.rmTruck), 1); return dirty(id); }
-      if (t.closest('[data-rm-machine]')) { e.equipment = e.equipment.filter((x) => x !== Number(t.closest('[data-rm-machine]').dataset.rmMachine)); return dirty(id); }
-      if (t.closest('[data-rm-lab]')) { e.labourers = e.labourers.filter((x) => x !== Number(t.closest('[data-rm-lab]').dataset.rmLab)); return dirty(id); }
+      const r = row(); if (!r) return;
+      const e = edits.get(r.site.id);
+      const p = t.closest('[data-pick]'); if (p) return openPicker(p.dataset.pick);
+      const et = t.closest('[data-edit-truck]'); if (et) return openPicker('truck', Number(et.dataset.editTruck));
+      const rm = t.closest('[data-rm]'); if (rm) { e[rm.dataset.rm].splice(Number(rm.dataset.i), 1); render(); return save(r.site.id); }
       if (t.closest('[data-yard]')) {
-        const m = data.equipment.find((x) => x.id === Number(t.closest('[data-yard]').dataset.yard));
-        if (!confirm(`Send ${m?.name || 'this machine'} back to the yard on ${dateLong(day)}? A float work order is made to bring it.`)) return;
-        const job = await api(`/sites/${id}/yard`, { method: 'POST', body: { day, equipment_id: m.id } });
-        toast(`Back to the yard: float work order #${job.id} — pick the float truck and driver on the board`);
+        const id = Number(t.closest('[data-yard]').dataset.yard);
+        const job = await api(`/sites/${r.site.id}/yard`, { method: 'POST', body: { day, equipment_id: id } });
+        toast(`${machineBy(id)?.name || 'Machine'} goes back to the yard: float work order #${job.id}. Pick the float truck and driver on the Board.`);
         return load(day);
       }
       if (t.closest('[data-float]')) {
-        const job = await api(`/sites/${id}/float`, { method: 'POST', body: { day, equipment_id: Number(t.closest('[data-float]').dataset.float) } });
-        toast(`Float booked: work order #${job.id} — pick the float truck and driver on the board`);
-        return load(day);
-      }
-      if (t.closest('[data-save]')) {
-        const missing = e.trucks.some((x) => !x.driver_id);
-        if (missing) return toast('Pick a driver for each truck (or remove the row)');
-        const saved = await api(`/sites/${id}/give`, { method: 'POST', body: { day, trucks: e.trucks.map(({ truck_id, driver_id, material, loads }) => ({ truck_id, driver_id, material, loads })), equipment: e.equipment, labourers: e.labourers, note: e.note } });
-        const f = saved.floats || { made: [], dropped: [] };
-        toast(['Saved — the drivers are told in the morning jobs text',
-          f.made.length ? `Float work order${f.made.length === 1 ? '' : 's'} made to deliver the machine${f.made.length === 1 ? '' : 's'}: ${f.made.map((j) => '#' + j.id).join(', ')} — pick the float truck and driver on the board` : '',
-          f.dropped.length ? `Float${f.dropped.length === 1 ? '' : 's'} no longer needed, removed: ${f.dropped.map((n) => '#' + n).join(', ')}` : ''].filter(Boolean).join('. '));
+        const job = await api(`/sites/${r.site.id}/float`, { method: 'POST', body: { day, equipment_id: Number(t.closest('[data-float]').dataset.float) } });
+        toast(`Float booked: work order #${job.id}. Pick the float truck and driver on the Board.`);
         return load(day);
       }
     } catch (err) { toast(err.message); }
   });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && pick) closePicker(); });
   document.addEventListener('change', (ev) => {
     if (!root || !root.contains(ev.target)) return;
     const t = ev.target;
-    if (t.matches('[data-pick]') && t.value) return load(t.value);
-    const [id, e] = cardEdit(t);
-    if (!e) return;
-    if (t.matches('[data-truck], [data-driver]')) {
-      const row = e.trucks[Number(t.closest('[data-i]').dataset.i)];
-      if (t.matches('[data-truck]')) row.truck_id = t.value ? Number(t.value) : '';
-      else {
-        row.driver_id = t.value ? Number(t.value) : '';
-        const p = data.people.find((x) => x.id === row.driver_id);
-        if (p?.default_truck_id && !row.truck_id) row.truck_id = p.default_truck_id; // their usual truck
-      }
-      return dirty(id);
-    }
-    if (t.matches('[data-add-machine]') && t.value) { e.equipment.push(Number(t.value)); return dirty(id); }
-    if (t.matches('[data-add-lab]') && t.value && !e.labourers.includes(Number(t.value))) { e.labourers.push(Number(t.value)); return dirty(id); }
-  });
-  document.addEventListener('input', (ev) => {
-    if (!root || !root.contains(ev.target) || !ev.target.matches('[data-note], [data-mat], [data-loads]')) return;
-    const [, e] = cardEdit(ev.target);
-    if (ev.target.matches('[data-note]')) e.note = ev.target.value;
-    else {
-      const row = e.trucks[Number(ev.target.closest('[data-i]').dataset.i)];
-      if (ev.target.matches('[data-mat]')) row.material = ev.target.value; else row.loads = ev.target.value;
-    }
-    if (!e.dirty) { e.dirty = true; const b = ev.target.closest('[data-site]').querySelector('[data-save]'); b.disabled = false; b.textContent = 'Save'; }
+    if (t.matches('[data-pickday]') && t.value) return load(t.value);
+    if (t.matches('[data-note]')) { const r = row(); edits.get(r.site.id).note = t.value; return save(r.site.id, { reload: false }); }
   });
   document.addEventListener('submit', async (ev) => {
     if (!root || !root.contains(ev.target) || !ev.target.matches('[data-took]')) return;

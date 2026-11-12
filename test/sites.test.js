@@ -100,6 +100,11 @@ test('handing out a truck, a labourer and a machine makes an "Our site" work ord
   await sites.confirm('2026-11-16', { siteIds: [seguin.id] });
   assert.equal(sent.length, 1);
   assert.match(sent[0].body, /for Seguin on Mon Nov 16 you have: T4 with Dave Thompson, Excavator 1 \(floated from Carling\), Sam Lee\. Note: Bring the laser/);
+  const told = async () => (await sites.board('2026-11-16')).sites.find((s) => s.site.id === seguin.id).day.confirmed_at;
+  assert.ok(await told());
+  // Changing what the site gets after they were told means telling them again.
+  await sites.give(seguin.id, '2026-11-16', { trucks: [{ truck_id: t4.id, driver_id: dave.id }], equipment: [ex.id], note: 'Bring the laser' });
+  assert.equal(await told(), null);
 });
 
 test('"same" copies the last working day; the scheduled text goes once a working day; the link page saves a request', async (t) => {
