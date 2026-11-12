@@ -125,3 +125,26 @@ test('"same" copies the last working day; the scheduled text goes once a working
   assert.equal(describeNeeds(day.request), 'Triaxle (AM), Loader (AM), 1 labourer, call me');
   assert.equal((await fetch(`${base}/s/nope`)).status, 404);
 });
+
+test('hauling: material and loads from the text, the link and the office; confirmations text the crew too', async (t) => {
+  const { db, d, sites, sent, dave, t4, seguin, mike } = await setup(t);
+  await d.prices.seed();
+  await sites.ask('2026-11-16', { siteIds: [seguin.id] });
+  const r = await sites.handleReply(mike.phone, 'tandem of A gravel AM, 4 loads');
+  assert.match(r.reply, /Tandem \(AM\) – A Gravel 3\/4", 4 loads/);
+  const b = await sites.give(seguin.id, '2026-11-16', { trucks: [{ truck_id: t4.id, driver_id: dave.id, material: 'A Gravel 3/4"', loads: 4 }] });
+  const row = b.sites.find((s) => s.site.id === seguin.id);
+  assert.equal(row.given.trucks[0].material, 'A Gravel 3/4"');
+  assert.equal(Number(row.given.trucks[0].loads), 4);
+  const job = await d.getJob(row.job_id);
+  assert.equal(job.details.hauling, 'T4: A Gravel 3/4", 4 loads');
+  sent.length = 0;
+  const out = await sites.confirm('2026-11-16', { siteIds: [seguin.id], textCrew: true });
+  assert.equal(out.crew.length, 1, 'Dave is texted his job');
+  const daveText = sent.find((m) => m.to === '+17055550101');
+  assert.match(daveText.body, /Hauling: T4: A Gravel 3\/4", 4 loads/);
+  assert.match(sent.find((m) => m.to === mike.phone).body, /T4 with Dave Thompson \(A Gravel 3\/4", 4 loads\)/);
+  const again = await sites.confirm('2026-11-16', { siteIds: [seguin.id], textCrew: true });
+  assert.equal(again.crew.length, 0, 'not texted twice');
+  void db;
+});

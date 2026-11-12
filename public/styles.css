@@ -813,3 +813,9 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
   .site-grid { grid-template-columns: 1fr 1fr; }
 }
 .site-card .head a { white-space: nowrap; }
+
+.truck-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.truck-row .asked-for { grid-column: 1 / -1; }
+.truck-row input[data-mat] { grid-column: 1 / 2; }
+.truck-row input[data-loads] { grid-column: 2 / 3; max-width: 110px; }
+.truck-row + .truck-row { border-top: 1px dashed #e2e1da; padding-top: 6px; }

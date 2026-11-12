@@ -396,6 +396,10 @@ const ADDED_COLUMNS = {
     // One of our own job sites (Sites tab), for "Our site" work orders and the floats that move our machines.
     site_id: 'INTEGER',
   },
+  // What each truck on a site's day is hauling: { driver_id: { material, loads } } (Sites tab).
+  site_days: {
+    truck_notes: "TEXT NOT NULL DEFAULT '{}'",
+  },
   users: {
     // office: prices, questions, customers, work orders (no texting) · dispatcher: + texting drivers · admin: everything
     role: "TEXT NOT NULL DEFAULT 'admin'",

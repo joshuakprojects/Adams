@@ -18,6 +18,9 @@ function head(title) {
   .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 18px; }
   .quick .btn { font-size: 18px; padding: 16px; background: #fff; border: 3px solid #1d3a2b; color: #1d3a2b; }
   h2 { margin: 22px 0 6px; font-size: 18px; text-transform: uppercase; letter-spacing: .04em; color: #555; }
+  .haul { display: none; gap: 8px; padding: 0 0 12px; grid-template-columns: 1fr 110px; }
+  .haul.on { display: grid; }
+  .haul input { font: inherit; font-size: 17px; padding: 10px; border-radius: 10px; border: 2px solid #ccc; min-width: 0; box-sizing: border-box; }
   .saved { background: #e7f4ea; border: 2px solid #1d7a3d; color: #1d3a2b; padding: 14px; border-radius: 12px; font-size: 18px; margin: 12px 0; }
 </style></head><body>`;
 }
@@ -27,6 +30,12 @@ function stepper(name, label, value = 0) {
     <button type="button" data-d="-1" aria-label="One less ${esc(label)}">−</button><output>${value}</output>
     <button type="button" data-d="1" aria-label="One more ${esc(label)}">+</button>
     <input type="hidden" name="${esc(name)}" value="${value}"></span></div>`;
+}
+
+function haulRow(type, t = {}) {
+  return `<div class="haul ${t.count ? 'on' : ''}" data-haul="${esc(type)}">
+    <input name="mat:${esc(type)}" list="dl-mat" value="${esc(t.material || '')}" placeholder="What material? e.g. A Gravel 3/4&quot;" aria-label="${esc(type)} material">
+    <input name="loads:${esc(type)}" type="number" min="0" max="99" inputmode="numeric" value="${t.loads || ''}" placeholder="Loads" aria-label="${esc(type)} loads"></div>`;
 }
 
 function renderSitePage(p, { saved = false, describe = (r) => '' } = {}) {
@@ -46,7 +55,9 @@ function renderSitePage(p, { saved = false, describe = (r) => '' } = {}) {
   </form>
   <form method="post" id="needs">
     <h2>Trucks</h2>
-    <div class="card">${p.truck_types.map((t) => stepper(`truck:${t}`, t, count(r.trucks, 'type', t))).join('')}</div>
+    <div class="card">${p.truck_types.map((t) => stepper(`truck:${t}`, t, count(r.trucks, 'type', t))
+      + ((p.haul_types || []).includes(t) ? haulRow(t, { count: count(r.trucks, 'type', t), ...((r.trucks || []).find((x) => x.type === t) || {}) }) : '')).join('')}</div>
+    <datalist id="dl-mat">${(p.materials || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist>
     <h2>Machines</h2>
     <div class="card">${p.kinds.map((k) => stepper(`machine:${k}`, k, (r.equipment || []).filter((e) => e.kind === k).length)).join('')}</div>
     <h2>People</h2>
@@ -65,6 +76,9 @@ document.querySelectorAll('.step').forEach((s) => s.addEventListener('click', (e
   const input = s.querySelector('input'); const out = s.querySelector('output');
   const v = Math.max(0, Math.min(9, Number(input.value) + Number(b.dataset.d)));
   input.value = v; out.textContent = v;
+  // A hauling truck asked for: ask what material.
+  const haul = s.closest('.need').nextElementSibling;
+  if (haul && haul.classList.contains('haul')) haul.classList.toggle('on', v > 0);
 }));
 </script>
 </body></html>`;
@@ -79,7 +93,12 @@ function requestFromForm(body) {
   for (const [k, v] of Object.entries(body)) {
     const n = Math.max(0, Math.min(9, Number(v) || 0));
     if (!n) continue;
-    if (k.startsWith('truck:')) out.trucks.push({ type: k.slice(6).slice(0, 40), count: n, slot });
+    if (k.startsWith('truck:')) {
+      const type = k.slice(6).slice(0, 40);
+      const material = String(body[`mat:${type}`] || '').trim().slice(0, 100);
+      const loads = Math.max(0, Math.min(99, Number(body[`loads:${type}`]) || 0));
+      out.trucks.push({ type, count: n, slot, ...(material ? { material } : {}), ...(loads ? { loads } : {}) });
+    }
     if (k.startsWith('machine:')) for (let i = 0; i < n; i++) out.equipment.push({ kind: k.slice(8).slice(0, 60), slot });
   }
   if (!out.trucks.length && !out.equipment.length && !out.labourers && !out.note) out.nothing = true;

@@ -528,7 +528,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.post('/sites/equipment', need('admin'), json((req) => sites.saveEquipment(req.body || {})));
   api.post('/sites/ask-time', need('admin'), json(async (req) => ({ ask_time: await sites.saveAskTime(req.body?.ask_time) })));
   api.post('/sites/ask', json(async (req) => sites.ask(dayParam(req), { siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids.map(Number) : null, by: req.user.name })));
-  api.post('/sites/confirm', json(async (req) => sites.confirm(dayParam(req), { siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids.map(Number) : null })));
+  api.post('/sites/confirm', json(async (req) => sites.confirm(dayParam(req), { siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids.map(Number) : null,
+    textCrew: can(req.user, 'dispatcher') })));
   api.post('/sites/:id/request', json(async (req) => sites.saveRequest(Number(req.params.id), dayParam(req), { text: String(req.body?.text || ''), via: 'office' })));
   api.post('/sites/:id/give', json(async (req) => sites.give(Number(req.params.id), dayParam(req), req.body || {}, req.user.id)));
   api.post('/sites/:id/float', json(async (req) => sites.bookFloat(Number(req.params.id), dayParam(req), Number(req.body?.equipment_id), req.user.id)));
