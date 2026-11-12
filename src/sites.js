@@ -425,7 +425,8 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
         await dispatch.deleteJob?.(existing.id);
         await db.run('UPDATE site_days SET job_id = NULL WHERE id = ?', d.id);
       }
-      return board(day);
+      const floats = await syncFloats(siteId, day, [], userId);
+      return { ...(await board(day)), floats };
     }
     const truckNotes = Object.fromEntries(trucks.filter((t) => t.material || t.loads).map((t) => [t.driver_id, { material: t.material, loads: t.loads }]));
     const units = new Map((await dispatch.listTrucks({ includeInactive: true })).map((t) => [t.id, t.unit]));
@@ -455,7 +456,41 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     await db.run('DELETE FROM job_equipment WHERE job_id = ?', jobId);
     for (const id of equipment) await db.run('INSERT INTO job_equipment (job_id, equipment_id) VALUES (?, ?)', jobId, id);
     await db.run('UPDATE site_days SET job_id = ?, truck_notes = ? WHERE id = ?', jobId, JSON.stringify(truckNotes), d.id);
-    return board(day);
+    // Each driver's own load goes in their text (re-sent if it changed after they were texted).
+    for (const t of trucks) {
+      const note = [t.material, t.loads ? `${t.loads} load${t.loads === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
+      await db.run(`UPDATE assignments SET needs_resend = CASE WHEN note != ? AND status IN ('sent','acknowledged','in_progress') THEN 1 ELSE needs_resend END,
+          note = ? WHERE job_id = ? AND driver_id = ?`, note, note, jobId, t.driver_id);
+    }
+    const floats = await syncFloats(siteId, day, equipment, userId);
+    return { ...(await board(day)), floats };
+  }
+
+  /**
+   * Machines given to a site on a day that aren't there yet need delivering: make the float work order for each
+   * (from wherever the machine is). A machine taken off again loses its float, if nobody's been texted about it.
+   */
+  async function syncFloats(siteId, day, equipmentIds, userId = null) {
+    const events = await machineEvents();
+    const made = [];
+    for (const id of equipmentIds) {
+      const was = locate(events.get(id), day, false);
+      if (was.site_id === siteId) continue; // already there
+      const booked = (events.get(id) || []).some((x) => x.how === 'float' && x.day === day && x.site_id === siteId);
+      if (!booked) made.push(await bookFloat(siteId, day, id, userId));
+    }
+    const dropped = [];
+    const floats = await db.all('SELECT * FROM equipment_moves WHERE site_id = ? AND day = ? AND job_id IS NOT NULL', siteId, day);
+    for (const m of floats) {
+      if (equipmentIds.includes(Number(m.equipment_id))) continue;
+      const job = await dispatch.getJob(m.job_id);
+      if (job && job.status === 'open' && job.assignments.every((a) => a.status === 'pending')) {
+        await dispatch.deleteJob(job.id);
+        await db.run('DELETE FROM equipment_moves WHERE id = ?', m.id);
+        dropped.push(job.id);
+      }
+    }
+    return { made, dropped };
   }
 
   /** Book the float that moves a machine from where it was to this site, on the day. */

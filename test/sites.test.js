@@ -81,12 +81,20 @@ test('handing out a truck, a labourer and a machine makes an "Our site" work ord
   // The truck shows as busy at our site (not a customer) that day.
   assert.deepEqual(b.trucks.find((x) => x.id === t4.id).use.map((u) => [u.own, u.label]), [[true, 'Seguin']]);
 
-  const float = await sites.bookFloat(seguin.id, '2026-11-16', ex.id);
+  // The excavator isn't at Seguin yet: saving made its float work order.
+  assert.equal(b.floats.made.length, 1);
+  const float = b.floats.made[0];
   assert.equal(float.job_type, 'float');
   assert.equal(float.from_location, '4 Bay St, Carling');
   assert.equal(float.to_location, '12 Lake Rd, Seguin');
   const after = (await sites.board('2026-11-16')).sites.find((s) => s.site.id === seguin.id);
   assert.equal(after.given.equipment[0].float_job_id, float.id);
+  // Saving again doesn't make a second float; taking the machine off removes it (nobody texted yet).
+  assert.equal((await sites.give(seguin.id, '2026-11-16', { trucks: [{ truck_id: t4.id, driver_id: dave.id }], labourers: [sam.id], equipment: [ex.id], note: 'Bring the laser' })).floats.made.length, 0);
+  const off = await sites.give(seguin.id, '2026-11-16', { trucks: [{ truck_id: t4.id, driver_id: dave.id }], labourers: [sam.id], note: 'Bring the laser' });
+  assert.deepEqual(off.floats.dropped, [float.id]);
+  assert.equal(await d.getJob(float.id), null);
+  await sites.give(seguin.id, '2026-11-16', { trucks: [{ truck_id: t4.id, driver_id: dave.id }], labourers: [sam.id], equipment: [ex.id], note: 'Bring the laser' });
 
   sent.length = 0;
   await sites.confirm('2026-11-16', { siteIds: [seguin.id] });
@@ -150,7 +158,8 @@ test('hauling: material and loads from the text, the link and the office; confir
   const out = await morning.runScheduledLineup();
   assert.equal(out.date, '2026-11-16', "today's jobs, not tomorrow's");
   const daveText = sent.find((m) => m.to === '+17055550101');
-  assert.match(daveText.body, /Hauling: T4: A Gravel 3\/4", 4 loads/);
+  assert.match(daveText.body, /Your load: A Gravel 3\/4", 4 loads/);
+  assert.doesNotMatch(daveText.body, /Equipment:|Hauling:/, 'the dump truck driver sees only his own load');
   assert.equal(await morning.runScheduledLineup(), null, 'once a morning');
   void db;
 });

@@ -622,7 +622,8 @@
         ${Number(job.draft) ? '<span class="tag st-draft" title="Not finished — can\'t be texted yet">DRAFT</span>' : ''}
         ${statusTag}
         <span class="spacer"></span>
-        ${job.job_type === 'site' ? '<span class="tag own-site" title="One of our own job sites, not a customer">OUR SITE</span>' : `<span class="tag type" title="${esc(t.title)}">${esc(t.name)}</span>`}
+        ${job.job_type === 'site' ? '<span class="tag own-site" title="One of our own job sites, not a customer">OUR SITE</span>'
+          : `${job.site_id ? '<span class="tag own-site" title="Moving one of our machines for our own job site">OUR SITE</span>' : ''}<span class="tag type" title="${esc(t.title)}">${esc(t.name)}</span>`}
       </div>
       ${stale ? `<div class="stale-date">From ${esc(longDate(job.scheduled_date))}</div>` : ''}
       ${attentionReasons(job).length ? `<div class="attention">${attentionReasons(job).map(esc).join(' · ')}</div>` : ''}
