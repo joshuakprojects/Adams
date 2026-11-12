@@ -18,6 +18,8 @@ const { runAs } = require('./actor');
 const { CustomerError } = require('./customers');
 const twilio = require('./twilio');
 const { createIntake, validKey, IntakeError } = require('./intake');
+const { createSites, describeNeeds } = require('./sites');
+const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
 async function fetchTwilioMedia(url) {
@@ -43,8 +45,9 @@ const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, 
 
 function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
   qbo = createQuickBooks(db, dispatch), sunwire = createSunwire(), sendReply = (to, body) => sms.sendSms(to, body),
-  smsProvider = config.smsProvider }) {
+  smsProvider = config.smsProvider, sites = null }) {
   const intake = createIntake(db);
+  sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
   const app = express();
   app.set('trust proxy', true);
   app.disable('x-powered-by');
@@ -65,6 +68,19 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   app.use('/brand', express.static(path.join(pub, 'brand'), { maxAge: '7d', fallthrough: false }));
   app.get('/favicon.ico', (_req, res) => res.sendFile(path.join(pub, 'brand', 'favicon.ico'), { maxAge: '7d' }));
   app.get('/healthz', (_req, res) => res.json({ ok: true, db: db.kind }));
+
+  // ---------- site head's page (the link in the afternoon "what do you need?" text) ----------
+  app.get('/s/:token', h(async (req, res) => {
+    const p = await sites.pageFor(req.params.token);
+    if (!p) return res.status(404).send(renderSiteNotFound());
+    res.set('Cache-Control', 'no-store').send(renderSitePage(p, { saved: req.query.saved === '1', describe: describeNeeds }));
+  }));
+  app.post('/s/:token', h(async (req, res) => {
+    const p = await sites.pageFor(req.params.token);
+    if (!p) return res.status(404).send(renderSiteNotFound());
+    await sites.saveRequest(p.site.id, p.day, { request: requestFromForm(req.body || {}), via: 'link' });
+    res.redirect(303, `/s/${encodeURIComponent(req.params.token)}?saved=1`);
+  }));
 
   // ---------- driver job page (the link in the text; the token is the key) ----------
   app.get('/j/:token', h(async (req, res) => {
@@ -134,7 +150,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
         console.error('Could not download texted photo:', err.message);
       }
     }
-    const { reply } = await dispatch.handleInbound(req.body.From, req.body.Body, { media });
+    const asSite = media.length ? null : await sites.handleReply(sms.normalizePhone(req.body.From) || req.body.From, req.body.Body);
+    const { reply } = asSite || await dispatch.handleInbound(req.body.From, req.body.Body, { media });
     res.type('text/xml').send(sms.twiml(reply));
   }));
 
@@ -156,7 +173,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
         console.error('Could not download texted photo:', err.message);
       }
     }
-    const { reply } = await dispatch.handleInbound(b.From, text, { media });
+    const asSite = media.length ? null : await sites.handleReply(sms.normalizePhone(b.From) || b.From, text);
+    const { reply } = asSite || await dispatch.handleInbound(b.From, text, { media });
     if (b.ID) {
       seenSunwire.set(String(b.ID), Date.now());
       if (seenSunwire.size > 2000) seenSunwire.delete(seenSunwire.keys().next().value);
@@ -500,6 +518,21 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.post('/customers/:id/contacted', json((req) => dispatch.customers.markContacted(req.params.id, req.body?.note)));
   api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
+  // ---------- our own job sites (Sites tab) ----------
+  const dayParam = (req) => (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || req.body?.day || '')) ? String(req.query.day || req.body.day) : null);
+  api.get('/sites/board', json(async (req) => sites.board(dayParam(req) || require('./sites').nextWorkDay(dispatch.today()))));
+  api.get('/sites/setup', json(async () => ({ heads: await sites.listHeads({ all: true }), sites: await sites.listSites({ all: true }),
+    equipment: await sites.listEquipment({ all: true }), ask_time: await sites.askTime() })));
+  api.post('/sites/heads', need('admin'), json((req) => sites.saveHead(req.body || {})));
+  api.post('/sites/sites', need('admin'), json((req) => sites.saveSite(req.body || {})));
+  api.post('/sites/equipment', need('admin'), json((req) => sites.saveEquipment(req.body || {})));
+  api.post('/sites/ask-time', need('admin'), json(async (req) => ({ ask_time: await sites.saveAskTime(req.body?.ask_time) })));
+  api.post('/sites/ask', json(async (req) => sites.ask(dayParam(req), { siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids.map(Number) : null, by: req.user.name })));
+  api.post('/sites/confirm', json(async (req) => sites.confirm(dayParam(req), { siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids.map(Number) : null })));
+  api.post('/sites/:id/request', json(async (req) => sites.saveRequest(Number(req.params.id), dayParam(req), { text: String(req.body?.text || ''), via: 'office' })));
+  api.post('/sites/:id/give', json(async (req) => sites.give(Number(req.params.id), dayParam(req), req.body || {}, req.user.id)));
+  api.post('/sites/:id/float', json(async (req) => sites.bookFloat(Number(req.params.id), dayParam(req), Number(req.body?.equipment_id), req.user.id)));
+
   api.get('/drivers', json((req) => dispatch.listDrivers({ includeInactive: req.query.all === '1' })));
   api.post('/drivers', need('admin'), json((req) => dispatch.saveDriver(req.body)));
   api.get('/trucks', json((req) => dispatch.listTrucks({ includeInactive: req.query.all === '1' })));
@@ -572,6 +605,8 @@ async function main() {
   await auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
   await dispatch.loadCustomFields();
+  const sites = createSites(db, dispatch, { today: dispatch.today });
+  await sites.ensureSetup();
   const priced = await dispatch.prices.seed();
   if (priced) console.log(`Price book: loaded ${priced} prices from the price sheets.`);
   const linked = await dispatch.customers.backfill();
@@ -588,7 +623,7 @@ async function main() {
   const qbo = createQuickBooks(db, dispatch);
   dispatch.onChange((jobId, action) => { if (!/^Estimate /.test(action)) qbo.enqueue(jobId).catch(() => {}); });
   setInterval(() => qbo.processQueue().catch((err) => console.error('QuickBooks sync:', err.message)), 5 * 60 * 1000);
-  createApp({ db, dispatch, backups, qbo }).listen(config.port, () => {
+  createApp({ db, dispatch, backups, qbo, sites }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
@@ -597,6 +632,10 @@ async function main() {
     dispatch.runScheduledLineup()
       .then((out) => out && console.log(`Sent lineup for ${out.date} to ${out.results.length} driver(s)`))
       .catch((err) => console.error('Lineup send failed:', err));
+    // "What do you need tomorrow?" texts to site heads (Setup → Our sites).
+    sites.runScheduledAsk()
+      .then((out) => out && console.log(`Asked site heads about ${out.day}: ${out.results.filter((r) => r.ok).length} texted`))
+      .catch((err) => console.error('Site head texts failed:', err));
     // Review texts to customers of finished jobs (Setup → Review requests).
     dispatch.runReviewRequests()
       .then((out) => out?.some((r) => r.status === 'sent') && console.log(`Review texts sent: ${out.filter((r) => r.status === 'sent').map((r) => '#' + r.id).join(', ')}`))

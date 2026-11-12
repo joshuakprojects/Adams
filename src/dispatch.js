@@ -86,7 +86,7 @@ function parseJson(text) {
 }
 
 const ASSIGNMENT_SELECT = `
-  SELECT a.*, d.name AS driver_name, d.phone AS driver_phone, t.unit AS truck_unit, t.kind AS truck_kind
+  SELECT a.*, d.name AS driver_name, d.phone AS driver_phone, d.kind AS driver_kind, t.unit AS truck_unit, t.kind AS truck_kind
   FROM assignments a
   JOIN drivers d ON d.id = a.driver_id
   LEFT JOIN trucks t ON t.id = a.truck_id`;
@@ -1025,7 +1025,7 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
 
   // ---------- review requests: a text asking the customer for a Google review after the job ----------
   const REVIEW_DEFAULT = 'Hi {name}, thanks for choosing Adams Bros! If you were happy with the job, a quick Google review would mean a lot to us: {link}';
-  const REVIEW_TYPES = FORMS.TYPE_KEYS.filter((k) => k !== 'labour'); // labour jobs have no customer
+  const REVIEW_TYPES = FORMS.TYPE_KEYS.filter((k) => !FORMS.typeInfo(k).noPricing); // labour / our-site jobs have no customer
   async function reviewSettings() {
     const types = parseJson(await getSetting('review_types', '')) ;
     return {

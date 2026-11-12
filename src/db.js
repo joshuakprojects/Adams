@@ -294,6 +294,57 @@ CREATE TABLE IF NOT EXISTS qbo_sync (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Our own job sites (Sites tab): the people running them, the sites, our equipment, and what each site asked for / was given per day.
+CREATE TABLE IF NOT EXISTS site_heads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL UNIQUE,
+  active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS sites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  address TEXT NOT NULL DEFAULT '',
+  municipality TEXT NOT NULL DEFAULT '',
+  head_id INTEGER REFERENCES site_heads(id) ON DELETE SET NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT NOT NULL DEFAULT '',
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS equipment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'Other',
+  unit TEXT NOT NULL DEFAULT '',
+  in_shop INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT NOT NULL DEFAULT '',
+  sort INTEGER NOT NULL DEFAULT 0
+);
+-- status: '' | asked | replied | nothing.  request: what they asked for (JSON).  job_id: the day's "Our site" work order.
+CREATE TABLE IF NOT EXISTS site_days (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  day TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT '',
+  asked_at TEXT,
+  reply_text TEXT NOT NULL DEFAULT '',
+  reply_via TEXT NOT NULL DEFAULT '',
+  replied_at TEXT,
+  request TEXT NOT NULL DEFAULT '{}',
+  job_id INTEGER,
+  confirmed_at TEXT,
+  UNIQUE (site_id, day)
+);
+CREATE TABLE IF NOT EXISTS job_equipment (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  equipment_id INTEGER NOT NULL REFERENCES equipment(id) ON DELETE CASCADE,
+  UNIQUE (job_id, equipment_id)
+);
+
 -- Driving distances looked up with Google (kept up to 30 days).
 CREATE TABLE IF NOT EXISTS distances (
   route_key TEXT PRIMARY KEY,
@@ -342,6 +393,8 @@ const ADDED_COLUMNS = {
     review_status: "TEXT NOT NULL DEFAULT ''", // '' = not yet · sent · skipped · failed
     review_at: 'TEXT',
     no_review: 'INTEGER NOT NULL DEFAULT 0',
+    // One of our own job sites (Sites tab), for "Our site" work orders and the floats that move our machines.
+    site_id: 'INTEGER',
   },
   users: {
     // office: prices, questions, customers, work orders (no texting) · dispatcher: + texting drivers · admin: everything
