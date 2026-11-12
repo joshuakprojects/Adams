@@ -834,3 +834,9 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 .help-strip .link { font-size: 13.5px; color: #555; }
 .help-link { color: #fff; font-weight: 600; font-size: 14px; text-decoration: none; border: 1px solid rgba(255,255,255,.35); border-radius: 6px; padding: 3px 10px; margin-right: 8px; }
 .help-link:hover { border-color: #fec30c; color: #fec30c; }
+
+.site-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 10px; margin: 12px 0 4px; }
+.sstep { display: flex; flex-direction: column; gap: 6px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.sstep .btn { align-self: flex-start; }
+.sstep .btn[disabled] { opacity: .45; cursor: not-allowed; }
+.sstep span { font-size: 13.5px; color: var(--muted); line-height: 1.45; }

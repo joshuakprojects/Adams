@@ -10,6 +10,7 @@
 
   const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
   const time = (sql) => (sql ? new Date(sql.replace(' ', 'T') + 'Z').toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' }) : '');
+  const hm12 = (hm) => { const [h, m] = hm.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
   const dateLong = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
 
   async function mount(el) {
@@ -92,7 +93,7 @@
       </header>
       <section class="asked">
         <div class="row-actions">${statusChip(row)} ${row.day?.confirmed_at ? `<span class="chip done">Confirmed ${esc(time(row.day.confirmed_at))}</span>` : ''}
-          ${s.head_phone ? `<button class="btn tiny" data-ask="${s.id}">Text ${esc(String(s.head_name || '').split(' ')[0])}</button>` : ''}</div>
+          ${s.head_phone ? `<button class="btn tiny" data-ask="${s.id}" title="Sends the 'what do you need?' text to just this site head">Ask ${esc(String(s.head_name || '').split(' ')[0])} again</button>` : ''}</div>
         ${row.day?.reply_text ? `<blockquote>${esc(row.day.reply_text)}</blockquote>` : ''}
         ${row.asked ? `<div class="need-line"><span class="lbl">Asked for</span> ${esc(row.asked)}</div>` : ''}
         <form class="took" data-took="${s.id}"><input name="text" placeholder="Took it on the phone? Type what they need, e.g. tandem AM, loader" aria-label="What they need">
@@ -159,14 +160,19 @@
           <button class="btn" data-day="1" aria-label="Day after">›</button>
           ${day !== data.next_work_day ? `<button class="btn" data-goto="${data.next_work_day}">Next work day</button>` : ''}</div>
         <h2>${esc(dateLong(day))}</h2>
-        <div class="row-actions">
-          <button class="btn" data-ask-all>Text all site heads</button>
-          <button class="btn primary" data-confirm-all title="Texts each site head what they're getting. Drivers and labourers are told the morning of.">Send confirmations</button>
-          <button class="btn" data-print>Print</button>
+        <div class="row-actions"><button class="btn" data-print>Print</button></div>
+      </div>
+      <div class="site-steps">
+        <div class="sstep">
+          <button class="btn" data-ask-all>1 · Ask site heads what they need</button>
+          <span>Texts each site head "what do you need on ${esc(dateLong(day).split(',')[0])}?"${data.ask_time ? ` Goes out by itself at ${esc(hm12(data.ask_time))} on work days; use this to send it now.` : ' (The automatic afternoon text is off: Setup → Our sites.)'}</span>
+        </div>
+        <div class="sstep">
+          <button class="btn primary" data-confirm-all ${data.sites.some((s) => s.given || s.day?.status === 'nothing') ? '' : 'disabled title="Give at least one site what it needs and Save first"'}>2 · Tell site heads what they're getting</button>
+          <span>After you've saved each site: texts each site head their list. Drivers are told in the morning.</span>
         </div>
       </div>
-      <p class="muted small">${data.sites.length} site${data.sites.length === 1 ? '' : 's'} · asked ${asked} · replied ${replied}
-        ${data.ask_time ? ` · site heads are texted automatically at ${esc(data.ask_time)} on work days` : ' · automatic text is off (Setup → Our sites)'}</p>
+      <p class="muted small">${data.sites.length} site${data.sites.length === 1 ? '' : 's'} · asked ${asked} · replied ${replied}</p>
       ${data.sites.length ? '' : '<div class="empty">No sites yet. Add site heads and sites under Setup → Our sites.</div>'}
       <div class="site-grid">${data.sites.map(siteCard).join('')}</div>
       <datalist id="dl-site-mat">${(data.materials || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist>

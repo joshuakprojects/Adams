@@ -151,7 +151,7 @@ For the people running our own jobs (site heads), instead of calling round at th
    list says what's already out that day — *customer: Smith* or *at Carling*. **Save** makes the day's **Our site**
    work order (marked OUR SITE on the board, never priced or sent to QuickBooks); the drivers get it in the morning jobs text.
 4. Giving a site a machine that isn't there yet makes its **float work order** automatically when you save (from the yard or the site it's at), marked OUR SITE on the board; taking the machine off again removes the float if nobody's been texted about it. Each driver's text shows only their own load ("Your load: A Gravel 3/4", 1 load"), not the site's machines.
-5. **Send confirmations** texts each site head what they're getting. Drivers and labourers are **not** texted then: they
+5. **2 · Tell site heads what they're getting** (was Send confirmations) texts each site head what they're getting. Drivers and labourers are **not** texted then: they
    get their jobs in the **morning jobs text** (Setup → Drivers' jobs text → "for today, the morning of, at 6:30 AM").
    Hauling trucks (Tandem, Triaxle) carry a material and number of loads: asked on the link, read from texts ("tandem
    of A gravel, 4 loads"), set on the Sites tab, and in the drivers' text.
