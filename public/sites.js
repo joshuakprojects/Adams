@@ -58,7 +58,7 @@
   }
   function machineOptions(siteName, taken, siteId) {
     return '<option value="">+ Add a machine…</option>' + data.equipment.filter((e) => !taken.includes(e.id) && e.site_id !== siteId).map((e) => {
-      const where = e.in_shop ? 'in the shop' : e.site_id ? `at ${e.at} since ${e.since_label}` : 'in the yard';
+      const where = e.in_shop ? 'in the shop' : e.site_id || e.place ? `at ${e.at} since ${e.since_label}` : 'in the yard';
       return `<option value="${e.id}" ${e.in_shop ? 'disabled' : ''}>${esc(e.name)} (${esc(e.kind)}) — ${esc(where)}</option>`;
     }).join('');
   }
@@ -136,7 +136,8 @@
     const freeTrucks = data.trucks.filter((t) => !t.use.length);
     const custTrucks = data.trucks.filter((t) => t.use.some((u) => !u.own));
     const siteTrucks = data.trucks.filter((t) => t.use.some((u) => u.own));
-    const yardMachines = data.equipment.filter((e) => !e.site_id && !e.in_shop);
+    const yardMachines = data.equipment.filter((e) => !e.site_id && !e.place && !e.in_shop);
+    const elsewhere = data.equipment.filter((e) => !e.site_id && e.place && !e.in_shop);
     const siteMachines = data.equipment.filter((e) => e.site_id);
     const shop = data.equipment.filter((e) => e.in_shop);
     const list = (xs, f) => xs.map(f).join(', ') || '<span class="muted">none</span>';
@@ -145,6 +146,7 @@
       <div><span class="lbl">Out to customers</span> ${list(custTrucks, (t) => esc(t.unit))}</div>
       <div><span class="lbl">At our sites</span> ${list(siteTrucks, (t) => esc(t.unit))}</div>
       <div><span class="lbl">Machines in the yard</span> ${list(yardMachines, (e) => esc(e.name))}</div>
+      ${elsewhere.length ? `<div><span class="lbl">Machines elsewhere</span> ${list(elsewhere, (e) => `${esc(e.name)} <span class="muted">(${esc(e.place)})</span>`)}</div>` : ''}
       <div><span class="lbl">Machines at sites</span> ${list(siteMachines, (e) => `${esc(e.name)} <span class="muted">(${esc(e.at)} since ${esc(e.since_label)})</span>`)}</div>
       ${shop.length ? `<div><span class="lbl">In the shop</span> ${list(shop, (e) => esc(e.name))}</div>` : ''}
     </div>`;
@@ -403,7 +405,7 @@
       <div class="rows">${d.equipment.map((e) => {
         const loc = d.locations?.[e.id];
         return `<div class="lrow ${e.active ? '' : 'inactive'}"><div><div class="t">${esc(e.name)}${e.unit ? ` <span class="sub">#${esc(e.unit)}</span>` : ''}</div><div class="sub">${esc(e.kind)}${e.active ? '' : ' · not in use'}</div></div>
-          <div class="meta">${e.in_shop ? '<span class="pill warn">In the shop</span>' : ''}<span class="pill ${loc?.site_id ? 'brand' : ''}">${loc?.site_id ? `At ${esc(siteName(loc.site_id))}` : 'In the yard'}</span>
+          <div class="meta">${e.in_shop ? '<span class="pill warn">In the shop</span>' : ''}<span class="pill ${loc?.site_id ? 'brand' : loc?.place ? 'warn' : ''}">${loc?.site_id ? `At ${esc(siteName(loc.site_id))}` : loc?.place ? `At ${esc(loc.place)}` : 'In the yard'}</span>
           <button class="btn tiny" type="button" data-pedit="machine" data-id="${e.id}">Edit</button></div></div>`;
       }).join('') || '<div class="lempty">No machines yet.</div>'}</div>
       <p class="muted small">Placeholder machines are listed to start: rename them, or switch off <b>In use</b>. <b>Where it is now</b> in a machine's panel fixes its place if it was moved without the app (no float is made).</p>`;
@@ -423,11 +425,14 @@
       + switchHtml('ps-active', 'Active (gets the afternoon text)', item ? item.active : true)
       + '<span class="dhint">Switch Active off when the job wraps up.</span>';
     if (kind === 'machine') {
-      const loc = item ? d.locations?.[item.id]?.site_id || '' : '';
+      const at = item ? d.locations?.[item.id] || {} : {};
+      const loc = at.site_id || (at.place ? 'other' : '');
       body = fieldHtml('pm-name', 'Name', `<input id="pm-name" value="${v('name')}" placeholder="e.g. Cat 308">`)
         + fieldHtml('pm-kind', 'Kind', `<input id="pm-kind" value="${v('kind')}" list="dl-pm-kinds" placeholder="Excavator"><datalist id="dl-pm-kinds">${['Excavator', 'Mini excavator', 'Loader', 'Skid steer', 'Dozer', 'Roller', 'Grader'].map((k) => `<option value="${k}">`).join('')}</datalist>`, 'What site heads call it when they ask ("mini ex", "loader").')
         + fieldHtml('pm-unit', 'Unit #', `<input id="pm-unit" value="${v('unit')}" placeholder="EX-3">`, 'The number or code on the machine, if it has one.')
-        + fieldHtml('pm-where', 'Where it is now', `<select id="pm-where"><option value="">The yard</option>${d.sites.filter((s) => s.active || s.id === loc).map((s) => `<option value="${s.id}" ${s.id === loc ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`,
+        + fieldHtml('pm-where', 'Where it is now', `<select id="pm-where"><option value="">The yard</option>${d.sites.filter((s) => s.active || s.id === loc).map((s) => `<option value="${s.id}" ${s.id === loc ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+            <option value="other" ${loc === 'other' ? 'selected' : ''}>Somewhere else…</option></select>
+            <input id="pm-place" value="${esc(at.place || '')}" placeholder="e.g. Sundridge shop, Cat dealer for repairs" aria-label="Where it is" ${loc === 'other' ? '' : 'hidden'}>`,
           item ? 'Changing this makes no float. Use it if the machine was moved without the app.' : 'Where the machine is today. No float is made; from now on the app keeps track as it moves.')
         + switchHtml('pm-shop', 'In the shop', item?.in_shop)
         + switchHtml('pm-active', 'In use', item ? item.active : true);
@@ -445,7 +450,12 @@
         if (kind === 'machine') {
           const saved = await api('/sites/equipment', { method: 'POST', body: { id: item?.id, name: val('pm-name'), kind: val('pm-kind'), unit: val('pm-unit'), in_shop: chk('pm-shop'), active: chk('pm-active') } });
           const where = val('pm-where');
-          if (String(where) !== String((item && d.locations?.[item.id]?.site_id) || '')) await api(`/sites/equipment/${saved.id}/place`, { method: 'POST', body: { site_id: where || null } });
+          const place = where === 'other' ? val('pm-place').trim() : '';
+          if (where === 'other' && !place) { toast('Type where the machine is, or pick a site or the yard'); return false; }
+          const was = (item && d.locations?.[item.id]) || {};
+          if (String(where === 'other' ? '' : where) !== String(was.site_id || '') || place !== (was.place || '')) {
+            await api(`/sites/equipment/${saved.id}/place`, { method: 'POST', body: { site_id: where === 'other' ? null : where || null, place } });
+          }
         }
         toast('Saved ✓');
         await reloadParts();
@@ -465,6 +475,12 @@
       const list = { head: parts.d.heads, site: parts.d.sites, machine: parts.d.equipment }[ed.dataset.pedit];
       return openPart(ed.dataset.pedit, list.find((x) => x.id === Number(ed.dataset.id)));
     }
+  });
+  // "Somewhere else…" shows its text box.
+  document.addEventListener('change', (ev) => {
+    if (ev.target.id !== 'pm-where') return;
+    const box = document.getElementById('pm-place');
+    if (box) { box.hidden = ev.target.value !== 'other'; if (!box.hidden) box.focus(); }
   });
   document.addEventListener('change', async (ev) => {
     if (!parts || !parts.mounts.sitetext.contains(ev.target)) return;

@@ -224,3 +224,18 @@ test('Setup can say where a machine really is (no float); then giving it to that
   await sites.placeMachine(ex.id, null);
   assert.equal((await sites.locations())[ex.id].site_id, null, 'back in the yard by hand');
 });
+
+test('a machine can be somewhere else (e.g. a repair shop); giving it to a site books the float from there', async (t) => {
+  const { sites, seguin } = await setup(t);
+  const [ex] = await sites.listEquipment();
+  await sites.placeMachine(ex.id, null, 'Cat dealer, Sudbury');
+  const loc = (await sites.locations())[ex.id];
+  assert.deepEqual([loc.site_id, loc.place], [null, 'Cat dealer, Sudbury']);
+  assert.equal((await sites.placeMachine(ex.id, null, 'Cat dealer, Sudbury')).unchanged, true);
+  const b = await sites.give(seguin.id, '2026-11-16', { equipment: [ex.id] });
+  assert.equal(b.floats.made[0].from_location, 'Cat dealer, Sudbury');
+  const row = (await sites.board('2026-11-17')).sites.find((s) => s.site.id === seguin.id);
+  assert.equal(row.on_site[0].from, 'Cat dealer, Sudbury');
+  await sites.placeMachine(ex.id, null, '');
+  assert.equal((await sites.locations())[ex.id].place, '', 'back to the yard');
+});
