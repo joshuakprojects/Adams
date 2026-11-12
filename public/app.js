@@ -93,7 +93,7 @@
     if (tab === 'people') window.QBO_UI?.loadQbo().catch(() => {});
     if (tab === 'board') loadBoard();
     if (tab === 'sites') window.SITES?.mount($('#sites-root')).catch((err) => toast(err.message));
-    if (tab === 'people' && state.can?.admin) window.SITES?.mountSetup($('#sites-setup')).catch(() => {});
+    if (tab === 'people' && state.can?.admin) window.SETUP_UI?.start();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
@@ -1232,7 +1232,7 @@
       if (el.type === 'checkbox') el.checked = Boolean(obj[el.name]);
       else el.value = el.name === 'phone' ? prettyPhone(obj.phone) : obj[el.name] ?? '';
     }
-    f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.dispatchEvent(new CustomEvent('setup-edit', { detail: { form: f } })); // Setup opens it in the side panel
   }
 
   $('#tab-people').addEventListener('click', (e) => {
@@ -1253,8 +1253,10 @@
         await api(path, { method: 'POST', body });
         e.target.reset();
         e.target.elements.id.value = '';
-        toast('Saved');
+        toast('Saved ✓');
+        document.dispatchEvent(new CustomEvent('setup-saved', { detail: { form: formId } }));
         loadPeople();
+        window.SETUP_UI?.refresh();
       } catch (err) { toast(err.message); }
     });
     $(formId).addEventListener('reset', (e) => setTimeout(() => {

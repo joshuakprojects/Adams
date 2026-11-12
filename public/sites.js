@@ -362,5 +362,119 @@
     } catch (err) { toast(err.message); }
   });
 
-  window.SITES = { mount, mountSetup, reload: () => root && load(day) };
+  // ---------- Setup (new layout): Equipment, Sites & site heads, Site heads' text ----------
+  let parts = null;
+  let partsTab = 'sites';
+  const hm12s = (hm) => { if (!hm) return ''; const [h, m] = hm.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+  async function mountSetupParts(mounts) {
+    parts = { mounts, d: await api('/sites/setup') };
+    renderParts();
+  }
+  function fieldHtml(id, label, input, hint = '') {
+    return `<div class="dfield"><label for="${id}">${esc(label)}</label>${input}${hint ? `<span class="dhint">${hint}</span>` : ''}</div>`;
+  }
+  const switchHtml = (id, label, on) => `<label class="dswitch" for="${id}"><span class="sw"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></span>${esc(label)}</label>`;
+  function renderParts() {
+    const { mounts, d } = parts;
+    const siteName = (id) => d.sites.find((s) => s.id === id)?.name || 'a site';
+    // Site heads' text
+    mounts.sitetext.innerHTML = `<div class="setlist">
+      <div class="setrow"><div><div class="t">Ask site heads automatically</div><div class="sub">Every work day. You can also ask any time from the Our sites page.</div></div>
+        <div class="ctrl"><label class="sw"><input type="checkbox" data-ask-on ${d.ask_time ? 'checked' : ''} aria-label="Ask site heads automatically"><span></span></label></div></div>
+      <div class="setrow"><div><div class="t">Time</div><div class="sub">Eastern time.</div></div>
+        <div class="ctrl"><input type="time" data-ask-time value="${esc(d.ask_time || '14:30')}" aria-label="Time"></div></div>
+      <div class="setrow"><div><div class="t">What they get</div><div class="bubble-prev">Hi Mike - what do you need at Seguin on Mon Nov 16? Reply e.g. "tandem AM, mini ex, 2 labourers", or "same", or "nothing". Or tap: (their link)</div></div></div>
+    </div>`;
+    // Sites & site heads
+    const activeCount = (h) => d.sites.filter((s) => s.head_id === h.id && s.active).length;
+    mounts.sites.innerHTML = `<div class="sub-head"><div class="subtabs" role="tablist">
+        <button type="button" class="${partsTab === 'sites' ? 'on' : ''}" data-ptab="sites">Sites (${d.sites.length})</button>
+        <button type="button" class="${partsTab === 'heads' ? 'on' : ''}" data-ptab="heads">Site heads (${d.heads.length})</button></div>
+        <button class="btn primary" type="button" data-padd="${partsTab === 'sites' ? 'site' : 'head'}">+ Add ${partsTab === 'sites' ? 'site' : 'site head'}</button></div>
+      <div class="rows">${partsTab === 'sites'
+        ? d.sites.map((x) => `<div class="lrow"><div><div class="t">${esc(x.name)}</div><div class="sub">${esc(x.address || 'No address')}${x.head_name ? ' · run by ' + esc(x.head_name) : ' · no site head'}</div></div>
+            <div class="meta"><span class="pill ${x.active ? 'ok' : ''}">${x.active ? 'Active' : 'Wrapped up'}</span><button class="btn tiny" type="button" data-pedit="site" data-id="${x.id}">Edit</button></div></div>`).join('')
+          || '<div class="lempty">No sites yet. Add the first one with <b>+ Add site</b>.</div>'
+        : d.heads.map((h) => `<div class="lrow"><div><div class="t">${esc(h.name)}</div><div class="sub">${esc(A.prettyPhone(h.phone))} · runs ${activeCount(h)} active site${activeCount(h) === 1 ? '' : 's'}</div></div>
+            <div class="meta">${h.active ? '' : '<span class="pill">Inactive</span>'}<button class="btn tiny" type="button" data-pedit="head" data-id="${h.id}">Edit</button></div></div>`).join('')
+          || '<div class="lempty">No site heads yet. Add the first one with <b>+ Add site head</b>.</div>'}</div>`;
+    // Equipment
+    mounts.equipment.innerHTML = `<div class="sub-head"><span></span><button class="btn primary" type="button" data-padd="machine">+ Add machine</button></div>
+      <div class="rows">${d.equipment.map((e) => {
+        const loc = d.locations?.[e.id];
+        return `<div class="lrow ${e.active ? '' : 'inactive'}"><div><div class="t">${esc(e.name)}${e.unit ? ` <span class="sub">#${esc(e.unit)}</span>` : ''}</div><div class="sub">${esc(e.kind)}${e.active ? '' : ' · not in use'}</div></div>
+          <div class="meta">${e.in_shop ? '<span class="pill warn">In the shop</span>' : ''}<span class="pill ${loc?.site_id ? 'brand' : ''}">${loc?.site_id ? `At ${esc(siteName(loc.site_id))}` : 'In the yard'}</span>
+          <button class="btn tiny" type="button" data-pedit="machine" data-id="${e.id}">Edit</button></div></div>`;
+      }).join('') || '<div class="lempty">No machines yet.</div>'}</div>
+      <p class="muted small">Placeholder machines are listed to start: rename them, or switch off <b>In use</b>. <b>Where it is now</b> in a machine's panel fixes its place if it was moved without the app (no float is made).</p>`;
+  }
+  async function reloadParts() { parts.d = await api('/sites/setup'); renderParts(); window.SETUP_UI?.refresh(); }
+  function openPart(kind, item = null) {
+    const { d } = parts;
+    const v = (k) => esc(item?.[k] ?? '');
+    let body = '';
+    if (kind === 'head') body = fieldHtml('ph-name', 'Name', `<input id="ph-name" value="${v('name')}">`)
+      + fieldHtml('ph-phone', 'Cell number', `<input id="ph-phone" type="tel" value="${esc(item ? A.prettyPhone(item.phone) : '')}" placeholder="705-555-0123">`, 'The "what do you need?" text goes to this number.')
+      + switchHtml('ph-active', 'Active', item ? item.active : true);
+    if (kind === 'site') body = fieldHtml('ps-name', 'Site name', `<input id="ps-name" value="${v('name')}" placeholder="e.g. Seguin – Lake Rd septic">`)
+      + fieldHtml('ps-address', 'Address', `<input id="ps-address" value="${v('address')}">`)
+      + fieldHtml('ps-muni', 'Municipality', `<input id="ps-muni" value="${v('municipality')}">`)
+      + fieldHtml('ps-head', 'Site head', `<select id="ps-head"><option value="">No site head</option>${d.heads.filter((h) => h.active || h.id === item?.head_id).map((h) => `<option value="${h.id}" ${h.id === item?.head_id ? 'selected' : ''}>${esc(h.name)}</option>`).join('')}</select>`)
+      + switchHtml('ps-active', 'Active (gets the afternoon text)', item ? item.active : true)
+      + '<span class="dhint">Switch Active off when the job wraps up.</span>';
+    if (kind === 'machine') {
+      const loc = item ? d.locations?.[item.id]?.site_id || '' : '';
+      body = fieldHtml('pm-name', 'Name', `<input id="pm-name" value="${v('name')}" placeholder="e.g. Cat 308">`)
+        + fieldHtml('pm-kind', 'Kind', `<input id="pm-kind" value="${v('kind')}" list="dl-pm-kinds" placeholder="Excavator"><datalist id="dl-pm-kinds">${['Excavator', 'Mini excavator', 'Loader', 'Skid steer', 'Dozer', 'Roller', 'Grader'].map((k) => `<option value="${k}">`).join('')}</datalist>`, 'What site heads call it when they ask ("mini ex", "loader").')
+        + fieldHtml('pm-unit', 'Unit #', `<input id="pm-unit" value="${v('unit')}" placeholder="EX-3">`, 'The number or code on the machine, if it has one.')
+        + (item ? fieldHtml('pm-where', 'Where it is now', `<select id="pm-where"><option value="">The yard</option>${d.sites.filter((s) => s.active || s.id === loc).map((s) => `<option value="${s.id}" ${s.id === loc ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>`, 'Changing this makes no float. Use it when starting out, or if it was moved without the app.') : '')
+        + switchHtml('pm-shop', 'In the shop', item?.in_shop)
+        + switchHtml('pm-active', 'In use', item ? item.active : true);
+    }
+    const titles = { head: 'site head', site: 'site', machine: 'machine' };
+    const val = (id) => document.getElementById(id)?.value ?? '';
+    const chk = (id) => Boolean(document.getElementById(id)?.checked);
+    window.SETUP_UI.drawer({
+      title: item ? (item.name || 'Edit') : `New ${titles[kind]}`,
+      body,
+      saveLabel: item ? 'Save' : `Add ${titles[kind]}`,
+      onSave: async () => {
+        if (kind === 'head') await api('/sites/heads', { method: 'POST', body: { id: item?.id, name: val('ph-name'), phone: val('ph-phone'), active: chk('ph-active') } });
+        if (kind === 'site') await api('/sites/sites', { method: 'POST', body: { id: item?.id, name: val('ps-name'), address: val('ps-address'), municipality: val('ps-muni'), head_id: val('ps-head') || null, active: chk('ps-active') } });
+        if (kind === 'machine') {
+          const saved = await api('/sites/equipment', { method: 'POST', body: { id: item?.id, name: val('pm-name'), kind: val('pm-kind'), unit: val('pm-unit'), in_shop: chk('pm-shop'), active: chk('pm-active') } });
+          const where = item ? val('pm-where') : '';
+          if (item && String(where) !== String(d.locations?.[item.id]?.site_id || '')) await api(`/sites/equipment/${saved.id}/place`, { method: 'POST', body: { site_id: where || null } });
+        }
+        toast('Saved ✓');
+        await reloadParts();
+      },
+    });
+  }
+  document.addEventListener('click', (ev) => {
+    if (!parts) return;
+    const inParts = Object.values(parts.mounts).some((m) => m.contains(ev.target));
+    if (!inParts) return;
+    const tabBtn = ev.target.closest('[data-ptab]');
+    if (tabBtn) { partsTab = tabBtn.dataset.ptab; return renderParts(); }
+    const add = ev.target.closest('[data-padd]');
+    if (add) return openPart(add.dataset.padd);
+    const ed = ev.target.closest('[data-pedit]');
+    if (ed) {
+      const list = { head: parts.d.heads, site: parts.d.sites, machine: parts.d.equipment }[ed.dataset.pedit];
+      return openPart(ed.dataset.pedit, list.find((x) => x.id === Number(ed.dataset.id)));
+    }
+  });
+  document.addEventListener('change', async (ev) => {
+    if (!parts || !parts.mounts.sitetext.contains(ev.target)) return;
+    const on = parts.mounts.sitetext.querySelector('[data-ask-on]').checked;
+    const t = parts.mounts.sitetext.querySelector('[data-ask-time]').value || '14:30';
+    try {
+      const out = await api('/sites/ask-time', { method: 'POST', body: { ask_time: on ? t : '' } });
+      toast(out.ask_time ? `Saved ✓ Site heads are asked at ${hm12s(out.ask_time)} on work days` : 'Saved ✓ Site heads are not asked automatically');
+      parts.d.ask_time = out.ask_time; window.SETUP_UI?.refresh();
+    } catch (err) { toast(err.message); }
+  });
+
+  window.SITES = { mount, mountSetup, mountSetupParts, reload: () => root && load(day) };
 })();
