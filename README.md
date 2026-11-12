@@ -149,10 +149,15 @@ For the people running our own jobs (site heads), instead of calling round at th
 3. **Our sites** tab (dashboard, and reception's 🏗️ Our sites): one card per site for the day, showing what they asked
    for. Give each site trucks + drivers (a driver's usual truck is filled in), machines and labourers, and a note; each
    list says what's already out that day — *customer: Smith* or *at Carling*. **Save** makes the day's **Our site**
-   work order (marked OUR SITE on the board, never priced or sent to QuickBooks); text the drivers from the board as usual.
+   work order (marked OUR SITE on the board, never priced or sent to QuickBooks); the drivers get it in the morning jobs text.
 4. A machine last sent to a different site shows **Book the float from Carling**, which makes the float work order.
-5. **Send confirmations** texts each site head what they're getting, and (for dispatchers and admins) texts the drivers and labourers on the site work orders their job, the ones not texted yet. Hauling trucks (Tandem, Triaxle) carry a material and number of loads: asked on the link, read from texts ("tandem of A gravel, 4 loads"), set on the Sites tab, and in the drivers' text. The strip at the bottom shows trucks free, out to
-   customers and at our sites, and machines free (and where they were last).
+5. **Send confirmations** texts each site head what they're getting. Drivers and labourers are **not** texted then: they
+   get their jobs in the **morning jobs text** (Setup → Drivers' jobs text → "for today, the morning of, at 6:30 AM").
+   Hauling trucks (Tandem, Triaxle) carry a material and number of loads: asked on the link, read from texts ("tandem
+   of A gravel, 4 loads"), set on the Sites tab, and in the drivers' text.
+6. **Machines stay where they were sent** until moved. Each site card lists what's **on site now**, since when and where
+   it came from (floated from Carling, or from the yard); **Back to the yard** books the float that brings it back. The
+   strip at the bottom shows trucks free / out to customers / at our sites, and machines in the yard / at which site.
 
 ## Review requests (texts asking customers for a Google review)
 

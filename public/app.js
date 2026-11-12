@@ -1188,7 +1188,8 @@
     const [drivers, trucks, settings] = await Promise.all([api('/drivers?all=1'), api('/trucks?all=1'), api('/settings')]);
     const sf = $('#settings-form');
     sf.elements.lineup_on.checked = Boolean(settings.lineup_time);
-    sf.elements.lineup_time.value = settings.lineup_time || '17:00';
+    sf.elements.lineup_when.value = settings.lineup_when || 'evening';
+    sf.elements.lineup_time.value = settings.lineup_time || (settings.lineup_when === 'morning' ? '06:30' : '17:00');
     $('#septic-form').elements.septic_reminder_years.value = settings.septic_reminder_years || '3';
     fillReviewForm(settings.reviews || {});
     loadBackups().catch(() => {});
@@ -1253,8 +1254,9 @@
     e.preventDefault();
     const f = e.target.elements;
     try {
-      const out = await api('/settings', { method: 'POST', body: { lineup_time: f.lineup_on.checked ? f.lineup_time.value : '' } });
-      toast(out.lineup_time ? `Drivers will get tomorrow's jobs at ${fmtTime(out.lineup_time)} each day` : 'Evening text turned off');
+      const out = await api('/settings', { method: 'POST', body: { lineup_time: f.lineup_on.checked ? f.lineup_time.value : '', lineup_when: f.lineup_when.value } });
+      toast(out.lineup_time ? `Drivers will get ${out.lineup_when === 'morning' ? "the day's jobs that morning" : "tomorrow's jobs the evening before"} at ${fmtTime(out.lineup_time)}`
+        : 'Automatic jobs text turned off');
     } catch (err) { toast(err.message); }
   });
 

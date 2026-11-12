@@ -120,10 +120,14 @@
       </div>
     </div>
     <div class="panel settings">
-      <h2>Evening text: tomorrow's jobs</h2>
+      <h2>Drivers' jobs text</h2>
       <form id="settings-form" class="inline-form">
-        <label class="check"><input type="checkbox" name="lineup_on"> Automatically text each driver their jobs for tomorrow at</label>
-        <input type="time" name="lineup_time" value="17:00">
+        <label class="check"><input type="checkbox" name="lineup_on"> Automatically text each driver and labourer their jobs</label>
+        <select name="lineup_when" aria-label="Which day">
+          <option value="morning">for today, the morning of, at</option>
+          <option value="evening">for tomorrow, the evening before, at</option>
+        </select>
+        <input type="time" name="lineup_time" value="06:30">
         <span class="muted small">(Eastern time)</span>
         <button class="btn primary" type="submit">Save</button>
       </form>
