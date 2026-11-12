@@ -151,7 +151,7 @@ For the people running our own jobs (site heads), instead of calling round at th
    list says what's already out that day — *customer: Smith* or *at Carling*. **Save** makes the day's **Our site**
    work order (marked OUR SITE on the board, never priced or sent to QuickBooks); text the drivers from the board as usual.
 4. A machine last sent to a different site shows **Book the float from Carling**, which makes the float work order.
-5. **Send confirmations** texts each site head what they're getting. The strip at the bottom shows trucks free, out to
+5. **Send confirmations** texts each site head what they're getting, and (for dispatchers and admins) texts the drivers and labourers on the site work orders their job, the ones not texted yet. Hauling trucks (Tandem, Triaxle) carry a material and number of loads: asked on the link, read from texts ("tandem of A gravel, 4 loads"), set on the Sites tab, and in the drivers' text. The strip at the bottom shows trucks free, out to
    customers and at our sites, and machines free (and where they were last).
 
 ## Review requests (texts asking customers for a Google review)

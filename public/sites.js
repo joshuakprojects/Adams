@@ -21,12 +21,15 @@
     data = await api('/sites/board' + (d ? '?day=' + d : ''));
     day = data.day;
     edits.clear();
-    for (const s of data.sites) edits.set(s.site.id, fromGiven(s.given));
+    for (const s of data.sites) edits.set(s.site.id, fromGiven(s.given, s.day?.request));
     render();
   }
-  function fromGiven(g) {
+  function fromGiven(g, request) {
+    // Nothing given yet: start a row for each truck they asked for, with what it's hauling.
+    const asked = !g && request?.trucks ? request.trucks.flatMap((t) => Array.from({ length: Math.min(t.count || 1, 9) },
+      () => ({ truck_id: '', driver_id: '', material: t.material || '', loads: t.loads || '', asked: t.type }))) : [];
     return {
-      trucks: (g?.trucks || []).map((t) => ({ truck_id: t.truck_id || '', driver_id: t.driver_id })),
+      trucks: g ? (g.trucks || []).map((t) => ({ truck_id: t.truck_id || '', driver_id: t.driver_id, material: t.material || '', loads: t.loads || '' })) : asked,
       equipment: (g?.equipment || []).map((e) => e.id),
       labourers: (g?.labourers || []).map((l) => l.driver_id),
       note: g?.note || '',
@@ -99,9 +102,12 @@
       <section class="given">
         <div class="lbl">Trucks &amp; drivers</div>
         ${e.trucks.map((t, i) => `<div class="truck-row" data-i="${i}">
+          ${t.asked ? `<div class="asked-for muted small">Asked: ${esc(t.asked)}</div>` : ''}
           <select data-truck aria-label="Truck">${truckOptions(t.truck_id, s.name)}</select>
           <select data-driver aria-label="Driver">${personOptions('driver', t.driver_id, s.name, 'Driver…')}</select>
-          <button class="x" data-rm-truck="${i}" aria-label="Remove">×</button></div>`).join('')}
+          <button class="x" data-rm-truck="${i}" aria-label="Remove">×</button>
+          <input data-mat list="dl-site-mat" value="${esc(t.material || '')}" placeholder="Hauling (e.g. A Gravel 3/4&quot;)" aria-label="Material">
+          <input data-loads type="number" min="0" max="99" value="${t.loads || ''}" placeholder="Loads" aria-label="Loads"></div>`).join('')}
         <button class="btn tiny" data-add-truck>+ Truck</button>
         <div class="lbl">Machines</div>
         <div class="chips">${machines}</div>
@@ -145,7 +151,7 @@
         <h2>${esc(dateLong(day))}</h2>
         <div class="row-actions">
           <button class="btn" data-ask-all>Text all site heads</button>
-          <button class="btn primary" data-confirm-all>Send confirmations</button>
+          <button class="btn primary" data-confirm-all title="Texts each site head what they're getting${A.state.can?.dispatch ? ', and the drivers and labourers their job' : ''}">Send confirmations</button>
           <button class="btn" data-print>Print</button>
         </div>
       </div>
@@ -153,6 +159,7 @@
         ${data.ask_time ? ` · site heads are texted automatically at ${esc(data.ask_time)} on work days` : ' · automatic text is off (Setup → Our sites)'}</p>
       ${data.sites.length ? '' : '<div class="empty">No sites yet. Add site heads and sites under Setup → Our sites.</div>'}
       <div class="site-grid">${data.sites.map(siteCard).join('')}</div>
+      <datalist id="dl-site-mat">${(data.materials || []).map((m) => `<option value="${esc(m)}">`).join('')}</datalist>
       ${yard()}
     </div>`;
   }
@@ -180,7 +187,9 @@
       if (t.closest('[data-confirm-all]')) {
         if ([...edits.values()].some((x) => x.dirty)) return toast('Save the sites you changed first');
         const out = await api('/sites/confirm', { method: 'POST', body: { day } });
-        toast(out.results.length ? `Sent ${out.results.filter((r) => r.ok).length} confirmation(s)` : 'Nothing to confirm yet — give the sites what they need first');
+        const crew = (out.crew || []).filter((r) => r.ok).length;
+        toast(out.results.length ? `Sent ${out.results.filter((r) => r.ok).length} site head confirmation(s)${crew ? ` and texted ${crew} driver(s)/labourer(s) their job` : ''}`
+          : 'Nothing to confirm yet — give the sites what they need first');
         return load(day);
       }
       if (t.closest('[data-open-job]')) { ev.preventDefault(); return A.openJobForm(await api('/jobs/' + t.closest('[data-open-job]').dataset.openJob)); }
@@ -197,7 +206,7 @@
       if (t.closest('[data-save]')) {
         const missing = e.trucks.some((x) => !x.driver_id);
         if (missing) return toast('Pick a driver for each truck (or remove the row)');
-        await api(`/sites/${id}/give`, { method: 'POST', body: { day, trucks: e.trucks, equipment: e.equipment, labourers: e.labourers, note: e.note } });
+        await api(`/sites/${id}/give`, { method: 'POST', body: { day, trucks: e.trucks.map(({ truck_id, driver_id, material, loads }) => ({ truck_id, driver_id, material, loads })), equipment: e.equipment, labourers: e.labourers, note: e.note } });
         toast('Saved — drivers get the job when you text them from the board');
         return load(day);
       }
@@ -223,9 +232,13 @@
     if (t.matches('[data-add-lab]') && t.value && !e.labourers.includes(Number(t.value))) { e.labourers.push(Number(t.value)); return dirty(id); }
   });
   document.addEventListener('input', (ev) => {
-    if (!root || !root.contains(ev.target) || !ev.target.matches('[data-note]')) return;
+    if (!root || !root.contains(ev.target) || !ev.target.matches('[data-note], [data-mat], [data-loads]')) return;
     const [, e] = cardEdit(ev.target);
-    e.note = ev.target.value;
+    if (ev.target.matches('[data-note]')) e.note = ev.target.value;
+    else {
+      const row = e.trucks[Number(ev.target.closest('[data-i]').dataset.i)];
+      if (ev.target.matches('[data-mat]')) row.material = ev.target.value; else row.loads = ev.target.value;
+    }
     if (!e.dirty) { e.dirty = true; const b = ev.target.closest('[data-site]').querySelector('[data-save]'); b.disabled = false; b.textContent = 'Save'; }
   });
   document.addEventListener('submit', async (ev) => {

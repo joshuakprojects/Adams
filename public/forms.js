@@ -171,6 +171,7 @@
       noPricing: true,
       fields: [
         { key: 'site_head', label: 'Site head', kind: 'text', sms: true },
+        { key: 'hauling', label: 'Hauling', kind: 'text', wide: true, sms: true },
         { key: 'equipment', label: 'Equipment', kind: 'text', wide: true, sms: true },
       ],
       report: [],

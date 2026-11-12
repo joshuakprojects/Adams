@@ -49,8 +49,22 @@ function slotOf(text) {
   return '';
 }
 
-/** "tandem AM, mini ex and 2 labourers" → { trucks: [{type, count, slot}], equipment: [{kind, slot}], labourers, note } */
-function parseNeeds(text, kinds = []) {
+// Trucks that haul material: the site head says what (an aggregate from the price book, or anything).
+const HAUL_TYPES = ['Tandem', 'Triaxle'];
+const norm = (x) => ` ${String(x).toLowerCase().replace(/["'”″]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
+/** The price-book material named in `part`, matched loosely ("a gravel", "3/4 clear", "sand fill"); the longest name wins. */
+function findMaterial(part, materials) {
+  const p = norm(part);
+  let best = null;
+  for (const m of materials) {
+    const aliases = [m, m.replace(/\(.*?\)/g, ''), m.replace(/\(.*?\)/g, '').replace(/[\d/"'.-]+/g, ' ')].map(norm).filter((a) => a.trim().length >= 4);
+    for (const a of aliases) if (p.includes(a) && (!best || a.length > best.len)) best = { name: m, len: a.length };
+  }
+  return best?.name || '';
+}
+
+/** "tandem AM, mini ex and 2 labourers" → { trucks: [{type, count, slot, material, loads}], equipment: [{kind, slot}], labourers, note } */
+function parseNeeds(text, kinds = [], materials = []) {
   const raw = String(text || '').trim();
   const out = { trucks: [], equipment: [], labourers: 0, note: '', nothing: false, same: false };
   if (!raw) return out;
@@ -70,7 +84,17 @@ function parseNeeds(text, kinds = []) {
     const machine = MACHINE_WORDS.find(([re]) => re.test(part)) || kinds.map((k) => [new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?\\b`, 'i'), k]).find(([re]) => re.test(part));
     if (!used && machine) { for (let i = 0; i < Math.min(count, 6); i++) out.equipment.push({ kind: machine[1], slot }); used = true; }
     const truck = !used && TRUCK_WORDS.find(([re]) => re.test(part));
-    if (truck) { out.trucks.push({ type: truck[1], count: Math.min(count, 9), slot }); used = true; }
+    const material = findMaterial(part, materials);
+    const loads = Number((part.match(/(\d+)\s*loads?\b/i) || [])[1]) || 0;
+    if (truck) {
+      out.trucks.push({ type: truck[1], count: loads && countMatch && Number(countMatch[1]) === loads ? 1 : Math.min(count, 9), slot,
+        ...(material ? { material } : {}), ...(loads ? { loads } : {}) });
+      used = true;
+    } else if (!used && (material || loads)) {
+      // "tandem AM, A gravel, 4 loads": goes with the last truck that hauls.
+      const last = [...out.trucks].reverse().find((t) => HAUL_TYPES.includes(t.type));
+      if (last) { if (material && !last.material) last.material = material; if (loads && !last.loads) last.loads = loads; used = true; }
+    }
     if (!used) left.push(part);
   }
   out.note = left.join(', ').slice(0, 300);
@@ -82,7 +106,10 @@ function describeNeeds(n) {
   if (n.nothing) return 'Nothing needed';
   if (n.same) return 'Same as last time';
   const bits = [];
-  for (const t of n.trucks || []) bits.push(`${t.count > 1 ? t.count + ' × ' : ''}${t.type}${t.slot ? ` (${SLOTS[t.slot]})` : ''}`);
+  for (const t of n.trucks || []) {
+    const load = [t.material, t.loads ? `${t.loads} load${t.loads === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
+    bits.push(`${t.count > 1 ? t.count + ' × ' : ''}${t.type}${t.slot ? ` (${SLOTS[t.slot]})` : ''}${load ? ` – ${load}` : ''}`);
+  }
   const kinds = {};
   for (const e of n.equipment || []) { const k = e.kind + (e.slot ? ` (${SLOTS[e.slot]})` : ''); kinds[k] = (kinds[k] || 0) + 1; }
   for (const [k, c] of Object.entries(kinds)) bits.push(`${c > 1 ? c + ' × ' : ''}${k}`);
@@ -181,6 +208,8 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     return db.get('SELECT * FROM equipment WHERE id = ?', r.lastInsertRowid);
   }
   const equipmentKinds = async () => [...new Set((await listEquipment()).map((e) => e.kind))];
+  const materials = async () => (await db.all(`SELECT grp FROM price_items WHERE category = 'aggregate' AND grp != '' AND active = 1
+      GROUP BY grp ORDER BY MIN(sort)`)).map((m) => m.grp);
 
   // ---------- one site, one day ----------
   async function siteDay(siteId, day, create = false) {
@@ -189,7 +218,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       await db.run('INSERT INTO site_days (site_id, day) VALUES (?, ?)', siteId, day);
       row = await db.get('SELECT * FROM site_days WHERE site_id = ? AND day = ?', siteId, day);
     }
-    if (row) row.request = parseJson(row.request, {});
+    if (row) { row.request = parseJson(row.request, {}); row.truck_notes = parseJson(row.truck_notes, {}); }
     return row;
   }
   async function equipmentOnJob(jobId) {
@@ -226,7 +255,8 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       const d = await siteDay(s.id, day);
       const job = d?.job_id ? jobs.find((j) => j.id === d.job_id) || null : null;
       const given = job ? {
-        trucks: job.assignments.filter((a) => a.status !== 'cancelled' && a.driver_kind !== 'labourer').map((a) => ({ driver_id: a.driver_id, driver_name: a.driver_name, truck_id: a.truck_id, truck_unit: a.truck_unit })),
+        trucks: job.assignments.filter((a) => a.status !== 'cancelled' && a.driver_kind !== 'labourer').map((a) => ({ driver_id: a.driver_id, driver_name: a.driver_name,
+          truck_id: a.truck_id, truck_unit: a.truck_unit, material: d.truck_notes?.[a.driver_id]?.material || '', loads: d.truck_notes?.[a.driver_id]?.loads || '' })),
         labourers: job.assignments.filter((a) => a.status !== 'cancelled' && a.driver_kind === 'labourer').map((a) => ({ driver_id: a.driver_id, driver_name: a.driver_name })),
         equipment: await Promise.all((await equipmentOnJob(job.id)).map(async (e) => {
           const was = await whereIs(e.id, day);
@@ -248,7 +278,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
         const was = await whereIs(e.id, day);
         return { ...e, use: usage(machineUse, e.id), last_at: was ? (was.site_name || was.to_location) : '' };
       })),
-      truck_types: TRUCK_TYPES, slots: SLOTS, ask_time: await getSetting('sites_ask_time', ''),
+      truck_types: TRUCK_TYPES, haul_types: HAUL_TYPES, materials: await materials(), slots: SLOTS, ask_time: await getSetting('sites_ask_time', ''),
     };
   }
 
@@ -298,7 +328,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
   async function saveRequest(siteId, day, { request, text = '', via = 'office' }) {
     checkDay(day);
     const d = await siteDay(siteId, day, true);
-    let need = request || parseNeeds(text, await equipmentKinds());
+    let need = request || parseNeeds(text, await equipmentKinds(), await materials());
     if (need.same) {
       // "Same": what this site asked for (or was given) the working day before.
       const prev = await siteDay(siteId, prevWorkDay(day));
@@ -345,7 +375,8 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     if (!site) throw new SiteError('Site not found');
     const d = await siteDay(siteId, day, true);
     const trucks = (Array.isArray(given.trucks) ? given.trucks : []).filter((t) => t && t.driver_id)
-      .map((t) => ({ driver_id: Number(t.driver_id), truck_id: t.truck_id ? Number(t.truck_id) : null }));
+      .map((t) => ({ driver_id: Number(t.driver_id), truck_id: t.truck_id ? Number(t.truck_id) : null,
+        material: str(t.material, 100), loads: Math.max(0, Math.min(99, Number(t.loads) || 0)) || '' }));
     const labourers = (Array.isArray(given.labourers) ? given.labourers : []).map(Number).filter(Boolean);
     const equipment = [...new Set((Array.isArray(given.equipment) ? given.equipment : []).map(Number).filter(Boolean))];
     const seen = new Set();
@@ -361,6 +392,10 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       }
       return board(day);
     }
+    const truckNotes = Object.fromEntries(trucks.filter((t) => t.material || t.loads).map((t) => [t.driver_id, { material: t.material, loads: t.loads }]));
+    const units = new Map((await dispatch.listTrucks({ includeInactive: true })).map((t) => [t.id, t.unit]));
+    const people = new Map((await dispatch.listDrivers({ includeInactive: true })).map((p) => [p.id, p.name]));
+    const hauling = trucks.filter((t) => t.material || t.loads).map((t) => `${units.get(t.truck_id) || people.get(t.driver_id) || 'Truck'}: ${[t.material, t.loads ? `${t.loads} load${t.loads === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')}`).join('; ');
     const machineNames = equipment.length ? (await db.all(`SELECT name FROM equipment WHERE id IN (${equipment.map(() => '?').join(',')})`, ...equipment)).map((e) => e.name) : [];
     const data = {
       ...(existing || {}),
@@ -375,16 +410,16 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       municipality: site.municipality,
       contact_name: site.head_name || '',
       contact_phone: site.head_phone || '',
-      details: { ...(existing?.details || {}), site_head: site.head_name || '', equipment: machineNames.join(', ') },
+      details: { ...(existing?.details || {}), site_head: site.head_name || '', equipment: machineNames.join(', '), hauling },
       notes: note,
-      assignments,
+      assignments: assignments.map(({ driver_id, truck_id }) => ({ driver_id, truck_id })),
     };
     const saved = existing ? await dispatch.saveJob(data, userId) : await dispatch.saveJob(data, userId);
     const jobId = saved.job.id;
     await db.run('UPDATE jobs SET site_id = ? WHERE id = ?', siteId, jobId);
     await db.run('DELETE FROM job_equipment WHERE job_id = ?', jobId);
     for (const id of equipment) await db.run('INSERT INTO job_equipment (job_id, equipment_id) VALUES (?, ?)', jobId, id);
-    await db.run('UPDATE site_days SET job_id = ? WHERE id = ?', jobId, d.id);
+    await db.run('UPDATE site_days SET job_id = ?, truck_notes = ? WHERE id = ?', jobId, JSON.stringify(truckNotes), d.id);
     return board(day);
   }
 
@@ -407,10 +442,19 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
   }
 
   /** Text site heads what they're getting (all sites given something that day, or just `siteIds`). */
-  async function confirm(day, { siteIds = null } = {}) {
+  async function confirm(day, { siteIds = null, textCrew = false } = {}) {
     checkDay(day);
     const b = await board(day);
     const results = [];
+    const crew = [];
+    // Drivers and labourers on the site work orders get their usual job text too (only those not texted yet, or changed).
+    if (textCrew) {
+      for (const row of b.sites) {
+        if ((siteIds && !siteIds.includes(row.site.id)) || !row.job_id) continue;
+        const out = await dispatch.sendJob(row.job_id);
+        crew.push(...out.results.map((r) => ({ site_id: row.site.id, ...r })));
+      }
+    }
     for (const row of b.sites) {
       if (siteIds && !siteIds.includes(row.site.id)) continue;
       if (!row.site.head_phone) continue;
@@ -420,7 +464,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
       if (!row.given) text = `Hi ${first} - noted: nothing needed at ${row.site.name} on ${dayLabel(day)}.`;
       else {
         const bits = [
-          ...row.given.trucks.map((t) => `${t.truck_unit ? t.truck_unit + ' with ' : ''}${t.driver_name}`),
+          ...row.given.trucks.map((t) => `${t.truck_unit ? t.truck_unit + ' with ' : ''}${t.driver_name}${t.material || t.loads ? ` (${[t.material, t.loads ? `${t.loads} load${Number(t.loads) === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')})` : ''}`),
           ...row.given.equipment.map((e) => `${e.name}${e.needs_float ? ` (floated from ${e.from})` : ''}`),
           row.given.labourers.length ? row.given.labourers.map((l) => l.driver_name).join(' & ') : '',
         ].filter(Boolean);
@@ -433,7 +477,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
         results.push({ site_id: row.site.id, ok: true, text });
       } catch (err) { results.push({ site_id: row.site.id, ok: false, error: err.message }); }
     }
-    return { day, results };
+    return { day, results, crew };
   }
 
   // ---------- the phone page behind the link ----------
@@ -442,7 +486,8 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     if (!site) return null;
     const asked = await db.get('SELECT day FROM site_days WHERE site_id = ? AND asked_at IS NOT NULL AND day >= ? ORDER BY asked_at DESC LIMIT 1', site.id, today());
     const day = asked?.day || nextWorkDay(today());
-    return { site, day, day_label: dayLabel(day), current: await siteDay(site.id, day), kinds: await equipmentKinds(), truck_types: TRUCK_TYPES, slots: SLOTS };
+    return { site, day, day_label: dayLabel(day), current: await siteDay(site.id, day), kinds: await equipmentKinds(), truck_types: TRUCK_TYPES,
+      haul_types: HAUL_TYPES, materials: await materials(), slots: SLOTS };
   }
 
   return {
@@ -451,4 +496,4 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
   };
 }
 
-module.exports = { createSites, parseNeeds, describeNeeds, nextWorkDay, prevWorkDay, SiteError, TRUCK_TYPES, SLOTS };
+module.exports = { createSites, findMaterial, HAUL_TYPES, parseNeeds, describeNeeds, nextWorkDay, prevWorkDay, SiteError, TRUCK_TYPES, SLOTS };
