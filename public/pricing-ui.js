@@ -562,15 +562,15 @@
           return `<tr class="${Object.values(c).every((x) => !x.active) ? 'inactive' : ''}"><td><b>${esc(g)}</b></td>${cols.map(([k]) =>
             `<td class="num">${c[k] ? priceCell(c[k]) : ''}</td>`).join('')}<td class="muted small">${esc(notes)}</td></tr>`;
         }).join('');
-        return { grid: `<table class="table price-table"><thead>${head}</thead><tbody>${rows}</tbody></table>`, singles };
+        return { grid: `<div class="table-scroll"><table class="table price-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`, singles };
       };
-      const plain = (list) => (list.length ? `<table class="table price-table"><thead><tr><th>Item</th><th>Unit</th><th class="num">Price</th>
+      const plain = (list) => (list.length ? `<div class="table-scroll"><table class="table price-table"><thead><tr><th>Item</th><th>Unit</th><th class="num">Price</th>
         ${state.can.admin ? '<th>HST</th><th>On list</th>' : '<th></th>'}<th>Note</th></tr></thead><tbody>${list.map((it) => `
         <tr class="${it.active ? '' : 'inactive'}"><td>${esc(it.name)}</td><td>${esc(it.unit)}</td><td class="num">${priceCell(it)}</td>
         ${state.can.admin ? `<td><input type="checkbox" data-tax-id="${it.id}" ${(pending.get(it.id)?.taxable ?? it.taxable) ? 'checked' : ''} aria-label="Charge HST"></td>
           <td><input type="checkbox" data-active-id="${it.id}" ${(pending.get(it.id)?.active ?? it.active) ? 'checked' : ''} aria-label="On the price list"></td>`
           : `<td class="muted small">${it.taxable ? '' : 'no HST'}</td>`}
-        <td class="muted small">${esc(it.notes)}</td></tr>`).join('')}</tbody></table>` : '');
+        <td class="muted small">${esc(it.notes)}</td></tr>`).join('')}</tbody></table></div>` : '');
       if (cat === 'aggregate') {
         const g = gridOf('agg.', [['yard', 'Per yard'], ['tandem', 'Per tandem'], ['triaxle', 'Per triaxle']]);
         table = g.grid + plain(g.singles);

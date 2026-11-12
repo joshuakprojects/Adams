@@ -1000,3 +1000,4 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 #pm-place[hidden] { display: none !important; }
 #pm-place { margin-top: 6px; }
 .sites-page .btn[disabled], .ppanel .btn[disabled] { opacity: .5; cursor: not-allowed; }
+.table-scroll { overflow-x: auto; max-width: 100%; }
