@@ -512,6 +512,30 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
     return saved.job;
   }
 
+  /** Where every machine is today: { equipment_id: { site_id, since } } (Setup → Equipment). */
+  async function locations() {
+    const events = await machineEvents();
+    const day = today();
+    return Object.fromEntries((await listEquipment({ all: true })).map((e) => {
+      const loc = locate(events.get(e.id), day, true);
+      return [e.id, { site_id: loc.site_id, since: loc.since }];
+    }));
+  }
+  /**
+   * Say where a machine really is (e.g. when starting out, or after it was moved without the app): no float is made.
+   * site_id null = the yard.
+   */
+  async function placeMachine(equipmentId, siteId) {
+    const machine = await db.get('SELECT * FROM equipment WHERE id = ?', equipmentId);
+    if (!machine) throw new SiteError('Equipment not found');
+    const site = siteId ? await db.get('SELECT * FROM sites WHERE id = ?', siteId) : null;
+    if (siteId && !site) throw new SiteError('Site not found');
+    const now = locate((await machineEvents()).get(machine.id), today(), true);
+    if ((now.site_id ?? null) === (site?.id ?? null)) return { unchanged: true };
+    await db.run('INSERT INTO equipment_moves (equipment_id, day, site_id, job_id) VALUES (?, ?, ?, NULL)', machine.id, today(), site?.id ?? null);
+    return { ok: true };
+  }
+
   /** A machine done at a site: back to the yard on `day`, with the float booked to bring it. */
   async function backToYard(siteId, day, equipmentId, userId = null) {
     checkDay(day);
@@ -571,7 +595,7 @@ function createSites(db, dispatch, { send = sms.sendSms, today, nowHm } = {}) {
 
   return {
     askTime: () => getSetting('sites_ask_time', ''), ensureSetup, listHeads, saveHead, listSites, saveSite, listEquipment, saveEquipment, board, ask, runScheduledAsk, saveAskTime,
-    saveRequest, handleReply, give, bookFloat, backToYard, confirm, pageFor, whereIs,
+    saveRequest, handleReply, give, bookFloat, backToYard, locations, placeMachine, confirm, pageFor, whereIs,
   };
 }
 

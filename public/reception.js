@@ -93,7 +93,10 @@
       api('/boss-notes').catch(() => [])]);
     const hour = new Date().getHours();
     const hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const helpOff = (window.APP_HELP?.helpHidden() || []).includes('reception');
     root().innerHTML = nav() + `<div class="rc-wrap">
+      ${helpOff ? '' : `<div class="help-strip" data-help="reception"><p>Phone rings? Press <b>New call</b>: pick the service, the price works itself out, then book it. To change or cancel a booking use <b>Find</b>. Site heads calling in what they need go under <b>Our sites</b>.</p>
+        <a href="/guide.html#reception" target="_blank" rel="noopener">Full guide ↗</a><button type="button" class="link" data-help-hide="reception">Got it</button></div>`}
       <h1 class="rc-h1">${hello}, ${esc((state.user?.name || '').split(' ')[0])}</h1>
       <div class="rc-sub">${esc(dayName(state.today))} · ${h.today_jobs} job${h.today_jobs === 1 ? '' : 's'} today · ${h.week_jobs} this week</div>
       ${notes.length ? `<div class="rc-boss"><h3>📌 Notes from the boss</h3>${notes.map((n) => `<div class="rc-boss-note">
