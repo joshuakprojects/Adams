@@ -248,11 +248,17 @@ function loadZipBackup(file) {
 const HOURLY_PREFIX = 'hourly/';
 const KEEP_HOURS = 48;
 
-function createBackups(db, { storage = chooseStorage(), server = undefined, today, nowHm, readPhoto, now = () => Date.now() } = {}) {
+function createBackups(db, { storage = chooseStorage(), server = undefined, extra = [], today, nowHm, readPhoto, now = () => Date.now() } = {}) {
   if (server === undefined) {
     try { server = require('./backupTargets').serverTarget(); } catch (err) { console.warn('Backup server not used:', err.message); server = null; }
   }
-  const targets = [storage, server].filter(Boolean);
+  const targets = [storage, server, ...extra].filter(Boolean);
+  // Places that can be switched on later (Google Drive, once connected) say so with active().
+  async function live() {
+    const out = [];
+    for (const t of targets) if (!t.active || await t.active().catch(() => false)) out.push(t);
+    return out;
+  }
   async function setting(key) { return (await db.get('SELECT value FROM settings WHERE key = ?', key))?.value ?? null; }
   async function setSetting(key, value) {
     await db.run('DELETE FROM settings WHERE key = ?', key);
@@ -290,8 +296,11 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
     const name = nameFor(kind);
     const buf = gzipJson(await dump(db));
     const results = [];
-    for (const t of only || targets) results.push(await runOn(t, name, buf));
-    const first = results[0];
+    for (const t of only || await live()) {
+      if (kind === 'hourly' && t.nightlyOnly) continue; // e.g. Google Drive gets the nightly copy only
+      results.push(await runOn(t, name, buf));
+    }
+    const first = results[0] || {};
     const failed = results.filter((r) => !r.ok);
     return { ok: !failed.length, name, bytes: buf.length, photos: first.photos || 0, reason, results,
       error: failed.length ? failed.map((r) => `${r.label}: ${r.error}`).join(' · ') : undefined };
@@ -324,7 +333,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
       if (kind === 'nightly' && nowHm() < '02:00') continue;
       const name = nameFor(kind);
       const only = [];
-      for (const t of targets) if (await due(name, t, wait)) only.push(t);
+      for (const t of await live()) if (!(kind === 'hourly' && t.nightlyOnly) && await due(name, t, wait)) only.push(t);
       if (only.length) return run({ reason: kind, kind, only });
     }
     return null;
@@ -335,7 +344,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
     const last = async (kind) => db.get('SELECT * FROM backups WHERE target = ? ORDER BY id DESC LIMIT 1', kind);
     const lastOk = async (kind) => db.get('SELECT * FROM backups WHERE target = ? AND ok = 1 ORDER BY id DESC LIMIT 1', kind);
     const list = [];
-    for (const t of targets) list.push({ kind: t.kind, label: t.label, last: await last(t.kind), last_ok: await lastOk(t.kind) });
+    for (const t of await live()) list.push({ kind: t.kind, label: t.label, last: await last(t.kind), last_ok: await lastOk(t.kind) });
     return {
       target: storage ? storage.kind : 'off',
       label: storage ? storage.label : 'Backups are off',
@@ -399,7 +408,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, toda
   /** Copies that can be restored, newest first: [{ target, label, name, kind, stamp }]. */
   async function stored() {
     const out = [];
-    for (const t of targets) {
+    for (const t of await live()) {
       let names = [];
       try { names = [...await t.list(DB_PREFIX), ...await t.list(HOURLY_PREFIX), ...await t.list(SAFETY_PREFIX)]; } catch { continue; }
       for (const name of names) {
