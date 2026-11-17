@@ -408,7 +408,17 @@ CREATE TABLE IF NOT EXISTS snow_call_people (
   via TEXT NOT NULL DEFAULT ''
 );
 
--- The recorded words of a snow call-out (ElevenLabs voice), played to every shoveler called in it.
+-- Recorded lines in an ElevenLabs voice (src/voice.js): each line recorded once, kept and reused by every call.
+CREATE TABLE IF NOT EXISTS voice_clips (
+  id TEXT PRIMARY KEY,
+  voice_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  data BLOB NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (voice_id, text)
+);
+
+-- (Older, not used any more:) the recorded words of a snow call-out.
 CREATE TABLE IF NOT EXISTS snow_audio (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   call_id INTEGER NOT NULL,

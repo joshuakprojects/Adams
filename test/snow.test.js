@@ -55,8 +55,8 @@ test('snow call: each shoveler phoned and texted at their own call-ahead time; k
   const token = calls[0].url.split('/').pop();
   const twiml = await snow.voiceTwiml(token);
   assert.match(twiml, /<Gather numDigits="1"[^>]*action="\/voice\/snow\/[\w-]+\/answer"/);
-  assert.match(twiml, /Adams Bros snow call\. Start at 4 AM at the yard\. Bring your own shovel\. Press 1 if you are coming/);
-  assert.match(await snow.voiceAnswer(token, '1'), /See you at 4 AM at the yard/);
+  assert.match(twiml, /Adams Bros snow call\. Start at 4 AM\. Report to the yard\. Bring your own shovel\. Press 1 if you are coming/);
+  assert.match(await snow.voiceAnswer(token, '1'), /Thank you\. See you there\. Start at 4 AM\. Report to the yard\./);
   await snow.voiceStatus(token, 'completed'); // after pressing 1: stays "coming"
 
   at('2026-12-03T08:30:00Z'); // 3:30 AM: Sue, who texts back instead of answering
@@ -134,7 +134,7 @@ test('the overnight snow dispatcher login: the Snow call and nothing else', asyn
   assert.equal((await api('/snow')).data.shovelers.length, 1);
 });
 
-test('ElevenLabs voice: the call-out is recorded once and played on every call; without it, the standard voice', async (t) => {
+test('ElevenLabs voice: the usual lines are recorded once and kept; calls then need no key', async (t) => {
   const db = await testDb(t);
   const { createVoice } = require('../src/voice');
   const spoken = [];
@@ -142,32 +142,50 @@ test('ElevenLabs voice: the call-out is recorded once and played on every call; 
     assert.equal(opts.headers['xi-api-key'], 'k');
     if (url.endsWith('/voices')) return { ok: true, json: async () => ({ voices: [{ voice_id: 'v2', name: 'Zoe', labels: { accent: 'canadian' } }, { voice_id: 'v1', name: 'Adam', preview_url: 'https://x/p.mp3' }] }) };
     spoken.push(JSON.parse(opts.body).text);
-    return { ok: true, arrayBuffer: async () => Buffer.from('MP3:' + spoken.length) };
+    return { ok: true, arrayBuffer: async () => Buffer.from('MP3:' + JSON.parse(opts.body).text) };
   };
   const voice = createVoice(db, { key: 'k', fetchImpl });
   assert.deepEqual((await voice.voices()).map((v) => v.name), ['Adam', 'Zoe']);
-  assert.equal(await voice.ready(), false, 'no voice picked yet');
+  await assert.rejects(() => voice.recordUsual(['the yard']), /Pick a voice/);
   await voice.choose('v1', 'Adam');
+  const made = await voice.recordUsual(['the yard']);
+  assert.equal(made.made, made.usual);
+  assert.equal(made.recorded, made.usual);
+  assert.ok(spoken.includes('Start at 4:30 AM.') && spoken.includes('Report to the yard.'));
+  const once = spoken.length;
+  assert.equal((await voice.recordUsual(['the yard'])).made, 0, 'already kept: nothing recorded again');
+  assert.equal(spoken.length, once);
+
+  // No key from here on: the kept recordings are played.
+  const noKey = createVoice(db, { key: '', fetchImpl: async () => { throw new Error('should not call ElevenLabs'); } });
   let clock = new Date('2026-12-03T07:30:00Z');
-  const snow = createSnow(db, { send: async () => {}, now: () => clock, timeZone: TZ, publicUrl: 'https://dispatch.example', live: false, voice });
+  const snow = createSnow(db, { send: async () => {}, now: () => clock, timeZone: TZ, publicUrl: 'https://dispatch.example', live: false, voice: noKey });
   await snow.saveShoveler({ name: 'Bob', phone: '705-555-0301', call_ahead_min: 60 });
-  const c = await snow.start({ day: '2026-12-03', time: '04:00', place: 'the yard' });
-  assert.equal(spoken.length, 5, 'main, coming, not coming, no answer, cancelled');
-  assert.match(spoken[0], /^Adams Bros snow call\. Start at 4 AM at the yard\. Press 1/);
+  const c = await snow.start({ day: '2026-12-03', time: '04:00', place: 'the yard', note: 'Bring a scraper' });
   const row = await db.get('SELECT token FROM snow_call_people WHERE call_id = ?', c.id);
   const twiml = await snow.voiceTwiml(row.token);
-  const m = /<Play>https:\/\/dispatch\.example\/voice\/audio\/([\w-]+)\/main\.mp3<\/Play>/.exec(twiml);
-  assert.ok(m, twiml);
-  assert.equal((await snow.audio(m[1], 'main')).toString(), 'MP3:1');
-  assert.match(await snow.voiceAnswer(row.token, '1'), /<Play>[^<]+\/coming\.mp3<\/Play>/);
-  assert.equal(await snow.audio('nope', 'main'), null);
-  // ElevenLabs down: the call-out still starts, in the standard voice.
+  const plays = [...twiml.matchAll(/<Play>https:\/\/dispatch\.example\/voice\/clip\/([\w-]+)\.mp3<\/Play>/g)].map((m) => m[1]);
+  assert.ok(plays.length >= 8, twiml); // greeting, time, place, press — twice
+  assert.equal((await snow.audio(plays[0])).toString(), 'MP3:Adams Bros snow call.');
+  // The one-off note was never recorded and there's no key: just that part in the standard voice.
+  assert.match(twiml, /<Say voice="Polly\.Joanna-Neural">Bring a scraper\.<\/Say>/);
+  assert.doesNotMatch(await snow.voiceAnswer(row.token, '1'), /<Say/);
+  assert.equal(await snow.audio('nope'), null);
+  await snow.cancel(c.id);
+
+  // With the key, a new place or note is recorded the first time and kept.
+  const withKey = createSnow(db, { send: async () => {}, now: () => clock, timeZone: TZ, publicUrl: 'https://dispatch.example', live: false, voice });
+  const c2 = await withKey.start({ day: '2026-12-03', time: '04:00', place: 'the Bowes St lot' });
+  assert.ok(spoken.includes('Report to the Bowes St lot.'));
+  assert.equal((await db.get('SELECT voice FROM snow_calls WHERE id = ?', c2.id)).voice, 'Adam');
+  await withKey.cancel(c2.id);
+
+  // ElevenLabs down: the call-out still starts; the missing part is spoken.
   const down = createSnow(db, { send: async () => {}, now: () => clock, timeZone: TZ, live: false,
-    voice: { ready: async () => true, chosen: async () => ({ voice_id: 'v1' }), speak: async () => { throw new Error('502'); } } });
-  await down.cancel(c.id);
-  const c2 = await down.start({ day: '2026-12-03', time: '04:00' });
-  const tok = (await db.get('SELECT token FROM snow_call_people WHERE call_id = ?', c2.id)).token;
-  assert.match(await down.voiceTwiml(tok), /<Say voice="Polly\.Joanna-Neural">Adams Bros snow call/);
+    voice: { chosen: async () => ({ voice_id: 'v1' }), ensure: async () => { throw new Error('502'); }, clip: async () => null } });
+  const c3 = await down.start({ day: '2026-12-03', time: '04:00' });
+  const tok = (await db.get('SELECT token FROM snow_call_people WHERE call_id = ?', c3.id)).token;
+  assert.match(await down.voiceTwiml(tok), /<Say voice="Polly\.Joanna-Neural">Adams Bros snow call\. Start at 4 AM/);
 });
 
 test('snow call: only the ticked shovelers; results stay on screen after; setup text and contact card', async (t) => {

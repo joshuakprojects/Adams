@@ -176,8 +176,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   const twilioOk = (req) => !config.smsEnabled || config.smsProvider !== 'twilio'
     || sms.validTwilioSignature(req.get('X-Twilio-Signature'), config.publicUrl + req.originalUrl, req.body || {});
   // The recorded words of a snow call (played by the phone system), and the contact card from the setup text.
-  app.get('/voice/audio/:key/:kind.mp3', h(async (req, res) => {
-    const buf = await snow.audio(req.params.key, req.params.kind);
+  app.get('/voice/clip/:id.mp3', h(async (req, res) => {
+    const buf = await snow.audio(req.params.id);
     if (!buf) return res.status(404).end();
     res.set('Cache-Control', 'public, max-age=86400').type('audio/mpeg').send(buf);
   }));
@@ -588,17 +588,22 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
   // ---------- snow call-outs ----------
+  // The places recorded with the usual lines: "the yard" and the last place used.
+  const usualPlaces = async () => [...new Set(['the yard', (await db.get('SELECT value FROM settings WHERE key = ?', 'snow_place'))?.value || ''])];
   api.get('/snow', needSnow, json(async () => ({ current: await snow.current(), last: await snow.last(), shovelers: await snow.listShovelers({ all: true }),
     recent: await snow.recent(5), notify: JSON.parse((await db.get('SELECT value FROM settings WHERE key = ?', 'snow_notify'))?.value || '[]'),
     place: (await db.get('SELECT value FROM settings WHERE key = ?', 'snow_place'))?.value || '',
     number: sms.prettyPhone(snow.voiceFrom()),
-    voice: { configured: voice.configured, ...(await voice.chosen()) } })));
+    voice: { configured: voice.configured, ...(await voice.chosen()), ...(await voice.library(await usualPlaces())) } })));
   api.post('/snow/setup-text', needSnow, json((req) => snow.sendSetupText(Array.isArray(req.body?.ids) ? req.body.ids : null)));
   // The ElevenLabs voice: the account's voices, the one picked, and a sample of the real call in a voice.
   api.get('/snow/voices', need('dispatcher'), json(async () => ({ voices: await voice.voices(), ...(await voice.chosen()) })));
   api.post('/snow/voice', need('dispatcher'), json((req) => voice.choose(req.body?.voice_id, req.body?.name)));
+  // Record the usual lines once in the chosen voice (kept forever; after that calls need no ElevenLabs key).
+  api.get('/snow/voice/library', need('dispatcher'), json(async () => voice.library(await usualPlaces())));
+  api.post('/snow/voice/record', need('dispatcher'), json(async () => voice.recordUsual(await usualPlaces())));
   api.post('/snow/voice/preview', need('dispatcher'), h(async (req, res) => {
-    const text = String(req.body?.text || 'Adams Bros snow call. Start at 4 AM at the yard. Press 1 if you are coming. Press 2 if you can\'t.').slice(0, 300);
+    const text = String(req.body?.text || 'Adams Bros snow call. Start at 4 AM. Report to the yard. Press 1 if you are coming. Press 2 if you can\'t.').slice(0, 300);
     const buf = await voice.speak(text, req.body?.voice_id || null);
     res.type('audio/mpeg').send(buf);
   }));

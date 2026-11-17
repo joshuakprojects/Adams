@@ -1170,3 +1170,7 @@ details.sn-card[open] > summary::after { content: '▴'; }
 .sn-voice .btn { grid-row: 1 / span 2; grid-column: 3; }
 .sn-voice.on { border-color: #111; background: #fff6c2; }
 @media (max-width: 640px) { .sn-hero h2 { font-size: 21px; } .sn-chip { padding: 10px 14px; font-size: 16px; } .sn-go .btn.big { width: 100%; } }
+
+.sn-library { display: grid; gap: 6px; padding: 12px; margin: 8px 0 12px; border-radius: 10px; background: #fff7e0; border: 1px solid #f0dca0; }
+.sn-library.ok { background: #eaf7ee; border-color: #b9e0c4; }
+.sn-library .btn { justify-self: start; }
