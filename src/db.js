@@ -354,6 +354,20 @@ CREATE TABLE IF NOT EXISTS job_equipment (
   UNIQUE (job_id, equipment_id)
 );
 
+-- Repeating work orders: a copy of the work order (template, JSON) and when it repeats (rule, JSON). See src/recurring.js.
+CREATE TABLE IF NOT EXISTS job_series (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  template TEXT NOT NULL,
+  rule TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  skips TEXT NOT NULL DEFAULT '[]',
+  paused INTEGER NOT NULL DEFAULT 0,
+  ended INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Problems the office should hear about (texts failing, a backup failing, the app having been down).
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -374,6 +388,8 @@ CREATE TABLE IF NOT EXISTS distances (
 // Columns added after the first version. Added to existing databases on start-up.
 const ADDED_COLUMNS = {
   jobs: {
+    // The repeating series this visit belongs to (job_series), if any.
+    series_id: 'INTEGER',
     // Customer & billing, as on the paper work orders.
     customer_phone: "TEXT NOT NULL DEFAULT ''",
     customer_email: "TEXT NOT NULL DEFAULT ''",

@@ -21,6 +21,7 @@ const { createIntake, validKey, IntakeError } = require('./intake');
 const { createSites, describeNeeds } = require('./sites');
 const { createAlerts } = require('./alerts');
 const { createSummary } = require('./summary');
+const { createRecurring } = require('./recurring');
 const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
@@ -47,9 +48,10 @@ const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, 
 
 function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
   qbo = createQuickBooks(db, dispatch), sunwire = createSunwire(), sendReply = (to, body) => sms.sendSms(to, body),
-  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null }) {
+  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null, recurring = null }) {
   const intake = createIntake(db);
   alerts = alerts || createAlerts(db, { listen: false });
+  recurring = recurring || createRecurring(db, dispatch);
   summary = summary || createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
   const app = express();
@@ -378,6 +380,10 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/jobs/:id', h(async (req, res) => {
     const job = await dispatch.getJob(req.params.id);
     if (!job) return res.status(404).json({ error: 'Not found' });
+    if (job.series_id) {
+      const s = await recurring.get(job.series_id);
+      if (s) job.series = { id: s.id, label: s.label, rule: s.rule, start_date: s.start_date, paused: Boolean(s.paused), ended: Boolean(s.ended) };
+    }
     res.json(job);
   }));
   // Office logins save work orders but don't assign or text drivers (that's dispatch).
@@ -390,6 +396,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.post('/jobs', json(async (req) => {
     req.body = await officeSafe(req, null);
     let { job } = await dispatch.saveJob({ ...req.body, id: null }, req.user.id, { enforceRequired: true });
+    // Repeats: this is the first visit; the next ones are made two weeks ahead, with no driver.
+    if (req.body.repeat?.freq && !job.draft) { await recurring.start(job.id, req.body.repeat, req.user.id); job = await dispatch.getJob(job.id); }
     // Booked from a saved quote: the quote is done.
     if (req.body.quote_id) {
       await reception.setQuoteStatus(req.body.quote_id, 'booked', job.id).catch(() => {});
@@ -405,8 +413,12 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   }));
   api.put('/jobs/:id', json(async (req) => {
     req.body = await officeSafe(req, req.params.id);
-    const { job, removed } = await dispatch.saveJob({ ...req.body, id: req.params.id }, req.user.id, { enforceRequired: true });
+    let { job, removed } = await dispatch.saveJob({ ...req.body, id: req.params.id }, req.user.id, { enforceRequired: true });
     await dispatch.notifyRemoved(job, removed);
+    // Repeats: "this and future visits" carries the change on; a work order that didn't repeat can start to.
+    if (job.series_id && req.body.series_scope === 'future') await recurring.updateFuture(job.id, req.body.repeat || null);
+    else if (!job.series_id && req.body.repeat?.freq && !job.draft) await recurring.start(job.id, req.body.repeat, req.user.id);
+    job = await dispatch.getJob(job.id);
     return req.body.send_now ? dispatch.sendJob(job.id) : { job, results: [] };
   }));
   api.post('/jobs/:id/send', need('dispatcher'), json((req) => dispatch.sendJob(req.params.id, { assignmentId: req.body?.assignment_id || null })));
@@ -523,6 +535,10 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
+  // ---------- repeating work orders ----------
+  api.get('/series', need('dispatcher'), json(async () => ({ series: await recurring.list() })));
+  api.post('/series/:id', need('dispatcher'), json((req) => recurring.action(req.params.id, String(req.body?.action || ''), String(req.body?.date || ''))));
+
   // ---------- end-of-day summary (Board) and alerts (Setup) ----------
   const dateParam = (req) => (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || req.body?.date || '')) ? String(req.query.date || req.body.date) : dispatch.today());
   api.get('/day-summary', need('dispatcher'), json(async (req) => {
@@ -660,8 +676,9 @@ async function main() {
   // Alerts by text when something fails (Setup → Alerts & day summary), and the end-of-day summary.
   const alerts = createAlerts(db);
   const summary = createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
+  const recurring = createRecurring(db, dispatch);
   await alerts.checkDowntime(config.timeZone);
-  createApp({ db, dispatch, backups, qbo, sites, alerts, summary }).listen(config.port, () => {
+  createApp({ db, dispatch, backups, qbo, sites, alerts, summary, recurring }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
@@ -692,6 +709,10 @@ async function main() {
       .then((out) => out && console.log(`Day summary texted to ${out.results.filter((r) => r.ok).length} number(s)`))
       .catch((err) => console.error('Day summary failed:', err));
     alerts.heartbeat().catch(() => {});
+    // Repeating work orders: make the next two weeks' visits, once a day.
+    recurring.runScheduled()
+      .then((made) => made?.length && console.log(`Repeat visits made: ${made.map((id) => '#' + id).join(', ')}`))
+      .catch((err) => { console.error('Repeat visits failed:', err); alerts.notify('task', `Repeating work orders could not be made: ${err.message}`); });
   }, 60 * 1000);
 }
 
