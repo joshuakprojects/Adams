@@ -4,7 +4,7 @@ const config = require('./config');
 const { openDb } = require('./db');
 const { createDispatch, ValidationError, nowHmIn } = require('./dispatch');
 const { createBackups } = require('./backup');
-const { need, needOwner, can, permissions } = require('./roles');
+const { need, needOwner, needSnow, can, permissions } = require('./roles');
 const { createDistance } = require('./distance');
 const { createQuickBooks } = require('./quickbooks');
 const { createReception } = require('./reception');
@@ -259,6 +259,11 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 
   const api = express.Router();
   api.use(auth.requireUser);
+  // The overnight snow dispatcher's login reaches only the Snow call (and who they are).
+  api.use((req, res, next) => {
+    if (req.user?.role !== 'snow' || req.path === '/me' || req.path.startsWith('/snow')) return next();
+    res.status(403).json({ error: 'This login is only for snow call-outs' });
+  });
   const json = (fn) => h(async (req, res) => res.json(await fn(req)));
 
   api.get('/me', (req, res) => res.json({ user: req.user, can: permissions(req.user), smsEnabled: config.smsEnabled, today: dispatch.today(),
@@ -572,16 +577,16 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
   // ---------- snow call-outs ----------
-  api.get('/snow', need('dispatcher'), json(async () => ({ current: await snow.current(), shovelers: await snow.listShovelers({ all: true }),
+  api.get('/snow', needSnow, json(async () => ({ current: await snow.current(), shovelers: await snow.listShovelers({ all: true }),
     recent: await snow.recent(5), notify: JSON.parse((await db.get('SELECT value FROM settings WHERE key = ?', 'snow_notify'))?.value || '[]') })));
-  api.post('/snow/start', need('dispatcher'), json(async (req) => {
+  api.post('/snow/start', needSnow, json(async (req) => {
     const out = await snow.start(req.body || {}, req.user.name || req.user.email);
     await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', 'snow_notify', JSON.stringify(out.notify));
     return out;
   }));
-  api.post('/snow/:id/cancel', need('dispatcher'), json((req) => snow.cancel(req.params.id)));
-  api.post('/snow/people/:id', need('dispatcher'), json((req) => snow.act(req.params.id, String(req.body?.action || ''))));
-  api.post('/snow/shovelers', need('dispatcher'), json((req) => snow.saveShoveler(req.body || {})));
+  api.post('/snow/:id/cancel', needSnow, json((req) => snow.cancel(req.params.id)));
+  api.post('/snow/people/:id', needSnow, json((req) => snow.act(req.params.id, String(req.body?.action || ''))));
+  api.post('/snow/shovelers', needSnow, json((req) => snow.saveShoveler(req.body || {})));
 
   // ---------- route planning (Board → Plan route) ----------
   const routeTypes = (q) => String(q.types ?? 'septic').split(',').map((s) => s.trim()).filter(Boolean);

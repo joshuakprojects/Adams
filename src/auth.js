@@ -22,7 +22,7 @@ function verifyPassword(password, stored) {
 class UserError extends Error {
   constructor(message) { super(message); this.status = 400; }
 }
-const ROLES = ['office', 'dispatcher', 'admin'];
+const ROLES = ['office', 'dispatcher', 'admin', 'snow'];
 const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
 /** Create a login, or update the name / password / role of an existing one (same email). */

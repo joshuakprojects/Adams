@@ -1095,3 +1095,10 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 .snow-recent { margin: 0; padding-left: 18px; font-size: 14px; }
 tr.inactive td { opacity: .55; }
 @media (max-width: 640px) { .snow-form { grid-template-columns: minmax(0, 1fr); } .snow-preview ul { columns: 1; } .snow-table th:nth-child(4), .snow-table td:nth-child(4) { display: none; } }
+
+/* Snow call tab: dispatch, admins and the overnight snow dispatcher; that login sees nothing else. */
+body:not(.can-snow) [data-need="snow"] { display: none !important; }
+body.snow-only .tabs button:not([data-tab="snow"]), body.snow-only #tab-board, body.snow-only .help-link { display: none !important; }
+
+.snow-when { background: #e4f3e8; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; font-size: 14px; }
+.snow-when.warn { background: #fdf0d9; color: #6b3a00; }
