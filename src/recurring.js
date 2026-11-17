@@ -214,7 +214,7 @@ function createRecurring(db, dispatch, { today = dispatch.today } = {}) {
   /** Called every minute: make new visits once a day. */
   async function runScheduled() {
     const day = today();
-    const ran = (await db.get("SELECT value FROM settings WHERE key = 'series_ran_day'"))?.value;
+    const ran = (await db.get('SELECT value FROM settings WHERE key = ?', 'series_ran_day'))?.value;
     if (ran === day) return null;
     await db.run("INSERT INTO settings (key, value) VALUES ('series_ran_day', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", day);
     return generate();

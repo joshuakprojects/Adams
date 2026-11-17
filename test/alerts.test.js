@@ -4,7 +4,10 @@ const assert = require('node:assert/strict');
 process.env.TWILIO_ACCOUNT_SID = '';
 const { testDb } = require('./helpers');
 const { createDispatch } = require('../src/dispatch');
-const { createAlerts, parsePhones } = require('../src/alerts');
+const { createAlerts, parsePhones, clock } = require('../src/alerts');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { createSummary } = require('../src/summary');
 
 async function setup(t) {
@@ -56,17 +59,25 @@ test('alerts: an alert text that fails is still recorded', async (t) => {
   assert.equal(a.texted, '');
 });
 
-test('alerts: the app being down for a while is noticed on start-up', async (t) => {
+test('alerts: the app being down for a while is noticed on start-up; a planned restart is not', async (t) => {
   const { db, sent, send } = await setup(t);
-  let clock = new Date('2026-11-12T15:00:00Z');
-  const alerts = createAlerts(db, { send, now: () => clock, listen: false });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let clockNow = new Date('2026-11-12T15:00:00Z');
+  const alerts = createAlerts(db, { send, now: () => clockNow, listen: false, heartbeatFile: path.join(dir, 'hb.json') });
   await alerts.saveSettings({ alert_phones: '705-555-0100' });
   assert.equal(await alerts.checkDowntime('America/Toronto'), false, 'first start: nothing to compare');
-  clock = new Date('2026-11-12T15:05:00Z');
+  clockNow = new Date('2026-11-12T15:05:00Z');
   assert.equal(await alerts.checkDowntime('America/Toronto'), false, 'a quick restart is fine');
-  clock = new Date('2026-11-12T18:05:00Z');
+  // A Republish: stopped on purpose, back 12 minutes later. Not reported.
+  alerts.stopped();
+  clockNow = new Date('2026-11-12T15:17:00Z');
+  assert.equal(await alerts.checkDowntime('America/Toronto'), false);
+  // Stopped without warning (a crash) for 3 hours: reported, with plain times.
+  clockNow = new Date('2026-11-12T18:17:00Z');
   assert.equal(await alerts.checkDowntime('America/Toronto'), true);
-  assert.match(sent.at(-1).body, /App was down: Dispatch was not running from .*10:05.* to .*1:05.* \(3 hours\)/);
+  assert.match(sent.at(-1).body, /App was down: Dispatch was not running from Thu Nov 12, 10:17 AM to Thu Nov 12, 1:17 PM \(3 hours\)\./);
+  assert.equal(clock(new Date('2026-11-17T13:49:00Z'), 'America/Toronto'), 'Tue Nov 17, 8:49 AM');
 });
 
 test('day summary: done, loads, money, still open, booked today, tomorrow; texted to chosen numbers', async (t) => {

@@ -5,6 +5,8 @@
  * Every alert is kept (Setup shows the latest). The same kind of alert is texted at most once an hour,
  * so a problem that keeps happening doesn't flood anyone's phone.
  */
+const fs = require('node:fs');
+const path = require('node:path');
 const sms = require('./sms');
 
 const KINDS = {
@@ -26,7 +28,16 @@ function parsePhones(value) {
   return [...new Set((Array.isArray(list) ? list : []).map((p) => sms.normalizePhone(p)).filter(Boolean))].slice(0, 10);
 }
 
-function createAlerts(db, { send = sms.sendSms, now = () => new Date(), throttleMinutes = 60, listen = true } = {}) {
+const DEFAULT_HEARTBEAT = path.join(__dirname, '..', 'data', 'heartbeat.json');
+
+/** "Tue Nov 17, 8:49 AM" in the given time zone, in plain characters (some clocks print odd spaces). */
+function clock(d, timeZone) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric',
+    minute: '2-digit', hour12: true }).formatToParts(d).map((x) => [x.type, x.value]));
+  return `${parts.weekday} ${parts.month} ${parts.day}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod || '').toUpperCase()}`;
+}
+
+function createAlerts(db, { send = sms.sendSms, now = () => new Date(), throttleMinutes = 60, listen = true, heartbeatFile = DEFAULT_HEARTBEAT } = {}) {
   let sending = false; // an alert text that fails must not raise another alert
 
   const getSetting = async (key, fallback = '') => (await db.get('SELECT value FROM settings WHERE key = ?', key))?.value ?? fallback;
@@ -65,16 +76,24 @@ function createAlerts(db, { send = sms.sendSms, now = () => new Date(), throttle
     notify('sms', `A text to ${sms.prettyPhone(to)} failed: ${String(err?.message || err).slice(0, 160)}. Drivers or customers may not be getting texts.`);
   });
 
-  // The app writes a heartbeat every minute; on start-up, a gap of over 10 minutes means it was down.
-  async function heartbeat() { await setSetting('heartbeat_at', now().toISOString()); }
+  // The app notes the time every minute in a small file (not the database, which is billed while awake). On start-up,
+  // a gap of over 10 minutes means it was down; a planned stop (Republish) is noted and not reported unless it ran long.
+  const readBeat = () => { try { return JSON.parse(fs.readFileSync(heartbeatFile, 'utf8')); } catch { return null; } };
+  const writeBeat = (beat) => {
+    try { fs.mkdirSync(path.dirname(heartbeatFile), { recursive: true }); fs.writeFileSync(heartbeatFile, JSON.stringify(beat)); } catch { /* best effort */ }
+  };
+  async function heartbeat() { writeBeat({ at: now().toISOString() }); }
+  /** Called on a planned stop (SIGTERM from a Republish or restart). */
+  function stopped() { writeBeat({ at: now().toISOString(), stopped: true }); }
   async function checkDowntime(timeZone) {
-    const last = await getSetting('heartbeat_at', '');
-    const gapMin = last ? (now().getTime() - Date.parse(last)) / 60e3 : 0;
+    const beat = readBeat();
+    const gapMin = beat?.at ? (now().getTime() - Date.parse(beat.at)) / 60e3 : 0;
     await heartbeat();
-    if (gapMin > 10) {
-      const fmt = (d) => d.toLocaleString('en-CA', { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    // A planned stop: only worth a text if the app then stayed off for over half an hour.
+    if (gapMin > (beat?.stopped ? 30 : 10)) {
       const hours = gapMin >= 120 ? `${Math.round(gapMin / 60)} hours` : `${Math.round(gapMin)} minutes`;
-      await notify('down', `Dispatch was not running from ${fmt(new Date(last))} to ${fmt(now())} (${hours}). Texts, replies and scheduled texts in that time were missed.`, { force: true });
+      await notify('down', `Dispatch was not running from ${clock(new Date(beat.at), timeZone)} to ${clock(now(), timeZone)} (${hours})`
+        + `${beat.stopped ? ' after a restart or update' : ''}. Texts and replies in that time were missed; scheduled texts went out when it came back.`, { force: true });
       return true;
     }
     return false;
@@ -91,7 +110,7 @@ function createAlerts(db, { send = sms.sendSms, now = () => new Date(), throttle
     return (await db.all('SELECT * FROM alerts ORDER BY id DESC LIMIT ?', limit)).map((a) => ({ ...a, label: KINDS[a.kind] || a.kind }));
   }
 
-  return { notify, raise, heartbeat, checkDowntime, settings, saveSettings, list, phones };
+  return { notify, raise, heartbeat, stopped, checkDowntime, settings, saveSettings, list, phones };
 }
 
-module.exports = { createAlerts, parsePhones, KINDS };
+module.exports = { createAlerts, parsePhones, KINDS, clock };

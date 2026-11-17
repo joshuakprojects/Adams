@@ -1943,9 +1943,20 @@
     await loadBoard();
     // Office logins get the simple reception screens; dispatchers and admins can look with ?view=reception.
     if (!state.can.dispatch || new URLSearchParams(location.search).get('view') === 'reception') window.RECEPTION?.start();
-    // Keep the board fresh so driver confirmations show up without reloading.
+    // Keep the board fresh so driver confirmations show up without reloading. A screen nobody has touched for
+    // 20 minutes stops asking (so the database can sleep, e.g. a PC left on overnight); the first touch refreshes it.
+    let lastActive = Date.now();
+    const idleMs = 20 * 60 * 1000;
+    const wake = () => {
+      const wasIdle = Date.now() - lastActive > idleMs;
+      lastActive = Date.now();
+      if (wasIdle && state.tab === 'board' && !document.hidden) loadBoard().catch(() => {});
+    };
+    for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) document.addEventListener(ev, wake, { passive: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
     setInterval(() => {
       if (document.hidden || dialog.open || $('#ticket-dialog').open) return;
+      if (Date.now() - lastActive > idleMs) return;
       if (state.tab === 'board' && !document.querySelector('details[open]')) loadBoard().catch(() => {});
       if (state.tab === 'messages') loadMessages().catch(() => {});
     }, 15000);
