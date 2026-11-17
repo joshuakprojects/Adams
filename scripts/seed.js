@@ -6,7 +6,7 @@ const { createDispatch } = require('../src/dispatch');
 const { seedDemo } = require('../src/demo');
 
 (async () => {
-  const db = await openDb(process.env.DATABASE_URL ? { url: process.env.DATABASE_URL } : config.dbPath);
+  const db = await openDb(config.databaseUrl ? { url: config.databaseUrl } : config.dbPath);
   const d = createDispatch(db);
   if (await seedDemo(d)) console.log('Seeded sample trucks, drivers and jobs starting', d.today());
   else console.log('Database already has drivers — not seeding.');

@@ -672,9 +672,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 }
 
 async function main() {
-  // Replit's built-in PostgreSQL sets DATABASE_URL; without it, a local SQLite file is used.
-  const db = await openDb(process.env.DATABASE_URL ? { url: process.env.DATABASE_URL } : config.dbPath);
-  console.log(db.kind === 'pg' ? 'Database: PostgreSQL (DATABASE_URL)' : `Database: SQLite file ${config.dbPath}`);
+  // PostgreSQL from DISPATCH_DATABASE_URL (e.g. Neon) or Replit's DATABASE_URL; without either, a local SQLite file.
+  const db = await openDb(config.databaseUrl ? { url: config.databaseUrl } : config.dbPath);
+  console.log(db.kind === 'pg' ? `Database: PostgreSQL (${config.databaseSource}, ${new URL(config.databaseUrl).host})` : `Database: SQLite file ${config.dbPath}`);
   await auth.ensureAdmin(db);
   const dispatch = createDispatch(db);
   await dispatch.loadCustomFields();
@@ -694,7 +694,8 @@ async function main() {
     nowHm: () => nowHmIn(),
     readPhoto: async (id) => (await dispatch.getTicket(id))?.data || null,
   });
-  console.log(backups.targets.length ? `Backups every hour and night: ${backups.targets.map((t) => t.label).join(' + ')}` : 'Backups are OFF (BACKUP_TARGET=off)');
+  const fixed = backups.targets.filter((t) => !t.active);
+  console.log(fixed.length ? `Backups every hour and night: ${fixed.map((t) => t.label).join(' + ')} (+ Google Drive nightly, once connected)` : 'Backups are OFF (BACKUP_TARGET=off)');
   // QuickBooks: every change to a work order queues its Estimate (sent only once an admin connects and switches it on).
   const qbo = createQuickBooks(db, dispatch);
   dispatch.onChange((jobId, action) => { if (!/^Estimate /.test(action)) qbo.enqueue(jobId).catch(() => {}); });

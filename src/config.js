@@ -11,6 +11,11 @@ module.exports = {
   // Public URL of this app, used for links in texts and Twilio signature checks.
   publicUrl: (env.PUBLIC_URL || `http://localhost:${env.PORT || 3000}`).replace(/\/$/, ''),
   dbPath: env.DB_PATH || path.join(__dirname, '..', 'data', 'dispatch.db'),
+  // PostgreSQL: DISPATCH_DATABASE_URL (a database you chose, e.g. Neon) wins over Replit's own DATABASE_URL.
+  // channel_binding is dropped from the link (Neon adds it; the database driver here doesn't need it).
+  databaseUrl: String(env.DISPATCH_DATABASE_URL || env.DATABASE_URL || '').trim()
+    .replace(/([?&])channel_binding=[^&]*&?/, '$1').replace(/[?&]$/, ''),
+  databaseSource: env.DISPATCH_DATABASE_URL ? 'DISPATCH_DATABASE_URL' : env.DATABASE_URL ? 'DATABASE_URL' : '',
   timeZone: env.TZ_NAME || 'America/Toronto',
   // Where scale ticket photos are stored.
   uploadDir: env.UPLOAD_DIR || path.join(__dirname, '..', 'data', 'uploads'),
