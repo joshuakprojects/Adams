@@ -304,6 +304,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   }));
   api.get('/qbo/log', admin, json(() => qbo.log(100)));
   api.get('/qbo/preview/:jobId', admin, json((req) => qbo.preview(req.params.jobId)));
+  api.post('/qbo/invoice/:jobId', admin, json((req) => qbo.invoice(req.params.jobId, { email: Boolean(req.body?.email) })));
   api.post('/qbo/disconnect', admin, json(() => qbo.disconnect()));
 
   // ---------- customer questions (standard answers) ----------

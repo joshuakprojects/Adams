@@ -49,6 +49,12 @@ function fakeQbo() {
       return ok({ Estimate: e });
     }
     if (path.startsWith('/estimate/')) return ok({ Estimate: s.estimates[path.split('/')[2]] });
+    if (path === '/invoice') {
+      const inv = { ...body, Id: String(s.nextId++), DocNumber: '1042', TotalAmt: 597.0 };
+      (s.invoices ||= []).push(inv);
+      return ok({ Invoice: inv });
+    }
+    if (/^\/invoice\/\d+\/send$/.test(path)) { s.sentTo = decodeURIComponent(url.match(/sendTo=([^&]+)/)[1]); return ok({ Invoice: {} }); }
     throw new Error('unexpected ' + url);
   };
   return { s, fetchImpl };
@@ -203,4 +209,38 @@ test('cancelled work orders mark the estimate rejected; sign-ins are never in ba
   assert.ok(dump.tables.settings.some((r) => r.key === 'qbo_mapping'));
   await qbo.disconnect();
   assert.equal((await qbo.status()).connected, false);
+});
+
+test('Send invoice: made from the work order, linked to its estimate (which then stops changing), emailed if asked; only once', async (t) => {
+  const { d, dave, qbo, fake, settle } = await setup(t);
+  const { job: unpriced } = await d.saveJob({ job_type: 'septic', scheduled_date: '2026-11-12', customer: 'No Price', to_location: '1 Rd' });
+  await assert.rejects(() => qbo.invoice(unpriced.id), /Add prices/);
+  const { job } = await d.saveJob({ job_type: 'septic', scheduled_date: '2026-11-12', customer: 'Lake House', customer_phone: '705-555-0444',
+    customer_email: 'lake@example.com', to_location: '9 Shore Rd', lines: septicLines.slice(0, 2), assignments: [{ driver_id: dave.id }] });
+  await assert.rejects(() => qbo.invoice(job.id), /Connect QuickBooks/, 'not connected yet');
+  const u = new URL(await qbo.authUrl());
+  await qbo.finishConnect({ code: 'c', state: u.searchParams.get('state'), realmId: '123' });
+  await qbo.saveMapping({ items: { septic: '11', water: '11', other: '19' }, tax: { hst: '5', exempt: '7' } });
+  await qbo.setEnabled(true);
+  await settle();
+  await qbo.processQueue();
+  const estId = Object.keys(fake.s.estimates)[0];
+  assert.ok(estId, 'estimate first, as before');
+
+  const out = await qbo.invoice(job.id, { email: true });
+  assert.equal(out.doc_number, '1042');
+  assert.equal(out.emailed, true);
+  assert.equal(fake.s.sentTo, 'lake@example.com');
+  const inv = fake.s.invoices[0];
+  assert.deepEqual(inv.LinkedTxn, [{ TxnId: estId, TxnType: 'Estimate' }]);
+  assert.equal(inv.Line.length, 2);
+  assert.equal(inv.TxnStatus, undefined);
+  assert.equal((await d.getJob(job.id)).invoice_number, '1042');
+  assert.match((await d.historyFor(job.id)).at(-1).action, /Invoice created in QuickBooks/);
+  await assert.rejects(() => qbo.invoice(job.id), /Already invoiced/);
+  // Later changes don't touch the estimate any more.
+  await d.saveJob({ ...(await d.getJob(job.id)), notes: 'changed', assignments: [{ driver_id: dave.id }] });
+  await settle();
+  await qbo.processQueue();
+  assert.equal(fake.s.estimates[estId].SyncToken, '0');
 });

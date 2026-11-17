@@ -367,6 +367,43 @@ function createQuickBooks(db, dispatch, {
     try { return await running; } finally { running = null; }
   }
 
+  /**
+   * Invoice a work order in QuickBooks (the office presses "Send invoice"). Built from the work order's prices, the
+   * same way as its Estimate, and linked to that Estimate so QuickBooks closes it. Once invoiced, the app stops
+   * changing the Estimate. Optionally emails the invoice to the customer from QuickBooks.
+   */
+  async function invoice(jobId, { email = false } = {}) {
+    const job = await dispatch.getJob(jobId);
+    if (!job) throw new QboError('Work order not found', 404);
+    if (FORMS.typeInfo(job.job_type).noPricing) throw new QboError('This kind of work order is not billed');
+    if (job.status === 'cancelled') throw new QboError('This work order was cancelled');
+    if (!job.lines.filter((l) => l.kind !== 'deposit').length) throw new QboError('Add prices to the work order before invoicing it');
+    if (job.lines.some((l) => l.kind !== 'deposit' && (l.unit_price == null || l.unit_price === ''))) throw new QboError('Some lines have no price yet: price them first');
+    if (!(await enabled()) || !(await tokens())?.refresh_token) throw new QboError('Connect QuickBooks and switch it on first (Setup → QuickBooks)');
+    const row = await db.get('SELECT * FROM qbo_sync WHERE job_id = ?', job.id);
+    if (row?.invoice_id) throw new QboError(`Already invoiced in QuickBooks (invoice ${row.invoice_doc || row.invoice_id})`);
+    const map = await mapping();
+    let customer = null;
+    if (row?.estimate_id) customer = (await call('GET', `/estimate/${row.estimate_id}`).catch(() => null))?.Estimate?.CustomerRef?.value || null;
+    const built = buildEstimate(job, { ...map, customerRef: customer || await customerRef(job) }, { categoryOf: await categoryLookup() });
+    if (built.missing.length) throw new QboError(`Set up in Dispatch first: ${built.missing.join(', ')}`);
+    const { TxnStatus, ...inv } = built.estimate;
+    void TxnStatus;
+    inv.TxnDate = job.completed_at ? String(job.completed_at).slice(0, 10) : job.scheduled_date;
+    if (row?.estimate_id) inv.LinkedTxn = [{ TxnId: String(row.estimate_id), TxnType: 'Estimate' }];
+    const created = (await call('POST', '/invoice', inv)).Invoice;
+    let emailed = false;
+    if (email && job.customer_email) {
+      try { await call('POST', `/invoice/${created.Id}/send?sendTo=${encodeURIComponent(job.customer_email)}`); emailed = true; } catch { /* the invoice is made; it can be emailed from QuickBooks */ }
+    }
+    const doc = String(created.DocNumber || created.Id);
+    if (row) await db.run("UPDATE qbo_sync SET status = 'locked', invoice_id = ?, invoice_doc = ?, invoiced_at = datetime('now'), last_error = '' WHERE job_id = ?", String(created.Id), doc, job.id);
+    else await db.run("INSERT INTO qbo_sync (job_id, status, invoice_id, invoice_doc, invoiced_at) VALUES (?, 'locked', ?, ?, datetime('now'))", job.id, String(created.Id), doc);
+    await db.run('UPDATE jobs SET invoice_number = ? WHERE id = ?', doc, job.id);
+    await dispatch.logHistory(job.id, 'Invoice created in QuickBooks', `Invoice ${doc} · ${PRICING.money(Number(created.TotalAmt) || 0)}${emailed ? ` · emailed to ${job.customer_email}` : ''}`);
+    return { invoice_id: String(created.Id), doc_number: doc, total: Number(created.TotalAmt) || 0, emailed, email: job.customer_email || '' };
+  }
+
   async function customerQboId(job) {
     if (!job.customer_id) return null;
     return (await dispatch.customers.get(job.customer_id))?.qbo_id || null;
@@ -381,7 +418,7 @@ function createQuickBooks(db, dispatch, {
     return row ? { ...row, payload: row.payload ? JSON.parse(row.payload) : null } : null;
   }
 
-  return { status, authUrl, finishConnect, disconnect, setEnabled, saveMapping, lists, importCustomers, enqueue, processQueue, log, preview, call };
+  return { status, authUrl, finishConnect, disconnect, setEnabled, saveMapping, lists, importCustomers, enqueue, processQueue, log, preview, call, invoice };
 }
 
 module.exports = { createQuickBooks, buildEstimate, buildCustomer, QboError, CATEGORIES };
