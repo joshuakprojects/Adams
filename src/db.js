@@ -408,6 +408,15 @@ CREATE TABLE IF NOT EXISTS snow_call_people (
   via TEXT NOT NULL DEFAULT ''
 );
 
+-- The recorded words of a snow call-out (ElevenLabs voice), played to every shoveler called in it.
+CREATE TABLE IF NOT EXISTS snow_audio (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  call_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  data BLOB NOT NULL,
+  UNIQUE (call_id, kind)
+);
+
 -- Problems the office should hear about (texts failing, a backup failing, the app having been down).
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -427,6 +436,15 @@ CREATE TABLE IF NOT EXISTS distances (
 
 // Columns added after the first version. Added to existing databases on start-up.
 const ADDED_COLUMNS = {
+  // Snow call-outs: the key in the address of their recorded words, and which voice they used.
+  snow_calls: {
+    audio_key: "TEXT NOT NULL DEFAULT ''",
+    voice: "TEXT NOT NULL DEFAULT ''",
+  },
+  // When the shoveler was texted how to save the snow call number.
+  shovelers: {
+    setup_texted_at: 'TEXT',
+  },
   // Invoices made from a work order (Send invoice): QuickBooks's id and number.
   qbo_sync: {
     invoice_id: "TEXT NOT NULL DEFAULT ''",

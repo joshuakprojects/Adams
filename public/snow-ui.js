@@ -1,4 +1,6 @@
-/* ❄ Snow call: phone every shoveler at their own call-ahead time, see who's coming. Uses app.js (window.APP). */
+/* ❄ Snow call: phone every shoveler at their own call-ahead time and see who's coming. Uses app.js (window.APP).
+   Three views: start a call-out (pick the time, who, where), the live board (Coming / Waiting / Can't), and the last
+   results (they stay until the next call-out). Shovelers, the setup text and the call voice are below. */
 (function () {
   const A = window.APP;
   if (!A) return;
@@ -6,137 +8,158 @@
   let root = null;
   let data = null;
   let timer = null;
-  let confirmStart = false;
-  let editing = null; // shoveler id being edited
+  let editing = null; // shoveler id being edited, or 'new'
+  const form = { day: '', time: '04:00', dayTouched: false, place: '', note: '', mode: 'ahead', pick: null, notify: '', confirm: false };
 
   const TZ = 'America/Toronto';
-  const dueText = (sql) => {
-    if (!sql) return '';
-    const d = new Date(sql.replace(' ', 'T') + 'Z');
-    const today = new Date().toDateString() === d.toDateString();
-    return today ? localTime(sql) : d.toLocaleString('en-CA', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  };
-  const localTime = (sql) => (sql ? new Date(sql.replace(' ', 'T') + 'Z').toLocaleTimeString('en-CA', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }) : '');
-  const dateLong = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
-  const STATUS = {
-    waiting: ['Waiting', ''], calling: ['Ringing…', 'blue'], no_answer_retry: ['No answer, trying again', 'warn'], coming: ['Coming ✓', 'ok'],
-    not_coming: ["Can't come", 'bad'], no_answer: ['No answer', 'bad'], failed: ["Couldn't call", 'bad'], cancelled: ['Cancelled', ''],
-  };
+  const QUICK = ['04:00', '04:30', '05:00', '05:30', '06:00'];
   const AHEAD = [15, 20, 30, 45, 60, 75, 90, 120];
   const sayHm = (hm) => { const [h, m] = String(hm).split(':').map(Number); return `${((h + 11) % 12) + 1}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'AM' : 'PM'}`; };
-
-  /** The next time the clock reads `hm` (today if that's still ahead, else tomorrow), as date + time inputs. */
   const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  function nextStart(hm = '04:00') {
-    const local = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
-    const [h, m] = hm.split(':').map(Number);
-    if (local.getHours() * 60 + local.getMinutes() >= h * 60 + m) local.setDate(local.getDate() + 1);
-    return { day: ymdOf(local), time: hm };
-  }
-  let dateTouched = false; // the date box follows the time until someone changes the date by hand
-  const at = (day, hm) => new Date(`${day}T${hm}:00`); // the office's own clock (Parry Sound)
-  const whenText = (d) => d.toLocaleString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const localNow = () => new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+  const todayYmd = () => ymdOf(localNow());
+  const tomorrowYmd = () => { const d = localNow(); d.setDate(d.getDate() + 1); return ymdOf(d); };
+  /** The next day the clock reads `hm`: today if that's still ahead, else tomorrow. */
+  const nextDay = (hm) => { const n = localNow(); const [h, m] = hm.split(':').map(Number); return n.getHours() * 60 + n.getMinutes() < h * 60 + m ? todayYmd() : tomorrowYmd(); };
+  const at = (day, hm) => new Date(`${day}T${hm}:00`);
+  const clock = (d) => d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
+  const dayWord = (ymd) => (ymd === todayYmd() ? 'Today' : ymd === tomorrowYmd() ? 'Tomorrow' : new Date(ymd + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }));
+  const whenText = (d) => `${dayWord(ymdOf(d))} ${clock(d)}`;
+  const fromSql = (s) => new Date(String(s).replace(' ', 'T') + 'Z');
   function fromNow(d) {
     const min = Math.round((d - Date.now()) / 60000);
     if (min < 1) return 'now';
     if (min < 60) return `in ${min} min`;
     const h = Math.floor(min / 60);
-    return `in ${h} hour${h === 1 ? '' : 's'}${min % 60 ? ` ${min % 60} min` : ''}`;
+    return `in ${h} h${min % 60 ? ` ${min % 60} min` : ''}`;
   }
-  const minus = (hm, min) => { const [h, m] = hm.split(':').map(Number); const t = ((h * 60 + m - min) % 1440 + 1440) % 1440; const hh = Math.floor(t / 60); return `${((hh + 11) % 12) + 1}:${String(t % 60).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
+  const active = () => data.shovelers.filter((s) => s.active);
+  const picked = () => (form.pick ? active().filter((s) => form.pick.has(s.id)) : active());
 
   async function mount(el) {
     root = el;
     await load();
     clearInterval(timer);
-    timer = setInterval(() => { if (A.state.tab === 'snow' && !document.hidden && data?.current) load().catch(() => {}); }, 10000);
+    timer = setInterval(() => { if (A.state.tab === 'snow' && !document.hidden && data?.current) load().catch(() => {}); }, 8000);
   }
   async function load() {
     data = await api('/snow');
+    if (!form.day) { form.day = nextDay(form.time); form.place = data.place || 'the yard, 116 William St'; form.notify = (data.notify || []).map(prettyPhone).join(', '); }
     render();
   }
 
+  // ---------- views ----------
   function render() {
+    const keep = document.activeElement?.id;
     root.innerHTML = `<div class="snow-page">
-      ${data.current ? running(data.current) : startForm()}
-      ${shovelers()}
-      ${data.recent.length ? `<div class="panel"><h3>Recent call-outs</h3><ul class="snow-recent">${data.recent.map((r) => `<li>${esc(dateLong(r.day))}, start ${esc(sayHm(r.start_time))} at ${esc(r.place)} · <span class="muted">${esc(r.status)}</span></li>`).join('')}</ul></div>` : ''}
+      ${data.current ? live(data.current) : `${data.last ? results(data.last) : ''}${starter()}`}
+      ${people()}
+      ${A.state.can?.dispatch ? voiceBox() : ''}
+    </div>`;
+    if (keep) document.getElementById(keep)?.focus();
+  }
+
+  function columns(c) {
+    const by = (list) => c.people.filter((p) => list.includes(p.status));
+    const tile = (p, actions) => `<div class="sn-person"><div><b>${esc(p.name)}</b><span>${esc(p.detail)}</span></div>${actions ? `<div class="sn-acts">${actions}</div>` : ''}</div>`;
+    const running = c.status === 'running';
+    const btn = (p, act, label) => `<button class="btn tiny" data-snow="${act}" data-id="${p.id}">${label}</button>`;
+    const coming = by(['coming']).map((p) => tile({ ...p, detail: p.via === 'office' ? 'marked by the office' : `answered by ${p.via}` },
+      running ? btn(p, 'not_coming', "Can't") : ''));
+    const waiting = by(['waiting', 'calling', 'no_answer_retry']).map((p) => {
+      const due = fromSql(p.due_at);
+      const detail = p.status === 'calling' ? '📞 Ringing now…' : p.status === 'no_answer_retry' ? `No answer, calling again ${fromNow(due)} (call ${p.attempts + 1} of 3)`
+        : due > new Date() ? `Called ${whenText(due)} (${fromNow(due)})` : 'Calling…';
+      return tile({ ...p, detail }, running ? `${btn(p, 'call_now', 'Call now')}${btn(p, 'coming', 'Coming')}${btn(p, 'not_coming', "Can't")}` : '');
+    });
+    const notComing = by(['not_coming', 'no_answer', 'failed', 'cancelled']).map((p) => tile({ ...p,
+      detail: p.status === 'not_coming' ? `Can't come (${p.via})` : p.status === 'cancelled' ? 'Not called (cancelled)' : `No answer after ${p.attempts} call${p.attempts === 1 ? '' : 's'}` },
+      running && p.status !== 'cancelled' ? `${btn(p, 'call_now', 'Try again')}${btn(p, 'coming', 'Coming')}` : ''));
+    const col = (cls, icon, title, list, empty) => `<section class="sn-col ${cls}"><h3>${icon} ${title} <span>${list.length}</span></h3>${list.join('') || `<p class="muted">${empty}</p>`}</section>`;
+    return `<div class="sn-cols">
+      ${col('ok', '✅', 'Coming', coming, 'Nobody yet')}
+      ${running || waiting.length ? col('wait', '⏳', 'Waiting', waiting, 'Everyone has answered') : ''}
+      ${col('no', '❌', "Can't / no answer", notComing, 'Nobody')}
     </div>`;
   }
 
-  function startForm() {
-    const n = nextStart();
-    dateTouched = false;
-    const people = data.shovelers.filter((s) => s.active);
-    return `<div class="panel snow-start">
-      <h2>❄ Snow call</h2>
-      <p class="muted">Every shoveler is phoned at their own call-ahead time before the start, and texted the details. They press 1 (coming) or 2 (can't), or text back. No answer: called again 5 minutes later, up to 3 times.</p>
-      <form id="snow-form" class="snow-form">
-        <label>Start <input type="date" name="day" value="${n.day}" required> <input type="time" name="time" value="${n.time}" required aria-label="Start time"></label>
-        <label>Where to report <input name="place" value="the yard, 116 William St" maxlength="120"></label>
-        <label class="wide">Note for the call (optional) <input name="note" placeholder="e.g. Bring your own shovel. Downtown route first." maxlength="160"></label>
-        <div class="field-col"><span class="lbl">When to call</span>
-          <label class="check"><input type="radio" name="mode" value="ahead" checked> At each person's call-ahead time</label>
-          <label class="check"><input type="radio" name="mode" value="now"> Everyone now</label></div>
-        <label class="wide">Text me who's coming when it's done <textarea name="notify" rows="1" placeholder="Your cell, e.g. 705-555-0100">${esc((data.notify || []).map(prettyPhone).join('\n'))}</textarea></label>
-        <div class="snow-preview" id="snow-preview">${preview(people, n.day, n.time, 'ahead')}</div>
-        <button class="btn primary big" type="submit" ${people.length ? '' : 'disabled'}>Start snow call</button>
-        ${people.length ? '' : '<p class="muted small">Add the shovelers below first.</p>'}
-      </form>
-    </div>`;
-  }
-  /** When the first call goes out (a Date), for the preview and the confirm button. */
-  function firstCall(people, day, time, mode) {
-    if (mode === 'now' || !people.length) return new Date();
-    const start = at(day, time);
-    return new Date(Math.max(Date.now(), start - Math.max(...people.map((s) => s.call_ahead_min)) * 60000));
-  }
-  function preview(people, day, time, mode) {
-    if (!people.length || !day || !time) return '';
-    const start = at(day, time);
-    const first = firstCall(people, day, time, mode);
-    const late = start - Date.now() > 20 * 3600 * 1000;
-    const past = start < Date.now();
-    return `<div class="snow-when ${late || past ? 'warn' : ''}"><b>Start: ${esc(whenText(start))}</b> (${esc(fromNow(start))}).
-        First call ${mode === 'now' ? '<b>right away</b>' : `<b>${esc(whenText(first))}</b> (${esc(fromNow(first))})`}.
-        ${late ? '<br>⚠ That\'s more than 20 hours away: check the date.' : past ? '<br>⚠ That time has already passed: check the date.' : ''}</div>
-      <span class="lbl">Who gets called when</span><ul>${people.map((s) => `<li><b>${esc(s.name)}</b> <span class="muted">${mode === 'now' ? 'right away'
-        : `${esc(whenText(new Date(Math.max(Date.now(), start - s.call_ahead_min * 60000))))} (${s.call_ahead_min} min ahead)`}</span></li>`).join('')}</ul>`;
+  function live(c) {
+    const start = fromSql(c.start_at);
+    const next = c.people.filter((p) => ['waiting', 'no_answer_retry'].includes(p.status)).map((p) => fromSql(p.due_at)).sort((a, b) => a - b)[0];
+    const status = next && next > new Date() ? `Next call ${whenText(next)} (${fromNow(next)})` : c.people.some((p) => p.status === 'calling') ? 'Calling now' : 'Waiting for answers';
+    return `<div class="sn-hero running">
+      <div class="sn-hero-top"><div><div class="sn-kicker">❄ Snow call running</div>
+        <h2>Start ${esc(sayHm(c.start_time))} · ${esc(dayWord(ymdOf(start)))}</h2>
+        <div class="sn-sub">At ${esc(c.place)}${c.note ? ` · ${esc(c.note)}` : ''} · ${esc(status)}</div></div>
+        <div class="sn-big"><b>${c.counts.coming || 0}</b><span>coming</span></div></div>
+      ${c.live ? '' : '<div class="note-warn">Test mode: nobody is really phoned (Twilio isn\'t set up). Use the buttons to try it.</div>'}
+      ${c.voice ? `<div class="muted small">Voice: ${esc(c.voice)}</div>` : ''}
+    </div>
+    ${columns(c)}
+    <div class="sn-foot"><span class="muted small">This page updates by itself.${c.notify.length ? ` When everyone has answered, the results are texted to ${esc(c.notify.map(prettyPhone).join(', '))}.` : ''}</span>
+      <button class="btn danger" data-snow="cancel">Cancel the call-out</button></div>`;
   }
 
-  function running(c) {
-    const pill = (s) => { const [t, k] = STATUS[s] || [s, '']; return `<span class="snow-pill ${k}">${esc(t)}</span>`; };
-    return `<div class="panel snow-running">
-      <div class="snow-head"><div><h2>❄ Snow call: start ${esc(c.say)}, ${esc(dateLong(c.day))}</h2><div class="muted">At ${esc(c.place)}${c.note ? ` · ${esc(c.note)}` : ''} · started by ${esc(c.created_by || '')}</div></div>
-        ${c.status === 'running' ? '<button class="btn danger" data-snow="cancel">Cancel the call-out</button>' : ''}</div>
-      ${c.live ? '' : '<div class="note-warn">Test mode: nobody is really phoned (Twilio isn\'t set up). Mark the answers below to try it.</div>'}
-      <div class="sum-tiles">
-        <div class="sum-tile"><span>Coming</span><b>${c.counts.coming || 0}</b></div>
-        <div class="sum-tile"><span>Can't come</span><b>${c.counts.not_coming || 0}</b></div>
-        <div class="sum-tile"><span>Still to answer</span><b>${(c.counts.waiting || 0) + (c.counts.calling || 0) + (c.counts.no_answer_retry || 0)}</b></div>
-        <div class="sum-tile"><span>No answer</span><b>${(c.counts.no_answer || 0) + (c.counts.failed || 0)}</b></div>
-      </div>
-      <table class="table snow-table"><thead><tr><th>Shoveler</th><th>Called at</th><th>Status</th><th>Calls</th><th></th></tr></thead><tbody>
-      ${c.people.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="muted small">${esc(prettyPhone(p.phone))}</div></td>
-        <td>${esc(dueText(p.due_at))}</td><td>${pill(p.status)}${p.via ? ` <span class="muted small">by ${esc(p.via)}</span>` : ''}</td><td>${p.attempts}</td>
-        <td><div class="snow-acts">${['coming', 'not_coming', 'cancelled'].includes(p.status) || c.status !== 'running' ? '' : `<button class="btn tiny" data-snow="call_now" data-id="${p.id}">Call now</button>`}
-          ${c.status === 'running' && p.status !== 'coming' ? `<button class="btn tiny" data-snow="coming" data-id="${p.id}" title="They told you another way">Coming</button>` : ''}
-          ${c.status === 'running' && p.status !== 'not_coming' ? `<button class="btn tiny" data-snow="not_coming" data-id="${p.id}">Can't</button>` : ''}</div></td></tr>`).join('')}
-      </tbody></table>
-      <p class="muted small">This page updates by itself. When everyone has answered (or been tried 3 times), who's coming is texted to ${c.notify.length ? esc(c.notify.map(prettyPhone).join(', ')) : 'nobody (no number was given)'}.</p>
+  function results(c) {
+    const start = fromSql(c.start_at);
+    const recent = Date.now() - start < 18 * 3600 * 1000;
+    return `<div class="sn-hero ${c.status === 'cancelled' ? 'cancelled' : 'done'}">
+      <div class="sn-hero-top"><div><div class="sn-kicker">${c.status === 'cancelled' ? 'Last snow call (cancelled)' : 'Last snow call'}</div>
+        <h2>Start ${esc(sayHm(c.start_time))} · ${esc(dayWord(ymdOf(start)))}</h2>
+        <div class="sn-sub">At ${esc(c.place)}</div></div>
+        <div class="sn-big"><b>${c.counts.coming || 0}</b><span>coming</span></div></div>
+    </div>
+    ${recent ? columns(c) : ''}`;
+  }
+
+  function starter() {
+    const ppl = active();
+    const chosen = picked();
+    const start = at(form.day, form.time);
+    const firstCall = form.mode === 'now' || !chosen.length ? new Date() : new Date(Math.max(Date.now(), start - Math.max(...chosen.map((s) => s.call_ahead_min)) * 60000));
+    const warn = start < Date.now() ? 'That time has already passed.' : start - Date.now() > 20 * 3600 * 1000 ? "That's more than 20 hours away: check the day." : '';
+    const custom = !QUICK.includes(form.time);
+    return `<div class="sn-card">
+      <h2>❄ Start a snow call</h2>
+      <div class="sn-step"><span class="sn-n">1</span><div class="sn-body"><div class="sn-q">When do they start?</div>
+        <div class="sn-chips">${QUICK.map((t) => `<button type="button" class="sn-chip ${form.time === t ? 'on' : ''}" data-time="${t}">${sayHm(t)}</button>`).join('')}
+          <label class="sn-chip other ${custom ? 'on' : ''}">Other <input type="time" id="sn-time" value="${esc(form.time)}" aria-label="Other start time"></label></div>
+        <div class="sn-chips small">${[todayYmd(), tomorrowYmd()].map((d) => `<button type="button" class="sn-chip ${form.day === d ? 'on' : ''}" data-day="${d}">${dayWord(d)}</button>`).join('')}
+          <label class="sn-chip other ${form.day !== todayYmd() && form.day !== tomorrowYmd() ? 'on' : ''}">Other day <input type="date" id="sn-day" value="${esc(form.day)}" aria-label="Other day"></label></div>
+      </div></div>
+      <div class="sn-step"><span class="sn-n">2</span><div class="sn-body"><div class="sn-q">Where?</div>
+        <input class="sn-input" id="sn-place" value="${esc(form.place)}" maxlength="120" aria-label="Where to report">
+        <input class="sn-input" id="sn-note" value="${esc(form.note)}" maxlength="160" placeholder="Anything else to say? (optional) e.g. Downtown route first" aria-label="Note"></div></div>
+      <div class="sn-step"><span class="sn-n">3</span><div class="sn-body"><div class="sn-q">Who? <span class="muted small">${chosen.length} of ${ppl.length} ·
+          <button type="button" class="link" data-pick="all">all</button> · <button type="button" class="link" data-pick="none">none</button></span></div>
+        ${ppl.length ? `<div class="sn-who">${ppl.map((s) => { const on = !form.pick || form.pick.has(s.id);
+          const when = form.mode === 'now' ? 'right away' : whenText(new Date(Math.max(Date.now(), start - s.call_ahead_min * 60000)));
+          return `<label class="sn-pick ${on ? 'on' : ''}"><input type="checkbox" data-who="${s.id}" ${on ? 'checked' : ''}><b>${esc(s.name)}</b><span>${on ? `called ${esc(when)}` : 'not called'}</span></label>`; }).join('')}</div>`
+          : '<p class="muted">No shovelers yet. Add them below.</p>'}
+        <label class="check sn-now"><input type="checkbox" id="sn-now" ${form.mode === 'now' ? 'checked' : ''}> Call everyone right now (not at their call-ahead times)</label></div></div>
+      <details class="sn-more"><summary>Text me the results</summary>
+        <input class="sn-input" id="sn-notify" value="${esc(form.notify)}" placeholder="Your cell, e.g. 705-555-0100" aria-label="Text the results to"></details>
+      <div class="sn-go ${warn ? 'warn' : ''}"><div><b>Start ${esc(whenText(start))}</b> (${esc(fromNow(start))}) · First call ${form.mode === 'now' ? 'right away' : `${esc(whenText(firstCall))} (${esc(fromNow(firstCall))})`}
+          ${warn ? `<div>⚠ ${esc(warn)}</div>` : ''}</div>
+        <button class="btn primary big" id="sn-start" ${chosen.length ? '' : 'disabled'}>${form.confirm ? `Tap again to phone ${chosen.length}` : 'Start snow call'}</button></div>
     </div>`;
   }
 
-  function shovelers() {
-    const row = (s) => editing === s.id ? `<tr><td colspan="5">${shovelerForm(s)}</td></tr>`
-      : `<tr class="${s.active ? '' : 'inactive'}"><td><b>${esc(s.name)}</b></td><td>${esc(prettyPhone(s.phone))}</td><td>${s.call_ahead_min} min</td>
-        <td>${s.active ? '' : '<span class="muted">not called</span>'}</td><td><button class="btn tiny" data-snow-edit="${s.id}">Edit</button></td></tr>`;
-    return `<div class="panel"><h3>Shovelers</h3>
-      <p class="muted small"><b>Call-ahead</b> is how long before the start each person needs to be called (to wake up and drive in).</p>
-      <table class="table compact"><thead><tr><th>Name</th><th>Cell</th><th>Call-ahead</th><th></th><th></th></tr></thead>
-        <tbody>${data.shovelers.map(row).join('') || '<tr><td colspan="5" class="muted">No shovelers yet.</td></tr>'}</tbody></table>
+  function people() {
+    const row = (s) => editing === s.id ? `<li class="sn-edit">${shovelerForm(s)}</li>`
+      : `<li class="${s.active ? '' : 'inactive'}"><div><b>${esc(s.name)}</b> <span class="muted">${esc(prettyPhone(s.phone))} · called ${s.call_ahead_min} min ahead${s.active ? '' : ' · not called'}</span>
+          <div class="small ${s.setup_texted_at ? 'muted' : 'sn-warn-text'}">${s.setup_texted_at ? '✓ Sent how to save our number' : '⚠ Not sent how to save our number yet'}</div></div>
+        <button class="btn tiny" data-snow-edit="${s.id}">Edit</button></li>`;
+    const notSent = data.shovelers.filter((s) => s.active && !s.setup_texted_at).length;
+    return `<details class="sn-card sn-people" ${data.shovelers.length && !editing ? '' : 'open'}><summary><h3>Shovelers <span class="muted">(${active().length})</span></h3>
+        ${notSent ? `<span class="pill warn">${notSent} not set up</span>` : ''}</summary>
+      <div class="sn-setup"><b>So the call rings at 3 AM:</b> phones often silence or flag calls from numbers that aren't saved. <b>Send setup text</b> texts each shoveler a link that saves
+        our number (${esc(data.number || '')}) as "Adams Bros Snow Call", and how to make it a Favourite so it rings through Do Not Disturb.
+        <div><button class="btn" data-snow="setup" data-scope="new">${notSent ? `Send setup text to the ${notSent} not set up` : 'Everyone has the setup text'}</button>
+          <button class="btn tiny" data-snow="setup" data-scope="all">Send to everyone again</button></div></div>
+      <ul class="sn-list">${data.shovelers.map(row).join('') || '<li class="muted">No shovelers yet.</li>'}</ul>
       ${editing === 'new' ? shovelerForm(null) : '<button class="btn" data-snow-edit="new">+ Add shoveler</button>'}
-    </div>`;
+    </details>`;
   }
   function shovelerForm(s) {
     const ahead = s?.call_ahead_min ?? 30;
@@ -144,73 +167,120 @@
     return `<form class="inline-form snow-shoveler" data-id="${s?.id || ''}">
       <input name="name" placeholder="Name" value="${esc(s?.name || '')}" required aria-label="Name">
       <input name="phone" placeholder="Cell, e.g. 705-555-0123" value="${esc(s ? prettyPhone(s.phone) : '')}" required aria-label="Cell number">
-      <select name="call_ahead_min" aria-label="Call-ahead">${opts.map((m) => `<option value="${m}" ${m === ahead ? 'selected' : ''}>${m} min ahead</option>`).join('')}</select>
+      <select name="call_ahead_min" aria-label="Call-ahead">${opts.map((m) => `<option value="${m}" ${m === ahead ? 'selected' : ''}>call ${m} min ahead</option>`).join('')}</select>
       ${s ? `<label class="check"><input type="checkbox" name="active" ${s.active ? 'checked' : ''}> Call them</label>` : ''}
       <button class="btn primary" type="submit">Save</button> <button class="btn" type="button" data-snow-edit="">Cancel</button></form>`;
   }
 
+  let voices = null;
+  function voiceBox() {
+    const v = data.voice || {};
+    if (!v.configured) {
+      return `<details class="sn-card"><summary><h3>Call voice: standard</h3></summary>
+        <p class="small">Calls use the phone system's voice. For a natural voice, add an ElevenLabs API key to Replit's Secrets as <code>ELEVENLABS_API_KEY</code>, Republish, and pick a voice here.</p></details>`;
+    }
+    return `<details class="sn-card" id="sn-voice" ${voices ? 'open' : ''}><summary><h3>Call voice: ${esc(v.voice_name || 'not picked yet (standard voice)')}</h3></summary>
+      ${voices ? `<div class="sn-voices">${voices.map((x) => `<label class="sn-voice ${x.voice_id === v.voice_id ? 'on' : ''}"><input type="radio" name="sn-voice" value="${esc(x.voice_id)}" data-name="${esc(x.name)}" ${x.voice_id === v.voice_id ? 'checked' : ''}>
+          <b>${esc(x.name)}</b><span>${esc(x.about || '')}</span>
+          <button type="button" class="btn tiny" data-hear="${esc(x.voice_id)}">▶ Hear our call</button></label>`).join('')}</div>
+        <p class="muted small">"Hear our call" plays this voice saying a real snow call. Pick one and it's used from the next call-out.</p>`
+        : '<button class="btn" data-snow="voices">Choose a voice</button>'}
+    </details>`;
+  }
+
+  // ---------- actions ----------
+  const startUpdate = () => { form.confirm = false; render(); };
   document.addEventListener('click', async (e) => {
     if (!root || !root.contains(e.target)) return;
-    const ed = e.target.closest('[data-snow-edit]');
+    const t = e.target;
+    const time = t.closest('[data-time]');
+    if (time) { form.time = time.dataset.time; if (!form.dayTouched) form.day = nextDay(form.time); return startUpdate(); }
+    const day = t.closest('[data-day]');
+    if (day) { form.day = day.dataset.day; form.dayTouched = true; return startUpdate(); }
+    const pk = t.closest('[data-pick]');
+    if (pk) { form.pick = pk.dataset.pick === 'all' ? null : new Set(); return startUpdate(); }
+    const ed = t.closest('[data-snow-edit]');
     if (ed) { editing = ed.dataset.snowEdit === 'new' ? 'new' : ed.dataset.snowEdit ? Number(ed.dataset.snowEdit) : null; return render(); }
-    const b = e.target.closest('[data-snow]');
-    if (!b) return;
-    try {
-      if (b.dataset.snow === 'cancel') {
-        if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Tap again to cancel'; return; }
-        await api(`/snow/${data.current.id}/cancel`, { method: 'POST' });
-        toast('Call-out cancelled. Anyone not yet called won\'t be.');
-      } else {
-        await api(`/snow/people/${b.dataset.id}`, { method: 'POST', body: { action: b.dataset.snow } });
-      }
-      await load();
-    } catch (err) { toast(err.message); }
-  });
-  document.addEventListener('input', (e) => {
-    if (!root || !e.target.closest('#snow-form')) return;
-    const f = e.target.closest('#snow-form').elements;
-    if (e.target.name === 'day') dateTouched = true;
-    // Changing the time moves the date to the next time the clock reads it (unless the date was set by hand).
-    if (e.target.name === 'time' && !dateTouched && f.time.value) f.day.value = nextStart(f.time.value).day;
-    const el = document.getElementById('snow-preview');
-    if (el) el.innerHTML = preview(data.shovelers.filter((s) => s.active), f.day.value, f.time.value, f.mode.value);
-    if (confirmStart) { confirmStart = false; const btn = e.target.closest('#snow-form').querySelector('button[type=submit]'); if (btn) btn.textContent = 'Start snow call'; }
-  });
-  document.addEventListener('change', (e) => { if (root && e.target.closest('#snow-form') && e.target.name === 'mode') e.target.dispatchEvent(new Event('input', { bubbles: true })); });
-  document.addEventListener('submit', async (e) => {
-    if (!root || !root.contains(e.target)) return;
-    if (e.target.id === 'snow-form') {
+    const hear = t.closest('[data-hear]');
+    if (hear) {
       e.preventDefault();
-      if (!confirmStart) {
-        confirmStart = true;
-        const people = data.shovelers.filter((x) => x.active);
-        const f = e.target.elements;
-        const first = firstCall(people, f.day.value, f.time.value, f.mode.value);
-        e.target.querySelector('button[type=submit]').textContent = f.mode.value === 'now'
-          ? `Tap again: phone all ${people.length} now`
-          : `Tap again to start: first call ${whenText(first)}`;
-        return;
-      }
-      confirmStart = false;
-      const f = e.target.elements;
+      hear.disabled = true; hear.textContent = '…';
       try {
-        await api('/snow/start', { method: 'POST', body: { day: f.day.value, time: f.time.value, place: f.place.value, note: f.note.value, mode: f.mode.value, notify: f.notify.value } });
+        const res = await fetch('/api/snow/voice/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ voice_id: hear.dataset.hear, text: `Adams Bros snow call. Start at ${sayHm(form.time)} at ${form.place || 'the yard'}. Press 1 if you are coming. Press 2 if you can't.` }) });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not make the sample');
+        new Audio(URL.createObjectURL(await res.blob())).play();
+      } catch (err) { toast(err.message); }
+      hear.disabled = false; hear.textContent = '▶ Hear our call';
+      return;
+    }
+    if (t.closest('#sn-start')) {
+      if (!form.confirm) { form.confirm = true; t.closest('#sn-start').textContent = `Tap again to phone ${picked().length}`; return; }
+      form.confirm = false;
+      try {
+        await api('/snow/start', { method: 'POST', body: { day: form.day, time: form.time, place: form.place, note: form.note,
+          mode: form.mode, notify: form.notify, shovelers: picked().map((s) => s.id) } });
         toast('Snow call started');
         await load();
       } catch (err) { toast(err.message); render(); }
       return;
     }
-    if (e.target.matches('.snow-shoveler')) {
-      e.preventDefault();
-      const f = e.target.elements;
-      try {
-        await api('/snow/shovelers', { method: 'POST', body: { id: e.target.dataset.id || null, name: f.name.value, phone: f.phone.value,
-          call_ahead_min: f.call_ahead_min.value, active: f.active ? f.active.checked : true } });
-        editing = null;
-        toast('Saved');
-        await load();
-      } catch (err) { toast(err.message); }
+    const b = t.closest('[data-snow]');
+    if (!b) return;
+    try {
+      const act = b.dataset.snow;
+      if (act === 'cancel') {
+        if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Tap again to cancel'; return; }
+        await api(`/snow/${data.current.id}/cancel`, { method: 'POST' });
+        toast("Call-out cancelled. Anyone not yet called won't be.");
+      } else if (act === 'setup') {
+        const ids = b.dataset.scope === 'all' ? active().map((s) => s.id) : active().filter((s) => !s.setup_texted_at).map((s) => s.id);
+        if (!ids.length) return toast('Everyone already has it');
+        const out = await api('/snow/setup-text', { method: 'POST', body: { ids } });
+        toast(`Setup text sent to ${out.results.filter((r) => r.ok).length}`);
+      } else if (act === 'voices') {
+        voices = (await api('/snow/voices')).voices;
+        return render();
+      } else {
+        await api(`/snow/people/${b.dataset.id}`, { method: 'POST', body: { action: act } });
+      }
+      await load();
+    } catch (err) { toast(err.message); }
+  });
+  document.addEventListener('change', async (e) => {
+    if (!root || !root.contains(e.target)) return;
+    const t = e.target;
+    if (t.matches('[data-who]')) {
+      if (!form.pick) form.pick = new Set(active().map((s) => s.id));
+      if (t.checked) form.pick.add(Number(t.dataset.who)); else form.pick.delete(Number(t.dataset.who));
+      return startUpdate();
     }
+    if (t.id === 'sn-now') { form.mode = t.checked ? 'now' : 'ahead'; return startUpdate(); }
+    if (t.id === 'sn-time' && t.value) { form.time = t.value; if (!form.dayTouched) form.day = nextDay(form.time); return startUpdate(); }
+    if (t.id === 'sn-day' && t.value) { form.day = t.value; form.dayTouched = true; return startUpdate(); }
+    if (t.name === 'sn-voice') {
+      try { data.voice = { ...data.voice, ...(await api('/snow/voice', { method: 'POST', body: { voice_id: t.value, name: t.dataset.name } })) }; toast(`Voice: ${t.dataset.name}`); render(); }
+      catch (err) { toast(err.message); }
+    }
+  });
+  document.addEventListener('input', (e) => {
+    if (!root || !root.contains(e.target)) return;
+    const t = e.target;
+    if (t.id === 'sn-place') form.place = t.value;
+    if (t.id === 'sn-note') form.note = t.value;
+    if (t.id === 'sn-notify') form.notify = t.value;
+  });
+  document.addEventListener('submit', async (e) => {
+    if (!root || !root.contains(e.target) || !e.target.matches('.snow-shoveler')) return;
+    e.preventDefault();
+    const f = e.target.elements;
+    try {
+      await api('/snow/shovelers', { method: 'POST', body: { id: e.target.dataset.id || null, name: f.name.value, phone: f.phone.value,
+        call_ahead_min: f.call_ahead_min.value, active: f.active ? f.active.checked : true } });
+      editing = null;
+      toast('Saved');
+      await load();
+    } catch (err) { toast(err.message); }
   });
 
   window.SNOW_UI = { mount };
