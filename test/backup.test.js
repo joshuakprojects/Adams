@@ -79,7 +79,9 @@ test('schedule: hourly copies kept 48 hours, nightly after 2 AM kept 30 days, fa
   assert.equal(await b.runScheduled(), null, 'once an hour');
   hm = '02:01';
   assert.equal((await b.runScheduled()).name, 'db/2026-11-10.json.gz', 'nightly after 2 AM');
-  assert.equal((await b.runScheduled()).name, 'hourly/2026-11-10-02.json.gz');
+  assert.equal(await b.runScheduled(), null, 'nothing changed since that copy: no hourly copy (the database can sleep)');
+  await d.saveDriver({ name: 'Night Shift', phone: '705-555-0177' });
+  assert.equal((await b.runScheduled()).name, 'hourly/2026-11-10-02.json.gz', 'a change: the hourly copy is made');
   assert.equal(await b.runScheduled(), null);
 
   await storage.put('db/2026-10-01.json.gz', Buffer.from('old'));
@@ -95,6 +97,7 @@ test('schedule: hourly copies kept 48 hours, nightly after 2 AM kept 30 days, fa
 
   storage.put = async () => { throw new Error('bucket not found'); };
   hm = '03:05';
+  await d.saveDriver({ name: 'Another', phone: '705-555-0178' });
   const bad = await b.runScheduled();
   assert.equal(bad.ok, false);
   assert.equal(await b.runScheduled(), null, 'waits 15 minutes after a failed hourly copy');
@@ -126,7 +129,8 @@ test('your own server is a second, separate copy: each one retried on its own', 
   const again = await b.runScheduled();
   assert.deepEqual(again.results.map((x) => x.target), ['server'], 'only the server is retried');
   assert.ok(files.has('db/2026-11-10.json.gz'));
-  assert.equal((await b.runScheduled()).name, 'hourly/2026-11-10-10.json.gz', 'then the hourly copy, to both');
+  await d.saveDriver({ name: 'Day Shift', phone: '705-555-0179' });
+  assert.equal((await b.runScheduled()).name, 'hourly/2026-11-10-10.json.gz', 'then, after a change, the hourly copy, to both');
   assert.ok(files.has('photos/1'), 'the server gets its own copy of the photos');
   const st = await b.status();
   assert.deepEqual(st.targets.map((x) => [x.kind, Boolean(x.last_ok)]), [['memory', true], ['server', true]]);

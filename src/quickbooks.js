@@ -298,8 +298,17 @@ function createQuickBooks(db, dispatch, {
     return (key) => byKey.get(key) || 'other';
   }
 
+  let pending = true; // something may be waiting (true at start-up)
+  let lastRun = 0;
+  /** For the 5-minute timer: only look at the queue when something was queued, or hourly to retry failures. */
+  async function processIfNeeded(nowMs = Date.now()) {
+    if (!pending && nowMs - lastRun < 60 * 60 * 1000) return null;
+    return processQueue();
+  }
+
   /** A work order changed: (re)build its Estimate soon. */
   async function enqueue(jobId) {
+    pending = true;
     const id = Number(jobId);
     if (!id) return;
     const row = await db.get('SELECT status FROM qbo_sync WHERE job_id = ?', id);
@@ -320,6 +329,8 @@ function createQuickBooks(db, dispatch, {
       const live = (await enabled()) && Boolean((await tokens())?.refresh_token);
       const rows = await db.all("SELECT * FROM qbo_sync WHERE status IN ('queued', 'error') ORDER BY updated_at LIMIT ?", limit);
       const out = { sent: 0, previewed: 0, errors: 0, locked: 0 };
+      pending = false;
+      lastRun = Date.now();
       const categoryOf = await categoryLookup();
       const map = await mapping();
       for (const row of rows) {
@@ -418,7 +429,7 @@ function createQuickBooks(db, dispatch, {
     return row ? { ...row, payload: row.payload ? JSON.parse(row.payload) : null } : null;
   }
 
-  return { status, authUrl, finishConnect, disconnect, setEnabled, saveMapping, lists, importCustomers, enqueue, processQueue, log, preview, call, invoice };
+  return { status, authUrl, finishConnect, disconnect, setEnabled, saveMapping, lists, importCustomers, enqueue, processQueue, processIfNeeded, log, preview, call, invoice };
 }
 
 module.exports = { createQuickBooks, buildEstimate, buildCustomer, QboError, CATEGORIES };

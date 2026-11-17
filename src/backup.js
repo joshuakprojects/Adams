@@ -283,6 +283,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, extr
       if (last !== after) await setSetting(photoKey(target), last);
       await prune(target);
       await db.run('INSERT INTO backups (name, target, bytes, photos, ok) VALUES (?, ?, ?, ?, 1)', name, target.kind, buf.length, photos);
+      doneNames.add(`${target.kind} ${name}`);
       return { ok: true, target: target.kind, label: target.label, name, bytes: buf.length, photos };
     } catch (err) {
       await db.run('INSERT INTO backups (name, target, bytes, photos, ok, error) VALUES (?, ?, 0, 0, 0, ?)', name, target.kind, String(err.message).slice(0, 500));
@@ -294,6 +295,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, extr
   async function run({ reason = 'by hand', kind = 'nightly', only = null } = {}) {
     if (!targets.length) throw new Error('Backups are turned off (BACKUP_TARGET=off)');
     const name = nameFor(kind);
+    const writesAtStart = db.writes;
     const buf = gzipJson(await dump(db));
     const results = [];
     for (const t of only || await live()) {
@@ -301,6 +303,7 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, extr
       results.push(await runOn(t, name, buf));
     }
     const first = results[0] || {};
+    if (results.some((r) => r.ok) && writesAtStart != null) copiedWrites = Math.max(copiedWrites ?? 0, writesAtStart);
     const failed = results.filter((r) => !r.ok);
     return { ok: !failed.length, name, bytes: buf.length, photos: first.photos || 0, reason, results,
       error: failed.length ? failed.map((r) => `${r.label}: ${r.error}`).join(' · ') : undefined };
@@ -322,15 +325,20 @@ function createBackups(db, { storage = chooseStorage(), server = undefined, extr
   }
 
   /** Called every minute: the nightly copy after 2 AM, and an hourly copy every hour — each target on its own. */
+  const doneNames = new Set(); // "target name" pairs already saved (so most minutes ask the database nothing)
+  let copiedWrites = null; // db.writes when the last copy was taken
   async function runScheduled() {
     if (!targets.length) return null;
     const due = async (name, t, waitMin) => {
-      if (await db.get('SELECT id FROM backups WHERE ok = 1 AND name = ? AND target = ? LIMIT 1', name, t.kind)) return false;
+      if (doneNames.has(`${t.kind} ${name}`)) return false;
+      if (await db.get('SELECT id FROM backups WHERE ok = 1 AND name = ? AND target = ? LIMIT 1', name, t.kind)) { doneNames.add(`${t.kind} ${name}`); return false; }
       const failed = await db.get('SELECT at FROM backups WHERE ok = 0 AND name = ? AND target = ? ORDER BY id DESC LIMIT 1', name, t.kind);
       return !(failed && now() - Date.parse(failed.at.replace(' ', 'T') + 'Z') < waitMin * 60e3);
     };
     for (const [kind, wait] of [['nightly', 60], ['hourly', 15]]) {
       if (kind === 'nightly' && nowHm() < '02:00') continue;
+      // Nothing changed since the last copy: no new hourly copy (lets the database sleep at night).
+      if (kind === 'hourly' && copiedWrites != null && db.writes != null && db.writes <= copiedWrites) continue;
       const name = nameFor(kind);
       const only = [];
       for (const t of await live()) if (!(kind === 'hourly' && t.nightlyOnly) && await due(name, t, wait)) only.push(t);

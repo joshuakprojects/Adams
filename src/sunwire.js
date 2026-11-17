@@ -95,7 +95,7 @@ function plainText(s) {
   return String(s || '')
     .replace(/[‘’‚′]/g, "'").replace(/[“”„″]/g, '"')
     .replace(/[–—−]/g, '-').replace(/…/g, '...').replace(/×/g, 'x').replace(/[·•]/g, '-')
-    .replace(/ /g, ' ').replace(/[✓✔✅]/g, 'OK');
+    .replace(/[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g, ' ').replace(/[✓✔✅]/g, 'OK');
 }
 
 module.exports = { createSunwire, digits, plainText };

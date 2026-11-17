@@ -1068,11 +1068,12 @@ function createDispatch(db, { send = sms.sendSms, today = todayIn, nowHm = nowHm
    * Text the customers of finished jobs (checked every minute). Sent an hour or more after the job finished,
    * between 9 a.m. and 8 p.m.; at most one per phone number a year; never for jobs marked "don't ask".
    */
-  async function runReviewRequests(now = new Date()) {
+  async function runReviewRequests(now = new Date(), { every = 0 } = {}) {
     const cfg = await reviewSettings();
     if (!cfg.on || !cfg.link || !cfg.types.length) return null;
     const hm = nowHm(config.timeZone, now);
     if (hm < '09:00' || hm >= '20:00') return null;
+    if (every && now.getMinutes() % every !== 0) return null;
     const sqlTime = (d) => d.toISOString().replace('T', ' ').slice(0, 19);
     const hourAgo = sqlTime(new Date(now.getTime() - 60 * 60 * 1000));
     const weekAgo = sqlTime(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));

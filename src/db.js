@@ -604,6 +604,41 @@ async function openDb(target) {
   const db = typeof target === 'object' && target.url ? pgDriver(target.url) : sqliteDriver(typeof target === 'string' ? target : target.file);
   await db.setup();
   await migrate(db);
+  return quiet(db);
+}
+
+/**
+ * Keep the database asleep when nobody is using the app. The hosted database is billed for every hour it is awake,
+ * and the app checks the time of its scheduled texts and backups every minute. So single settings are kept in
+ * memory (cleared by any write that touches settings, and by any transaction), and writes are counted in
+ * db.writes (an hourly backup is only made when something changed; the backup log itself doesn't count).
+ */
+function quiet(db) {
+  const cache = new Map();
+  const ONE_SETTING = /^\s*SELECT value FROM settings WHERE key = \?\s*$/i;
+  const { get, run, exec, tx } = db;
+  db.writes = 0;
+  const counts = (sql) => !/^\s*(INSERT INTO|UPDATE|DELETE FROM)\s+backups\b/i.test(sql);
+  db.trips = 0; // queries that really reached the database (for checking the app stays quiet)
+  const all = db.all;
+  db.all = async (sql, ...params) => { db.trips++; return all.call(db, sql, ...params); };
+  db.get = async (sql, ...params) => {
+    if (!ONE_SETTING.test(sql) || params.length !== 1) { db.trips++; return get.call(db, sql, ...params); }
+    const key = String(params[0]);
+    if (cache.has(key)) { const hit = cache.get(key); return hit ? { ...hit } : undefined; }
+    db.trips++;
+    const row = await get.call(db, sql, ...params);
+    cache.set(key, row ? { ...row } : null);
+    return row;
+  };
+  db.run = async (sql, ...params) => {
+    db.trips++;
+    if (/\bsettings\b/i.test(sql)) cache.clear();
+    try { return await run.call(db, sql, ...params); } finally { if (counts(sql)) db.writes++; }
+  };
+  db.exec = async (sql) => { cache.clear(); try { return await exec.call(db, sql); } finally { db.writes++; } };
+  if (tx) db.tx = async (fn) => { try { return await tx.call(db, fn); } finally { cache.clear(); db.writes++; } };
+  db.forgetSettings = () => cache.clear();
   return db;
 }
 

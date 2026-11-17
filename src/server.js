@@ -699,7 +699,7 @@ async function main() {
   const qbo = createQuickBooks(db, dispatch);
   dispatch.onChange((jobId, action) => { if (!/^Estimate /.test(action)) qbo.enqueue(jobId).catch(() => {}); });
   let qboFails = 0;
-  setInterval(() => qbo.processQueue()
+  setInterval(() => qbo.processIfNeeded()
     .then((out) => {
       // Several sync rounds in a row with errors: tell the office (one bad work order alone is shown in Setup → QuickBooks).
       qboFails = out?.errors && !out.sent ? qboFails + 1 : 0;
@@ -711,6 +711,13 @@ async function main() {
   const summary = createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   const recurring = createRecurring(db, dispatch);
   await alerts.checkDowntime(config.timeZone);
+  // A planned stop (Republish, a restart from Replit): noted, so it isn't reported as the app being down.
+  for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.once(sig, () => {
+      try { alerts.stopped(); } catch { /* exiting anyway */ }
+      process.exit(0);
+    });
+  }
   createApp({ db, dispatch, backups, qbo, sites, alerts, summary, recurring, drive }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
@@ -725,7 +732,7 @@ async function main() {
       .then((out) => out && console.log(`Asked site heads about ${out.day}: ${out.results.filter((r) => r.ok).length} texted`))
       .catch((err) => { console.error('Site head texts failed:', err); alerts.notify('task', `The site heads' afternoon text did not go out: ${err.message}`); });
     // Review texts to customers of finished jobs (Setup → Review requests).
-    dispatch.runReviewRequests()
+    dispatch.runReviewRequests(new Date(), { every: 10 })
       .then((out) => out?.some((r) => r.status === 'sent') && console.log(`Review texts sent: ${out.filter((r) => r.status === 'sent').map((r) => '#' + r.id).join(', ')}`))
       .catch((err) => console.error('Review texts failed:', err));
     // Nightly backup, after 2 AM.
