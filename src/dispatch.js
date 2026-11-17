@@ -79,7 +79,8 @@ function reportFields(jobType) {
 const sqlMinutesAgo = (n) => new Date(Date.now() - n * 60e3).toISOString().slice(0, 19).replace('T', ' ');
 
 /** Sort order for the time of day: first thing, morning, afternoon, then any time. */
-const SLOT_ORDER = (t) => `CASE ${t}time_slot WHEN 'first' THEN 0 WHEN 'am' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END, ${t}scheduled_time`;
+// Time of day first; within it, the order saved by the route planner (src/routes.js).
+const SLOT_ORDER = (t) => `CASE ${t}time_slot WHEN 'first' THEN 0 WHEN 'am' THEN 1 WHEN 'pm' THEN 2 ELSE 3 END, ${t}scheduled_time, COALESCE(${t}route_order, 9999)`;
 
 function parseJson(text) {
   try { return JSON.parse(text || '{}') || {}; } catch { return {}; }

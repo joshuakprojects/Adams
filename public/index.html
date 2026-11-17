@@ -55,6 +55,7 @@
         <button data-layout="month" aria-pressed="false">Calendar</button>
       </div>
       <span id="lineup-status" class="muted small"></span>
+      <button class="btn outline" id="route-btn" data-need="dispatch" title="Put the day's pump-outs in the shortest order from the yard">🗺 Plan route</button>
       <button class="btn outline" id="repeat-list-btn" data-need="dispatch" title="Work orders that repeat: next visits, pause, skip or stop">🔁 Repeating</button>
       <button class="btn outline" id="day-summary" data-need="dispatch" title="What got done today, what's still open, and tomorrow">Day summary</button>
       <button class="btn outline" id="send-lineup" data-need="dispatch" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
@@ -612,6 +613,21 @@
   </dialog>
 
   <!-- JOB HISTORY -->
+  <dialog id="route-dialog" class="summary-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="route-title">Plan route</h2>
+        <button type="button" class="link" data-close-route aria-label="Close">✕</button>
+      </div>
+      <form id="route-form" class="route-form">
+        <label>Day <input type="date" name="date" required></label>
+        <label>Driver <select name="driver"><option value="">Everyone's jobs</option></select></label>
+        <div class="field-col"><span class="lbl">Work orders</span><div class="route-types" id="route-types"></div></div>
+        <button class="btn primary" type="submit">Plan the route</button>
+      </form>
+      <div id="route-body"></div>
+    </div>
+  </dialog>
   <dialog id="repeat-dialog" class="summary-dialog">
     <div class="ticket-wrap">
       <div class="dialog-head">
@@ -673,5 +689,6 @@
   <script src="/reception.js"></script>
   <script src="/alerts-ui.js"></script>
   <script src="/repeat-ui.js"></script>
+  <script src="/routes-ui.js"></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ const { createSites, describeNeeds } = require('./sites');
 const { createAlerts } = require('./alerts');
 const { createSummary } = require('./summary');
 const { createRecurring } = require('./recurring');
+const { createRoutes } = require('./routes');
 const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
@@ -52,6 +53,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   const intake = createIntake(db);
   alerts = alerts || createAlerts(db, { listen: false });
   recurring = recurring || createRecurring(db, dispatch);
+  const routes = createRoutes(db, dispatch, distance);
   summary = summary || createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
   const app = express();
@@ -535,6 +537,13 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
+  // ---------- route planning (Board → Plan route) ----------
+  const routeTypes = (q) => String(q.types ?? 'septic').split(',').map((s) => s.trim()).filter(Boolean);
+  api.get('/routes/plan', need('dispatcher'), json(async (req) => ({
+    ...(await routes.plan({ date: String(req.query.date || dispatch.today()), types: routeTypes(req.query), driverId: req.query.driver || null })),
+    drivers: await routes.drivers(String(req.query.date || dispatch.today()), routeTypes(req.query)) })));
+  api.post('/routes/save', need('dispatcher'), json((req) => routes.save(String(req.body?.date || ''), req.body?.ids, req.user.id)));
+
   // ---------- repeating work orders ----------
   api.get('/series', need('dispatcher'), json(async () => ({ series: await recurring.list() })));
   api.post('/series/:id', need('dispatcher'), json((req) => recurring.action(req.params.id, String(req.body?.action || ''), String(req.body?.date || ''))));
