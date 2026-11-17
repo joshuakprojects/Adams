@@ -20,7 +20,7 @@
     <nav class="tabs" aria-label="Main">
       <button data-tab="board" class="active">Board</button>
       <button data-tab="sites" title="Trucks, drivers, machines and labourers for our own job sites">Our sites</button>
-      <button data-tab="snow" data-need="dispatch" title="Phone every shoveler for an early-morning snow call">❄ Snow call</button>
+      <button data-tab="snow" data-need="snow" title="Phone every shoveler for an early-morning snow call">❄ Snow call</button>
       <button data-tab="customers">Customers <span id="due-count" class="count hidden"></span></button>
       <button data-tab="prices">Prices</button>
       <button data-tab="faq">Questions</button>
@@ -109,7 +109,7 @@
       <form id="user-form" class="inline-form" autocomplete="off">
         <input name="name" placeholder="Name" required>
         <input name="email" type="email" placeholder="Email (their login)" required>
-        <select name="role"><option value="office">Office</option><option value="dispatcher">Dispatcher</option><option value="admin">Admin</option></select>
+        <select name="role"><option value="office">Office</option><option value="dispatcher">Dispatcher</option><option value="admin">Admin</option><option value="snow">Overnight snow dispatcher (Snow call only)</option></select>
         <input name="password" type="text" placeholder="Starting password (8+ characters)" minlength="8" required autocomplete="new-password">
         <button class="btn primary" type="submit">Add login</button>
       </form>

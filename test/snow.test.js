@@ -105,3 +105,31 @@ test('snow call in test mode: nothing is phoned; answers can be marked on the sc
   const after = await snow.act(bob.id, 'coming');
   assert.equal(after.people.find((p) => p.id === bob.id).status, 'coming');
 });
+
+test('the overnight snow dispatcher login: the Snow call and nothing else', async (t) => {
+  const db = await testDb(t);
+  const { createUser } = require('../src/auth');
+  const { createDispatch } = require('../src/dispatch');
+  const { createApp } = require('../src/server');
+  await createUser(db, { email: 'night@test.ca', name: 'Night', password: 'password123', role: 'snow' });
+  const server = createApp({ db, dispatch: createDispatch(db) }).listen(0);
+  t.after(() => server.close());
+  const base = `http://localhost:${server.address().port}`;
+  const res = await fetch(base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'night@test.ca', password: 'password123' }) });
+  const cookie = res.headers.get('set-cookie').split(';')[0];
+  const api = async (path, body) => {
+    const r = await fetch(base + '/api' + path, { method: body ? 'POST' : 'GET', headers: { cookie, 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+    return { status: r.status, data: await r.json() };
+  };
+  const me = (await api('/me')).data;
+  assert.equal(me.can.snow_only, true);
+  assert.equal(me.can.snow, true);
+  assert.equal(me.can.dispatch, false);
+  for (const path of ['/board', '/jobs?from=2026-01-01&to=2026-12-31', '/customers', '/prices', '/settings', '/sites/board']) {
+    assert.equal((await api(path)).status, 403, path);
+  }
+  assert.equal((await api('/snow/shovelers', { name: 'Bob', phone: '705-555-0301', call_ahead_min: 60 })).status, 200);
+  assert.equal((await api('/snow')).status, 200);
+  assert.equal((await api('/snow')).data.shovelers.length, 1);
+});

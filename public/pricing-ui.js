@@ -697,7 +697,7 @@
   // =====================================================================
   // Logins (owner only)
   // =====================================================================
-  const ROLE_OPTS = [['office', 'Office'], ['dispatcher', 'Dispatcher'], ['admin', 'Admin']];
+  const ROLE_OPTS = [['office', 'Office'], ['dispatcher', 'Dispatcher'], ['admin', 'Admin'], ['snow', 'Overnight snow dispatcher (Snow call only)']];
   async function loadUsers() {
     const users = await api('/users');
     $('#user-rows').innerHTML = users.map((u) => `<tr data-user="${u.id}" class="${u.active ? '' : 'inactive'}">

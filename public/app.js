@@ -1933,6 +1933,8 @@
     document.body.classList.toggle('can-admin', Boolean(state.can.admin));
     document.body.classList.toggle('is-owner', Boolean(state.can.owner));
     document.body.classList.toggle('can-notes', Boolean(state.can.notes));
+    document.body.classList.toggle('can-snow', Boolean(state.can.snow));
+    document.body.classList.toggle('snow-only', Boolean(state.can.snow_only));
     if (state.can.notes) loadBossNotes();
     $('#user-name').title = state.can.role_name || '';
     if (!state.can.dispatch) $('#job-form button[value=save]').textContent = 'Save work order';
@@ -1941,6 +1943,8 @@
     $('#user-name').textContent = me.user.name;
     $('#user-initial').textContent = (me.user.name || '?').trim()[0].toUpperCase();
     $('#test-mode').classList.toggle('hidden', me.smsEnabled);
+    // The overnight snow dispatcher sees only the Snow call.
+    if (state.can.snow_only) { showTab('snow'); return; }
     await loadBoard();
     // Office logins get the simple reception screens; dispatchers and admins can look with ?view=reception.
     if (!state.can.dispatch || new URLSearchParams(location.search).get('view') === 'reception') window.RECEPTION?.start();

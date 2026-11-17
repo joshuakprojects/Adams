@@ -10,6 +10,12 @@
   let editing = null; // shoveler id being edited
 
   const TZ = 'America/Toronto';
+  const dueText = (sql) => {
+    if (!sql) return '';
+    const d = new Date(sql.replace(' ', 'T') + 'Z');
+    const today = new Date().toDateString() === d.toDateString();
+    return today ? localTime(sql) : d.toLocaleString('en-CA', { timeZone: TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
   const localTime = (sql) => (sql ? new Date(sql.replace(' ', 'T') + 'Z').toLocaleTimeString('en-CA', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }) : '');
   const dateLong = (d) => new Date(d + 'T12:00:00Z').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
   const STATUS = {
@@ -19,13 +25,23 @@
   const AHEAD = [15, 20, 30, 45, 60, 75, 90, 120];
   const sayHm = (hm) => { const [h, m] = String(hm).split(':').map(Number); return `${((h + 11) % 12) + 1}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'AM' : 'PM'}`; };
 
-  /** The next 4:00 AM from now (today if it's before 4, else tomorrow), as date + time inputs. */
-  function nextStart() {
-    const now = new Date();
-    const local = new Date(now.toLocaleString('en-US', { timeZone: TZ }));
-    if (local.getHours() >= 4) local.setDate(local.getDate() + 1);
-    const ymd = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
-    return { day: ymd, time: '04:00' };
+  /** The next time the clock reads `hm` (today if that's still ahead, else tomorrow), as date + time inputs. */
+  const ymdOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  function nextStart(hm = '04:00') {
+    const local = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+    const [h, m] = hm.split(':').map(Number);
+    if (local.getHours() * 60 + local.getMinutes() >= h * 60 + m) local.setDate(local.getDate() + 1);
+    return { day: ymdOf(local), time: hm };
+  }
+  let dateTouched = false; // the date box follows the time until someone changes the date by hand
+  const at = (day, hm) => new Date(`${day}T${hm}:00`); // the office's own clock (Parry Sound)
+  const whenText = (d) => d.toLocaleString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  function fromNow(d) {
+    const min = Math.round((d - Date.now()) / 60000);
+    if (min < 1) return 'now';
+    if (min < 60) return `in ${min} min`;
+    const h = Math.floor(min / 60);
+    return `in ${h} hour${h === 1 ? '' : 's'}${min % 60 ? ` ${min % 60} min` : ''}`;
   }
   const minus = (hm, min) => { const [h, m] = hm.split(':').map(Number); const t = ((h * 60 + m - min) % 1440 + 1440) % 1440; const hh = Math.floor(t / 60); return `${((hh + 11) % 12) + 1}:${String(t % 60).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`; };
 
@@ -50,6 +66,7 @@
 
   function startForm() {
     const n = nextStart();
+    dateTouched = false;
     const people = data.shovelers.filter((s) => s.active);
     return `<div class="panel snow-start">
       <h2>❄ Snow call</h2>
@@ -62,15 +79,29 @@
           <label class="check"><input type="radio" name="mode" value="ahead" checked> At each person's call-ahead time</label>
           <label class="check"><input type="radio" name="mode" value="now"> Everyone now</label></div>
         <label class="wide">Text me who's coming when it's done <textarea name="notify" rows="1" placeholder="Your cell, e.g. 705-555-0100">${esc((data.notify || []).map(prettyPhone).join('\n'))}</textarea></label>
-        <div class="snow-preview" id="snow-preview">${preview(people, n.time, 'ahead')}</div>
+        <div class="snow-preview" id="snow-preview">${preview(people, n.day, n.time, 'ahead')}</div>
         <button class="btn primary big" type="submit" ${people.length ? '' : 'disabled'}>Start snow call</button>
         ${people.length ? '' : '<p class="muted small">Add the shovelers below first.</p>'}
       </form>
     </div>`;
   }
-  function preview(people, time, mode) {
-    if (!people.length) return '';
-    return `<span class="lbl">Who gets called when</span><ul>${people.map((s) => `<li><b>${esc(s.name)}</b> <span class="muted">${mode === 'now' ? 'now' : `at ${minus(time || '04:00', s.call_ahead_min)} (${s.call_ahead_min} min ahead)`}</span></li>`).join('')}</ul>`;
+  /** When the first call goes out (a Date), for the preview and the confirm button. */
+  function firstCall(people, day, time, mode) {
+    if (mode === 'now' || !people.length) return new Date();
+    const start = at(day, time);
+    return new Date(Math.max(Date.now(), start - Math.max(...people.map((s) => s.call_ahead_min)) * 60000));
+  }
+  function preview(people, day, time, mode) {
+    if (!people.length || !day || !time) return '';
+    const start = at(day, time);
+    const first = firstCall(people, day, time, mode);
+    const late = start - Date.now() > 20 * 3600 * 1000;
+    const past = start < Date.now();
+    return `<div class="snow-when ${late || past ? 'warn' : ''}"><b>Start: ${esc(whenText(start))}</b> (${esc(fromNow(start))}).
+        First call ${mode === 'now' ? '<b>right away</b>' : `<b>${esc(whenText(first))}</b> (${esc(fromNow(first))})`}.
+        ${late ? '<br>⚠ That\'s more than 20 hours away: check the date.' : past ? '<br>⚠ That time has already passed: check the date.' : ''}</div>
+      <span class="lbl">Who gets called when</span><ul>${people.map((s) => `<li><b>${esc(s.name)}</b> <span class="muted">${mode === 'now' ? 'right away'
+        : `${esc(whenText(new Date(Math.max(Date.now(), start - s.call_ahead_min * 60000))))} (${s.call_ahead_min} min ahead)`}</span></li>`).join('')}</ul>`;
   }
 
   function running(c) {
@@ -87,7 +118,7 @@
       </div>
       <table class="table snow-table"><thead><tr><th>Shoveler</th><th>Called at</th><th>Status</th><th>Calls</th><th></th></tr></thead><tbody>
       ${c.people.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="muted small">${esc(prettyPhone(p.phone))}</div></td>
-        <td>${esc(localTime(p.due_at))}</td><td>${pill(p.status)}${p.via ? ` <span class="muted small">by ${esc(p.via)}</span>` : ''}</td><td>${p.attempts}</td>
+        <td>${esc(dueText(p.due_at))}</td><td>${pill(p.status)}${p.via ? ` <span class="muted small">by ${esc(p.via)}</span>` : ''}</td><td>${p.attempts}</td>
         <td><div class="snow-acts">${['coming', 'not_coming', 'cancelled'].includes(p.status) || c.status !== 'running' ? '' : `<button class="btn tiny" data-snow="call_now" data-id="${p.id}">Call now</button>`}
           ${c.status === 'running' && p.status !== 'coming' ? `<button class="btn tiny" data-snow="coming" data-id="${p.id}" title="They told you another way">Coming</button>` : ''}
           ${c.status === 'running' && p.status !== 'not_coming' ? `<button class="btn tiny" data-snow="not_coming" data-id="${p.id}">Can't</button>` : ''}</div></td></tr>`).join('')}
@@ -138,8 +169,11 @@
   document.addEventListener('input', (e) => {
     if (!root || !e.target.closest('#snow-form')) return;
     const f = e.target.closest('#snow-form').elements;
+    if (e.target.name === 'day') dateTouched = true;
+    // Changing the time moves the date to the next time the clock reads it (unless the date was set by hand).
+    if (e.target.name === 'time' && !dateTouched && f.time.value) f.day.value = nextStart(f.time.value).day;
     const el = document.getElementById('snow-preview');
-    if (el) el.innerHTML = preview(data.shovelers.filter((s) => s.active), f.time.value, f.mode.value);
+    if (el) el.innerHTML = preview(data.shovelers.filter((s) => s.active), f.day.value, f.time.value, f.mode.value);
     if (confirmStart) { confirmStart = false; const btn = e.target.closest('#snow-form').querySelector('button[type=submit]'); if (btn) btn.textContent = 'Start snow call'; }
   });
   document.addEventListener('change', (e) => { if (root && e.target.closest('#snow-form') && e.target.name === 'mode') e.target.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -149,8 +183,12 @@
       e.preventDefault();
       if (!confirmStart) {
         confirmStart = true;
-        const n = data.shovelers.filter((x) => x.active).length;
-        e.target.querySelector('button[type=submit]').textContent = `Tap again to start: ${n} shoveler${n === 1 ? '' : 's'} will be phoned`;
+        const people = data.shovelers.filter((x) => x.active);
+        const f = e.target.elements;
+        const first = firstCall(people, f.day.value, f.time.value, f.mode.value);
+        e.target.querySelector('button[type=submit]').textContent = f.mode.value === 'now'
+          ? `Tap again: phone all ${people.length} now`
+          : `Tap again to start: first call ${whenText(first)}`;
         return;
       }
       confirmStart = false;
