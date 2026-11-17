@@ -37,7 +37,7 @@
     ] },
     { group: 'Account', items: [
       { id: 'logins', name: 'Logins', owner: true, text: 'Who can log in and what they can do. Only you see this section.', panels: ['logins'] },
-      { id: 'quickbooks', name: 'QuickBooks', text: 'Sends priced work orders to QuickBooks Online as Estimates.', panels: ['quickbooks'] },
+      { id: 'quickbooks', name: 'QuickBooks', text: 'Sends priced work orders to QuickBooks Online as Estimates. To bill one, open its More menu on the Board and choose Send invoice to QuickBooks.', panels: ['quickbooks'] },
       { id: 'backups', name: 'Backups & restore', text: 'A copy every hour (kept 48 hours) and every night (kept 30 days). Restore is for the owner only.', panels: ['backups'] },
     ] },
   ];

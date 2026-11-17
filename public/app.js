@@ -628,6 +628,8 @@
       primary[0] !== 'print' && ['print', 'Print work order'],
       ['dup', 'Copy to another day…'],
       ['history', 'History'],
+      state.can.admin && job.lines?.length && !window.FORMS.TYPES[job.job_type]?.noPricing && job.status !== 'cancelled'
+        && ['invoice', job.invoice_number ? `Invoiced (${job.invoice_number})` : 'Send invoice to QuickBooks…'],
       (job.job_type === 'toilet' || job.job_type === 'bin') && job.status !== 'cancelled' && ['pickup', 'Book pick-up'],
       stale && primary[0] !== 'move-today' && ['move-today', 'Move to today'],
       job.status === 'open' && primary[0] !== 'complete' && ['complete', 'Mark complete'],
@@ -723,6 +725,17 @@
       if (act === 'go-requests') return showTab('requests');
       if (act === 'go-texts') return showTab('messages');
       if (act === 'history') { el.closest('details')?.removeAttribute('open'); return openHistory(Number(jobId)); }
+      if (act === 'invoice') {
+        el.closest('details')?.removeAttribute('open');
+        const job = [...state.board.jobs, ...(state.board.stale_jobs || [])].find((j) => j.id === Number(jobId));
+        if (job?.invoice_number) return toast(`Already invoiced: ${job.invoice_number}. Open it in QuickBooks.`);
+        const total = job?.totals?.total ? ` for $${Number(job.totals.total).toFixed(2)}` : '';
+        if (!confirm(`Create an invoice in QuickBooks for work order #${jobId}${total}?` + String.fromCharCode(10, 10) + 'Its estimate is closed and the app stops changing it.')) return;
+        const email = job?.customer_email ? confirm(`Also email the invoice to ${job.customer_email} from QuickBooks?`) : false;
+        const out = await api(`/qbo/invoice/${jobId}`, { method: 'POST', body: { email } });
+        toast(`Invoice ${out.doc_number} created in QuickBooks${out.emailed ? ` and emailed to ${out.email}` : ''}`);
+        return loadBoard();
+      }
       if (act === 'resend-unconfirmed') {
         const job = [...state.board.jobs, ...(state.board.stale_jobs || [])].find((j) => j.id === Number(jobId));
         for (const a of (job?.assignments || []).filter((x) => x.status === 'sent' && !x.needs_resend)) {

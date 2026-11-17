@@ -387,6 +387,12 @@ CREATE TABLE IF NOT EXISTS distances (
 
 // Columns added after the first version. Added to existing databases on start-up.
 const ADDED_COLUMNS = {
+  // Invoices made from a work order (Send invoice): QuickBooks's id and number.
+  qbo_sync: {
+    invoice_id: "TEXT NOT NULL DEFAULT ''",
+    invoice_doc: "TEXT NOT NULL DEFAULT ''",
+    invoiced_at: 'TEXT',
+  },
   jobs: {
     // The repeating series this visit belongs to (job_series), if any.
     series_id: 'INTEGER',
