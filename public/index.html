@@ -20,6 +20,7 @@
     <nav class="tabs" aria-label="Main">
       <button data-tab="board" class="active">Board</button>
       <button data-tab="sites" title="Trucks, drivers, machines and labourers for our own job sites">Our sites</button>
+      <button data-tab="snow" data-need="dispatch" title="Phone every shoveler for an early-morning snow call">❄ Snow call</button>
       <button data-tab="customers">Customers <span id="due-count" class="count hidden"></span></button>
       <button data-tab="prices">Prices</button>
       <button data-tab="faq">Questions</button>
@@ -331,6 +332,7 @@
   <!-- CUSTOMERS (address book + septic reminders) -->
   <section id="tab-sites" class="tab hidden"><div class="help-strip" data-help="sites"><p>Pick a site on the left, read what the site head asked for, and add trucks, machines and labourers. It saves as you go. Then press <b>Tell site heads what's coming</b>. Machines that need moving get their float made for you. Drivers are told in the morning.</p><a href="/guide.html#sites" target="_blank" rel="noopener">Full guide ↗</a><button type="button" class="link" data-help-hide="sites">Got it</button></div><div id="sites-root"></div></section>
 
+  <section id="tab-snow" class="tab hidden"><div id="snow-root"></div></section>
   <section id="tab-customers" class="tab hidden">
     <div class="help-strip" data-help="customers"><p>Everyone we've done work for. Search by name, phone or address, see their past work orders, and see who's due for a septic pump-out.</p><a href="/guide.html#other" target="_blank" rel="noopener">Full guide ↗</a><button type="button" class="link" data-help-hide="customers">Got it</button></div>
     <div class="toolbar">
@@ -692,5 +694,6 @@
   <script src="/repeat-ui.js"></script>
   <script src="/routes-ui.js"></script>
   <script src="/gdrive-ui.js"></script>
+  <script src="/snow-ui.js"></script>
 </body>
 </html>
