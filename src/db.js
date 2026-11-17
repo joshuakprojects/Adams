@@ -450,6 +450,7 @@ const ADDED_COLUMNS = {
   snow_calls: {
     audio_key: "TEXT NOT NULL DEFAULT ''",
     voice: "TEXT NOT NULL DEFAULT ''",
+    cleared_at: 'TEXT', // taken off the Snow call screen ("Clear the board")
   },
   // When the shoveler was texted how to save the snow call number.
   shovelers: {

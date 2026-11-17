@@ -615,6 +615,7 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
     return out;
   }));
   api.post('/snow/:id/cancel', needSnow, json((req) => snow.cancel(req.params.id)));
+  api.post('/snow/:id/clear', needSnow, json((req) => snow.clear(req.params.id)));
   api.post('/snow/people/:id', needSnow, json((req) => snow.act(req.params.id, String(req.body?.action || ''))));
   api.post('/snow/shovelers', needSnow, json((req) => snow.saveShoveler(req.body || {})));
 

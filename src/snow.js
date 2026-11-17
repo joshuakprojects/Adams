@@ -127,9 +127,18 @@ function createSnow(db, {
     return c;
   }
   /** The last call-out that's finished (its results stay on the screen until the next one starts). */
+  /** The last finished call-out, for the results on screen, unless it's been cleared off. */
   async function last() {
-    const row = await db.get("SELECT id FROM snow_calls WHERE status IN ('done', 'cancelled') ORDER BY id DESC LIMIT 1");
-    return row ? get(row.id) : null;
+    const row = await db.get("SELECT id, cleared_at FROM snow_calls WHERE status IN ('done', 'cancelled') ORDER BY id DESC LIMIT 1");
+    return row && !row.cleared_at ? get(row.id) : null;
+  }
+  /** "Clear the board": take a finished call-out's results off the screen (it stays in the records). */
+  async function clear(id) {
+    const call = await db.get('SELECT id, status FROM snow_calls WHERE id = ?', Number(id));
+    if (!call) throw new SnowError('No such snow call', 404);
+    if (!['done', 'cancelled'].includes(call.status)) throw new SnowError('That call-out is still running: cancel it first');
+    await db.run("UPDATE snow_calls SET cleared_at = datetime('now') WHERE id = ?", call.id);
+    return { ok: true };
   }
   async function recent(limit = 5) {
     return db.all('SELECT id, day, start_time, place, status, created_at FROM snow_calls ORDER BY id DESC LIMIT ?', limit);
@@ -353,7 +362,7 @@ function createSnow(db, {
     return { results, number };
   }
 
-  return { listShovelers, saveShoveler, start, current, last, get, recent, tick, voiceTwiml, voiceAnswer, voiceStatus, handleReply, act, cancel, sayTime,
+  return { listShovelers, saveShoveler, start, current, last, clear, get, recent, tick, voiceTwiml, voiceAnswer, voiceStatus, handleReply, act, cancel, sayTime,
     audio, contactCard, sendSetupText, voiceFrom: () => voiceFrom, voice };
 }
 

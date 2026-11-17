@@ -198,6 +198,13 @@ test('snow call: only the ticked shovelers; results stay on screen after; setup 
   const last = await snow.last();
   assert.equal(last.id, c.id);
   assert.deepEqual(last.people.map((p) => [p.name, p.status]), [['Bob Smith', 'coming']]);
+  // "Clear the board": the results come off the screen; a running call-out can't be cleared.
+  await snow.clear(c.id);
+  assert.equal(await snow.last(), null);
+  const c2 = await snow.start({ day: '2026-12-03', time: '04:00', shovelers: [bob.id] });
+  await assert.rejects(() => snow.clear(c2.id), /still running/);
+  await snow.cancel(c2.id);
+  assert.equal((await snow.last()).id, c2.id, 'the next call-out shows again');
   const out = await snow.sendSetupText();
   assert.equal(out.results.length, 2);
   assert.match(texts.at(-1).body, /snow call-outs will phone you from 705-555-0000\. .*\/snow\/contact\.vcf .*Favourite/);
