@@ -354,6 +354,15 @@ CREATE TABLE IF NOT EXISTS job_equipment (
   UNIQUE (job_id, equipment_id)
 );
 
+-- Problems the office should hear about (texts failing, a backup failing, the app having been down).
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL,
+  texted TEXT NOT NULL DEFAULT '',
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Driving distances looked up with Google (kept up to 30 days).
 CREATE TABLE IF NOT EXISTS distances (
   route_key TEXT PRIMARY KEY,

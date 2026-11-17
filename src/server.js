@@ -19,6 +19,8 @@ const { CustomerError } = require('./customers');
 const twilio = require('./twilio');
 const { createIntake, validKey, IntakeError } = require('./intake');
 const { createSites, describeNeeds } = require('./sites');
+const { createAlerts } = require('./alerts');
+const { createSummary } = require('./summary');
 const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
@@ -45,8 +47,10 @@ const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, 
 
 function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
   qbo = createQuickBooks(db, dispatch), sunwire = createSunwire(), sendReply = (to, body) => sms.sendSms(to, body),
-  smsProvider = config.smsProvider, sites = null }) {
+  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null }) {
   const intake = createIntake(db);
+  alerts = alerts || createAlerts(db, { listen: false });
+  summary = summary || createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
   const app = express();
   app.set('trust proxy', true);
@@ -519,6 +523,24 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
+  // ---------- end-of-day summary (Board) and alerts (Setup) ----------
+  const dateParam = (req) => (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || req.body?.date || '')) ? String(req.query.date || req.body.date) : dispatch.today());
+  api.get('/day-summary', need('dispatcher'), json(async (req) => {
+    const s = await summary.build(dateParam(req));
+    return { summary: s, text: summary.text(s), ...(await summary.settings()) };
+  }));
+  api.post('/day-summary/send', need('dispatcher'), json((req) => summary.sendTo(dateParam(req), Array.isArray(req.body?.phones) ? req.body.phones : null)));
+  api.get('/alerts', need('admin'), json(async () => ({ ...(await alerts.settings()), ...(await summary.settings()), recent: await alerts.list(15) })));
+  api.post('/alerts/settings', need('admin'), json(async (req) => {
+    await alerts.saveSettings(req.body || {});
+    try { await summary.saveSettings(req.body || {}); } catch (err) { throw new ValidationError(err.message); }
+    return { ...(await alerts.settings()), ...(await summary.settings()), recent: await alerts.list(15) };
+  }));
+  api.post('/alerts/test', need('admin'), json(async () => {
+    if (!(await alerts.phones()).length) throw new ValidationError('Add at least one alert number first');
+    return alerts.raise('test', 'This is a test. Alerts from the dispatch app will come to this number.', { force: true });
+  }));
+
   const dayParam = (req) => (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || req.body?.day || '')) ? String(req.query.day || req.body.day) : null);
   api.get('/sites/board', json(async (req) => sites.board(dayParam(req) || require('./sites').nextWorkDay(dispatch.today()))));
   api.get('/sites/setup', json(async () => ({ heads: await sites.listHeads({ all: true }), sites: await sites.listSites({ all: true }),
@@ -590,7 +612,10 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 
   app.use((err, req, res, _next) => {
     const status = err.status || err.statusCode || 500;
-    if (status === 500) console.error(err);
+    if (status === 500) {
+      console.error(err);
+      alerts.notify('error', `${req.method} ${req.originalUrl.split('?')[0]} failed: ${String(err.message || err).slice(0, 150)}`);
+    }
     if (req.originalUrl.startsWith('/api/')) {
       return res.status(status).json({ error: status === 500 ? 'Something went wrong' : err.message, ...(err.missing ? { missing: err.missing } : {}) });
     }
@@ -624,8 +649,19 @@ async function main() {
   // QuickBooks: every change to a work order queues its Estimate (sent only once an admin connects and switches it on).
   const qbo = createQuickBooks(db, dispatch);
   dispatch.onChange((jobId, action) => { if (!/^Estimate /.test(action)) qbo.enqueue(jobId).catch(() => {}); });
-  setInterval(() => qbo.processQueue().catch((err) => console.error('QuickBooks sync:', err.message)), 5 * 60 * 1000);
-  createApp({ db, dispatch, backups, qbo, sites }).listen(config.port, () => {
+  let qboFails = 0;
+  setInterval(() => qbo.processQueue()
+    .then((out) => {
+      // Several sync rounds in a row with errors: tell the office (one bad work order alone is shown in Setup → QuickBooks).
+      qboFails = out?.errors && !out.sent ? qboFails + 1 : 0;
+      if (qboFails === 3) alerts.notify('qbo', `${out.errors} work order(s) could not be sent to QuickBooks, three times in a row. Check Setup → QuickBooks.`);
+    })
+    .catch((err) => { console.error('QuickBooks sync:', err.message); alerts.notify('qbo', `QuickBooks sync stopped: ${err.message}`); }), 5 * 60 * 1000);
+  // Alerts by text when something fails (Setup → Alerts & day summary), and the end-of-day summary.
+  const alerts = createAlerts(db);
+  const summary = createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
+  await alerts.checkDowntime(config.timeZone);
+  createApp({ db, dispatch, backups, qbo, sites, alerts, summary }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
@@ -633,11 +669,11 @@ async function main() {
   setInterval(() => {
     dispatch.runScheduledLineup()
       .then((out) => out && console.log(`Sent lineup for ${out.date} to ${out.results.length} driver(s)`))
-      .catch((err) => console.error('Lineup send failed:', err));
+      .catch((err) => { console.error('Lineup send failed:', err); alerts.notify('task', `The drivers' day text did not go out: ${err.message}`); });
     // "What do you need tomorrow?" texts to site heads (Setup → Our sites).
     sites.runScheduledAsk()
       .then((out) => out && console.log(`Asked site heads about ${out.day}: ${out.results.filter((r) => r.ok).length} texted`))
-      .catch((err) => console.error('Site head texts failed:', err));
+      .catch((err) => { console.error('Site head texts failed:', err); alerts.notify('task', `The site heads' afternoon text did not go out: ${err.message}`); });
     // Review texts to customers of finished jobs (Setup → Review requests).
     dispatch.runReviewRequests()
       .then((out) => out?.some((r) => r.status === 'sent') && console.log(`Review texts sent: ${out.filter((r) => r.status === 'sent').map((r) => '#' + r.id).join(', ')}`))
@@ -647,9 +683,15 @@ async function main() {
       .then((out) => {
         if (!out) return;
         console.log(out.ok ? `Backup saved: ${out.name} (${out.bytes} bytes, ${out.photos} new photo(s))` : `Backup FAILED: ${out.error}`);
+        if (!out.ok) alerts.notify('backup', `The ${out.reason || ''} backup failed: ${String(out.error || (out.results || []).filter((r) => !r.ok).map((r) => r.error).join('; ')).slice(0, 160)}`);
         if (out.ok) dispatch.geo.prune().catch(() => {});
       })
-      .catch((err) => console.error('Backup failed:', err));
+      .catch((err) => { console.error('Backup failed:', err); alerts.notify('backup', `The backup failed: ${err.message}`); });
+    // End-of-day summary text, at the time set in Setup.
+    summary.runScheduled()
+      .then((out) => out && console.log(`Day summary texted to ${out.results.filter((r) => r.ok).length} number(s)`))
+      .catch((err) => console.error('Day summary failed:', err));
+    alerts.heartbeat().catch(() => {});
   }, 60 * 1000);
 }
 

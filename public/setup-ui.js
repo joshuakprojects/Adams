@@ -12,7 +12,7 @@
   const P = {
     logins: $('#users-panel'), texting: $('#sms-panel'), daytext: panelByTitle("Drivers' jobs text"), fields: $('#fields-panel'),
     required: $('#required-panel'), quickbooks: $('#qbo-panel'), septic: panelByTitle('Septic reminders'), sitesSetup: $('#sites-panel'),
-    reviews: $('#review-panel'), backups: $('#backup-panel'), drivers: panelByTitle('Drivers'), labourers: panelByTitle('Labourers'), trucks: panelByTitle('Trucks'),
+    reviews: $('#review-panel'), alerts: $('#alerts-panel'), backups: $('#backup-panel'), drivers: panelByTitle('Drivers'), labourers: panelByTitle('Labourers'), trucks: panelByTitle('Trucks'),
   };
 
   const SECTIONS = [
@@ -29,6 +29,7 @@
       { id: 'daytext', name: "Drivers' day text", text: 'One text per driver and labourer with their jobs. Drivers who already have their day are only texted again if something changed.', panels: ['daytext'] },
       { id: 'sitetext', name: "Site heads' text", text: "Asks each active site's head what they need for the next work day. Friday asks about Monday.", mount: 'sitetext' },
       { id: 'reviews', name: 'Review requests', text: 'Text customers asking for a Google review an hour after their job (9 AM to 8 PM, at most once a year).', panels: ['reviews'] },
+      { id: 'alerts', name: 'Alerts & day summary', text: 'Who gets a text when something goes wrong, and who gets the end-of-day summary.', panels: ['alerts'] },
     ] },
     { group: 'Work orders', items: [
       { id: 'fields', name: 'Fields & required', text: 'Everything on each type of work order: rename, reorder, hide or add fields, and choose which must be filled in.', panels: ['fields', 'required'] },

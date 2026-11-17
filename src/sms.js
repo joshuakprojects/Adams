@@ -211,7 +211,20 @@ function parseReply(body) {
  * Send a text. Without Twilio settings the message is only logged (handy for trying
  * the system out); it still shows on the dashboard as sent.
  */
+const failureListeners = [];
+/** Call fn(to, error) whenever a text can't be sent (used for failure alerts). */
+function onSendFailure(fn) { failureListeners.push(fn); return () => failureListeners.splice(failureListeners.indexOf(fn), 1); }
+
 async function sendSms(to, bodyRaw) {
+  try {
+    return await sendSmsNow(to, bodyRaw);
+  } catch (err) {
+    for (const fn of failureListeners) { try { fn(to, err); } catch { /* an alert must never break sending */ } }
+    throw err;
+  }
+}
+
+async function sendSmsNow(to, bodyRaw) {
   // Plain characters only: one fancy character (×, —, smart quotes) makes every segment hold 70 characters instead of 160.
   const body = require('./sunwire').plainText(bodyRaw);
   if (!config.smsEnabled) {
@@ -250,6 +263,7 @@ function twiml(message) {
 }
 
 module.exports = {
+  onSendFailure,
   jobNumbers,
   normalizePhone,
   prettyPhone,

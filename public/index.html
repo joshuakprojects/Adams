@@ -55,6 +55,7 @@
         <button data-layout="month" aria-pressed="false">Calendar</button>
       </div>
       <span id="lineup-status" class="muted small"></span>
+      <button class="btn outline" id="day-summary" data-need="dispatch" title="What got done today, what's still open, and tomorrow">Day summary</button>
       <button class="btn outline" id="send-lineup" data-need="dispatch" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
       <button class="btn primary big" id="new-job">+ New job</button>
     </div>
@@ -186,6 +187,29 @@
     <div class="panel settings" id="sites-panel" data-need="admin">
       <h2>Our sites</h2>
       <div id="sites-setup"></div>
+    </div>
+    <div class="panel settings" id="alerts-panel" data-need="admin">
+      <h2>Alerts &amp; day summary</h2>
+      <form id="alerts-form" class="alerts-form">
+        <fieldset>
+          <legend>Alerts when something goes wrong</legend>
+          <p class="muted small">A text when texts stop sending, a backup fails, QuickBooks stops syncing, the app hits an error,
+            or the app was down. The same kind of alert is texted at most once an hour.</p>
+          <label>Text alerts to <textarea name="alert_phones" rows="2" placeholder="One cell number per line, e.g. 705-555-0100"></textarea></label>
+          <div class="row-actions"><button class="btn" type="button" id="alerts-test">Send a test alert</button></div>
+        </fieldset>
+        <fieldset>
+          <legend>End-of-day summary</legend>
+          <p class="muted small">The Board's <b>Day summary</b>: jobs done, loads, money, what's still open, machines moved and tomorrow.
+            These numbers are ticked when you text it from the Board.</p>
+          <label>Text the summary to <textarea name="summary_phones" rows="2" placeholder="One cell number per line"></textarea></label>
+          <label class="check"><input type="checkbox" name="summary_auto"> Also text it automatically every day at
+            <input type="time" name="summary_time" value="17:00" aria-label="Time to text the summary"></label>
+        </fieldset>
+        <button class="btn primary" type="submit">Save</button>
+      </form>
+      <h3 class="small-head">Recent alerts</h3>
+      <ol class="alert-list" id="alert-list"></ol>
     </div>
     <div class="panel settings" id="review-panel" data-need="admin">
       <h2>Review requests</h2>
@@ -582,6 +606,16 @@
   </dialog>
 
   <!-- JOB HISTORY -->
+  <dialog id="summary-dialog" class="summary-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2 id="summary-title">Day summary</h2>
+        <button type="button" class="link" data-close-summary aria-label="Close">✕</button>
+      </div>
+      <div id="summary-body"></div>
+      <div class="summary-send" id="summary-send"></div>
+    </div>
+  </dialog>
   <dialog id="history-dialog">
     <div class="ticket-wrap">
       <div class="dialog-head">
@@ -620,5 +654,6 @@
   <script src="/sites.js"></script>
   <script src="/setup-ui.js"></script>
   <script src="/reception.js"></script>
+  <script src="/alerts-ui.js"></script>
 </body>
 </html>

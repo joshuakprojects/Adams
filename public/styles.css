@@ -37,7 +37,7 @@ h2, h3 { margin: 0; }
 
 .board { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
 @media (max-width: 900px) { .board { grid-template-columns: 1fr; } }
-.jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 12px; }
 .empty { background: var(--card); border: 2px dashed var(--line); border-radius: 12px; padding: 40px; text-align: center; color: var(--muted); }
 
 .job { background: var(--card); border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); border-left: 6px solid #999; display: flex; flex-direction: column; }
@@ -1001,3 +1001,35 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 #pm-place { margin-top: 6px; }
 .sites-page .btn[disabled], .ppanel .btn[disabled] { opacity: .5; cursor: not-allowed; }
 .table-scroll { overflow-x: auto; max-width: 100%; }
+
+/* Day summary (Board) */
+.summary-dialog { width: min(760px, 96vw); }
+.sum-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.sum-tile { background: #f4f3ee; border-radius: 12px; padding: 10px 12px; display: grid; gap: 2px; }
+.sum-tile span { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #6a6a64; }
+.sum-tile b { font: 700 26px/1.1 var(--head, sans-serif); }
+.sum-tile b small { font-size: 14px; color: #6a6a64; }
+.sum-tile small { font-size: 12px; color: #6a6a64; }
+.sum-block h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px; }
+.sum-block p { margin: 0; }
+.sum-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+.sum-list li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 10px; border: 1px solid #e2e2de; border-radius: 9px; }
+.sum-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.sum-text pre { white-space: pre-wrap; background: #f4f3ee; padding: 10px; border-radius: 8px; font-size: 13px; }
+.summary-send { border-top: 1px solid #e2e2de; margin-top: 12px; padding-top: 12px; }
+.summary-send h3 { margin: 0 0 8px; font-size: 15px; }
+.sum-phones { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+.sum-phones input#sum-extra { padding: 7px 10px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; min-width: 0; }
+@media (max-width: 640px) { .sum-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sum-grid { grid-template-columns: 1fr; } }
+/* Setup → Alerts & day summary */
+.alerts-form { display: grid; gap: 14px; max-width: 640px; }
+.alerts-form fieldset { border: 1px solid #e2e2de; border-radius: 12px; padding: 12px 14px; display: grid; gap: 8px; }
+.alerts-form legend { font-weight: 700; padding: 0 4px; }
+.alerts-form textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid #c9c9c2; border-radius: 8px; }
+.alerts-form input[type=time] { padding: 4px 8px; border: 1px solid #c9c9c2; border-radius: 8px; font: inherit; }
+.alerts-form > button { justify-self: start; }
+.small-head { font-size: 14px; margin: 16px 0 6px; }
+.alert-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; max-width: 760px; }
+.alert-list li { padding: 8px 10px; border: 1px solid #e2e2de; border-radius: 9px; font-size: 14px; }
+.alert-list .when { color: #6a6a64; font-size: 12px; margin-right: 6px; }
+@media (max-width: 520px) { .empty { padding: 28px 16px; } }
