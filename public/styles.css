@@ -1174,3 +1174,5 @@ details.sn-card[open] > summary::after { content: '▴'; }
 .sn-library { display: grid; gap: 6px; padding: 12px; margin: 8px 0 12px; border-radius: 10px; background: #fff7e0; border: 1px solid #f0dca0; }
 .sn-library.ok { background: #eaf7ee; border-color: #b9e0c4; }
 .sn-library .btn { justify-self: start; }
+.sn-hero-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
+.sn-hero-foot .btn { background: transparent; color: inherit; border-color: rgba(255,255,255,.45); }

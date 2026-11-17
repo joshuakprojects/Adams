@@ -108,6 +108,7 @@
         <h2>Start ${esc(sayHm(c.start_time))} · ${esc(dayWord(ymdOf(start)))}</h2>
         <div class="sn-sub">At ${esc(c.place)}</div></div>
         <div class="sn-big"><b>${c.counts.coming || 0}</b><span>coming</span></div></div>
+      <div class="sn-hero-foot"><button class="btn tiny outline" data-snow="clear" data-call="${c.id}">Clear the board</button></div>
     </div>
     ${recent ? columns(c) : ''}`;
   }
@@ -247,6 +248,10 @@
         if (!ids.length) return toast('Everyone already has it');
         const out = await api('/snow/setup-text', { method: 'POST', body: { ids } });
         toast(`Setup text sent to ${out.results.filter((r) => r.ok).length}`);
+      } else if (act === 'clear') {
+        if (!confirm('Clear these results off the screen? (The call-out stays in the records.)')) return;
+        await api(`/snow/${b.dataset.call}/clear`, { method: 'POST' });
+        toast('Board cleared');
       } else if (act === 'record') {
         b.disabled = true;
         b.textContent = 'Recording… (about a minute)';
