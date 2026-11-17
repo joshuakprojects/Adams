@@ -12,7 +12,7 @@ const { openDb } = require('../src/db');
 const config = require('../src/config');
 
 (async () => {
-  const url = process.env.DATABASE_URL;
+  const url = config.databaseUrl;
   const db = await openDb(url ? { url } : config.dbPath);
   const tables = db.kind === 'pg'
     ? (await db.all("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1")).map((r) => r.name)

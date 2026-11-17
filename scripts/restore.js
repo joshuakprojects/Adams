@@ -9,7 +9,8 @@
 //   add --from server                           use your own server instead of Replit App Storage
 //
 // It only restores into an EMPTY database (no drivers, no jobs). Add --force to wipe the current data first.
-// Uses DATABASE_URL (PostgreSQL) if set, otherwise the local SQLite file — the same database the app uses.
+// Uses DISPATCH_DATABASE_URL or DATABASE_URL (PostgreSQL) if set, otherwise the local SQLite file — the same database the app uses.
+// To fill a new database (e.g. moving to Neon), put its link in front:  DISPATCH_DATABASE_URL='postgresql://…' npm run restore -- latest
 const fs = require('node:fs');
 const config = require('../src/config');
 const { openDb } = require('../src/db');
@@ -58,10 +59,10 @@ const { serverTarget } = require('../src/backupTargets');
     backup = gunzipJson(buf);
     if (storage) photoFor = async (id) => ((await storage.exists(PHOTO_PREFIX + id)) ? storage.get(PHOTO_PREFIX + id) : null);
   }
-  const db = await openDb(process.env.DATABASE_URL ? { url: process.env.DATABASE_URL } : config.dbPath);
+  const db = await openDb(config.databaseUrl ? { url: config.databaseUrl } : config.dbPath);
   try {
     const out = await restore(db, backup, { photoFor, force });
-    console.log(`Restored the backup made ${backup.created_at}:`);
+    console.log(`Restored the backup made ${backup.created_at} into ${db.kind === 'pg' ? new URL(config.databaseUrl).host : config.dbPath}:`);
     for (const [t, n] of Object.entries(out.counts)) console.log(`  ${t}: ${n}`);
     console.log(`  ticket photos: ${out.photos}`);
     console.log('Log in with the office logins from the backup. Restart / republish the app.');

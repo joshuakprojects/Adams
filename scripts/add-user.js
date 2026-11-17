@@ -11,7 +11,7 @@ if (!email || !password) {
   process.exit(1);
 }
 (async () => {
-  const db = await openDb(process.env.DATABASE_URL ? { url: process.env.DATABASE_URL } : config.dbPath);
+  const db = await openDb(config.databaseUrl ? { url: config.databaseUrl } : config.dbPath);
   await createUser(db, { email, name, password, role });
   console.log(`Login ready for ${email} (${role})`);
   await db.close();
