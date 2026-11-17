@@ -133,3 +133,57 @@ test('the overnight snow dispatcher login: the Snow call and nothing else', asyn
   assert.equal((await api('/snow')).status, 200);
   assert.equal((await api('/snow')).data.shovelers.length, 1);
 });
+
+test('ElevenLabs voice: the call-out is recorded once and played on every call; without it, the standard voice', async (t) => {
+  const db = await testDb(t);
+  const { createVoice } = require('../src/voice');
+  const spoken = [];
+  const fetchImpl = async (url, opts) => {
+    assert.equal(opts.headers['xi-api-key'], 'k');
+    if (url.endsWith('/voices')) return { ok: true, json: async () => ({ voices: [{ voice_id: 'v2', name: 'Zoe', labels: { accent: 'canadian' } }, { voice_id: 'v1', name: 'Adam', preview_url: 'https://x/p.mp3' }] }) };
+    spoken.push(JSON.parse(opts.body).text);
+    return { ok: true, arrayBuffer: async () => Buffer.from('MP3:' + spoken.length) };
+  };
+  const voice = createVoice(db, { key: 'k', fetchImpl });
+  assert.deepEqual((await voice.voices()).map((v) => v.name), ['Adam', 'Zoe']);
+  assert.equal(await voice.ready(), false, 'no voice picked yet');
+  await voice.choose('v1', 'Adam');
+  let clock = new Date('2026-12-03T07:30:00Z');
+  const snow = createSnow(db, { send: async () => {}, now: () => clock, timeZone: TZ, publicUrl: 'https://dispatch.example', live: false, voice });
+  await snow.saveShoveler({ name: 'Bob', phone: '705-555-0301', call_ahead_min: 60 });
+  const c = await snow.start({ day: '2026-12-03', time: '04:00', place: 'the yard' });
+  assert.equal(spoken.length, 5, 'main, coming, not coming, no answer, cancelled');
+  assert.match(spoken[0], /^Adams Bros snow call\. Start at 4 AM at the yard\. Press 1/);
+  const row = await db.get('SELECT token FROM snow_call_people WHERE call_id = ?', c.id);
+  const twiml = await snow.voiceTwiml(row.token);
+  const m = /<Play>https:\/\/dispatch\.example\/voice\/audio\/([\w-]+)\/main\.mp3<\/Play>/.exec(twiml);
+  assert.ok(m, twiml);
+  assert.equal((await snow.audio(m[1], 'main')).toString(), 'MP3:1');
+  assert.match(await snow.voiceAnswer(row.token, '1'), /<Play>[^<]+\/coming\.mp3<\/Play>/);
+  assert.equal(await snow.audio('nope', 'main'), null);
+  // ElevenLabs down: the call-out still starts, in the standard voice.
+  const down = createSnow(db, { send: async () => {}, now: () => clock, timeZone: TZ, live: false,
+    voice: { ready: async () => true, chosen: async () => ({ voice_id: 'v1' }), speak: async () => { throw new Error('502'); } } });
+  await down.cancel(c.id);
+  const c2 = await down.start({ day: '2026-12-03', time: '04:00' });
+  const tok = (await db.get('SELECT token FROM snow_call_people WHERE call_id = ?', c2.id)).token;
+  assert.match(await down.voiceTwiml(tok), /<Say voice="Polly\.Joanna-Neural">Adams Bros snow call/);
+});
+
+test('snow call: only the ticked shovelers; results stay on screen after; setup text and contact card', async (t) => {
+  const { snow, texts, bob } = await setup(t, { live: false });
+  await assert.rejects(() => snow.start({ day: '2026-12-03', time: '04:00', shovelers: [] }), /Tick at least one/);
+  const c = await snow.start({ day: '2026-12-03', time: '04:00', mode: 'now', shovelers: [bob.id] });
+  assert.deepEqual(c.people.map((p) => p.name), ['Bob Smith']);
+  await snow.act(c.people[0].id, 'coming');
+  assert.equal(await snow.current(), null, 'finished');
+  const last = await snow.last();
+  assert.equal(last.id, c.id);
+  assert.deepEqual(last.people.map((p) => [p.name, p.status]), [['Bob Smith', 'coming']]);
+  const out = await snow.sendSetupText();
+  assert.equal(out.results.length, 2);
+  assert.match(texts.at(-1).body, /snow call-outs will phone you from 705-555-0000\. .*\/snow\/contact\.vcf .*Favourite/);
+  const card = snow.contactCard();
+  assert.match(card, /^BEGIN:VCARD\r\nVERSION:3\.0\r\nFN:Adams Bros Snow Call\r\n/);
+  assert.match(card, /TEL;TYPE=WORK,VOICE:\+17055550000/);
+});

@@ -48,8 +48,9 @@ const xml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&g
 function createSnow(db, {
   send = sms.sendSms, now = () => new Date(), timeZone = config.timeZone, publicUrl = config.publicUrl,
   twilio = config.twilio, voiceFrom = process.env.TWILIO_VOICE_FROM || config.twilio.fromNumber,
-  fetchImpl = (...a) => fetch(...a), live = config.smsEnabled && config.smsProvider === 'twilio',
+  fetchImpl = (...a) => fetch(...a), live = config.smsEnabled && config.smsProvider === 'twilio', voice = null,
 } = {}) {
+  const FALLBACK_VOICE = 'Polly.Joanna-Neural'; // Twilio's own voice, when there's no ElevenLabs voice
   let active = null; // null = not known yet; false = no call-out running (minute checks then ask the database nothing)
 
   // ---------- shovelers ----------
@@ -85,11 +86,18 @@ function createSnow(db, {
     const note = String(input.note || '').trim().slice(0, 160);
     const mode = input.mode === 'now' ? 'now' : 'ahead';
     const notify = [...new Set((Array.isArray(input.notify) ? input.notify : String(input.notify || '').split(/[\n,;]+/)).map(sms.normalizePhone).filter(Boolean))].slice(0, 5);
-    const people = await listShovelers();
+    let people = await listShovelers();
     if (!people.length) throw new SnowError('Add the shovelers first (their name, cell and call-ahead time)');
+    // Only some of them this time (the ticks on the screen).
+    if (Array.isArray(input.shovelers)) {
+      const pick = new Set(input.shovelers.map(Number));
+      people = people.filter((p) => pick.has(p.id));
+      if (!people.length) throw new SnowError('Tick at least one shoveler to call');
+    }
     const r = await db.run(`INSERT INTO snow_calls (day, start_time, start_at, place, note, mode, notify, status, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)`, day, time, sqlTime(startAt), place, note, mode, JSON.stringify(notify), String(userName).slice(0, 80));
     const callId = Number(r.lastInsertRowid);
+    await record(callId);
     for (const p of people) {
       const due = mode === 'now' ? now() : new Date(Math.max(now().getTime(), startAt.getTime() - p.call_ahead_min * 60e3));
       await db.run(`INSERT INTO snow_call_people (call_id, shoveler_id, name, phone, due_at, token) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -117,12 +125,56 @@ function createSnow(db, {
     c.live = live;
     return c;
   }
+  /** The last call-out that's finished (its results stay on the screen until the next one starts). */
+  async function last() {
+    const row = await db.get("SELECT id FROM snow_calls WHERE status IN ('done', 'cancelled') ORDER BY id DESC LIMIT 1");
+    return row ? get(row.id) : null;
+  }
   async function recent(limit = 5) {
     return db.all('SELECT id, day, start_time, place, status, created_at FROM snow_calls ORDER BY id DESC LIMIT ?', limit);
   }
 
   // ---------- calling ----------
   const message = (c) => `Adams Bros snow call. Start at ${sayTime(c.start_time)} at ${c.place}.${c.note ? ' ' + c.note + '.' : ''}`;
+  // Everything the call can say, by part.
+  const lines = (c) => ({
+    main: `${message(c)} Press 1 if you are coming. Press 2 if you can't.`,
+    coming: `Thank you. See you at ${sayTime(c.start_time)} at ${c.place}.`,
+    not_coming: 'Thank you. We will let the office know.',
+    no_answer: 'We did not get an answer. We will try again soon.',
+    cancelled: 'The Adams Bros snow call was cancelled. Thank you.',
+  });
+
+  /** With an ElevenLabs voice: record the call-out's words once, at the start (never stops a call-out if it fails). */
+  async function record(callId) {
+    if (!voice || !(await voice.ready().catch(() => false))) return false;
+    const call = await db.get('SELECT * FROM snow_calls WHERE id = ?', callId);
+    const key = crypto.randomBytes(12).toString('base64url');
+    try {
+      for (const [kind, text] of Object.entries(lines(call))) {
+        await db.run('INSERT INTO snow_audio (call_id, kind, data) VALUES (?, ?, ?)', callId, kind, await voice.speak(text));
+      }
+      const chosen = await voice.chosen();
+      await db.run('UPDATE snow_calls SET audio_key = ?, voice = ? WHERE id = ?', key, chosen.voice_name || chosen.voice_id, callId);
+      return true;
+    } catch (err) {
+      console.error('Snow call recording failed (the standard voice is used):', err.message);
+      await db.run('DELETE FROM snow_audio WHERE call_id = ?', callId);
+      return false;
+    }
+  }
+  /** A recorded part, for the phone system to play. */
+  async function audio(key, kind) {
+    const call = await db.get("SELECT id FROM snow_calls WHERE audio_key = ? AND audio_key != ''", String(key || ''));
+    if (!call) return null;
+    const row = await db.get('SELECT data FROM snow_audio WHERE call_id = ? AND kind = ?', call.id, String(kind));
+    return row ? Buffer.from(row.data) : null;
+  }
+  /** TwiML for one part: the recording when there is one, else the standard voice. */
+  function speech(call, kind) {
+    if (call.audio_key) return `<Play>${xml(publicUrl.replace(/\/$/, ''))}/voice/audio/${xml(call.audio_key)}/${kind}.mp3</Play>`;
+    return `<Say voice="${FALLBACK_VOICE}">${xml(lines(call)[kind])}</Say>`;
+  }
 
   async function placeCall(person, call) {
     const token = person.token;
@@ -210,13 +262,12 @@ function createSnow(db, {
     const p = await personByToken(token);
     if (!p) return '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
     const call = await db.get('SELECT * FROM snow_calls WHERE id = ?', p.call_id);
-    if (call.status === 'cancelled') return `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">The Adams Bros snow call was cancelled. Thank you.</Say></Response>`;
-    const say = `${xml(message(call))} Press 1 if you are coming. Press 2 if you can't.`;
+    if (call.status === 'cancelled') return `<?xml version="1.0" encoding="UTF-8"?><Response>${speech(call, 'cancelled')}</Response>`;
     const action = `/voice/snow/${xml(token)}/answer`;
     return '<?xml version="1.0" encoding="UTF-8"?><Response>'
-      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST"><Say voice="Polly.Joanna">${say}</Say></Gather>`
-      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST"><Say voice="Polly.Joanna">Again. ${say}</Say></Gather>`
-      + '<Say voice="Polly.Joanna">We did not get an answer. We will try again soon.</Say></Response>';
+      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST">${speech(call, 'main')}</Gather>`
+      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST">${speech(call, 'main')}</Gather>`
+      + `${speech(call, 'no_answer')}</Response>`;
   }
   async function voiceAnswer(token, digits) {
     const p = await personByToken(token);
@@ -224,8 +275,7 @@ function createSnow(db, {
     const call = await db.get('SELECT * FROM snow_calls WHERE id = ?', p.call_id);
     if (digits === '1' || digits === '2') {
       await answer(p.id, digits === '1' ? 'coming' : 'not_coming', 'call');
-      const thanks = digits === '1' ? `Thank you. See you at ${sayTime(call.start_time)} at ${call.place}.` : 'Thank you. We will let the office know.';
-      return `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna">${xml(thanks)}</Say></Response>`;
+      return `<?xml version="1.0" encoding="UTF-8"?><Response>${speech(call, digits === '1' ? 'coming' : 'not_coming')}</Response>`;
     }
     return voiceTwiml(token);
   }
@@ -270,7 +320,36 @@ function createSnow(db, {
     return get(callId);
   }
 
-  return { listShovelers, saveShoveler, start, current, get, recent, tick, voiceTwiml, voiceAnswer, voiceStatus, handleReply, act, cancel, sayTime };
+  // ---------- so the call rings at 3 AM ----------
+  /** The snow call number as a contact card (opened from the setup text: one tap saves it). */
+  function contactCard() {
+    const tel = (n) => String(n || '').replace(/[^+\d]/g, '');
+    const numbers = [...new Set([tel(voiceFrom), tel(config.twilio.fromNumber)].filter(Boolean))];
+    return ['BEGIN:VCARD', 'VERSION:3.0', 'FN:Adams Bros Snow Call', 'N:Snow Call;Adams Bros;;;', 'ORG:Adams Bros Construction',
+      ...numbers.map((n, i) => `TEL;TYPE=${i ? 'CELL' : 'WORK,VOICE'}:${n}`),
+      'NOTE:Early-morning snow call-outs. Mark this contact as a favourite so it rings through Do Not Disturb.', 'END:VCARD', ''].join('\r\n');
+  }
+  /** Text shovelers (all, or the ids given) how to save the number so the call rings at night and isn't flagged as spam. */
+  async function sendSetupText(ids = null) {
+    let people = await listShovelers();
+    if (Array.isArray(ids)) { const pick = new Set(ids.map(Number)); people = people.filter((p) => pick.has(p.id)); }
+    const link = `${publicUrl.replace(/\/$/, '')}/snow/contact.vcf`;
+    const number = sms.prettyPhone(voiceFrom);
+    const results = [];
+    for (const p of people) {
+      const body = `Adams Bros: snow call-outs will phone you from ${number}. Please save it so the call rings at night: tap ${link} and save the contact. `
+        + 'Then make it a Favourite (iPhone: Favourites; Android: tap the star) so it rings through Do Not Disturb / sleep mode.';
+      try {
+        await send(p.phone, body);
+        await db.run('UPDATE shovelers SET setup_texted_at = ? WHERE id = ?', sqlTime(now()), p.id);
+        results.push({ id: p.id, name: p.name, ok: true });
+      } catch (err) { results.push({ id: p.id, name: p.name, ok: false, error: err.message }); }
+    }
+    return { results, number };
+  }
+
+  return { listShovelers, saveShoveler, start, current, last, get, recent, tick, voiceTwiml, voiceAnswer, voiceStatus, handleReply, act, cancel, sayTime,
+    audio, contactCard, sendSetupText, voiceFrom: () => voiceFrom, voice };
 }
 
 module.exports = { createSnow, zonedTime, sayTime, SnowError };

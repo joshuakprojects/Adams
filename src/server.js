@@ -25,6 +25,7 @@ const { createRecurring } = require('./recurring');
 const { createRoutes } = require('./routes');
 const { createDrive } = require('./gdrive');
 const { createSnow } = require('./snow');
+const { createVoice } = require('./voice');
 const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
@@ -56,7 +57,8 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   alerts = alerts || createAlerts(db, { listen: false });
   recurring = recurring || createRecurring(db, dispatch);
   drive = drive || createDrive(db);
-  snow = snow || createSnow(db);
+  const voice = snow?.voice || createVoice(db);
+  snow = snow || createSnow(db, { voice });
   const routes = createRoutes(db, dispatch, distance);
   summary = summary || createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
@@ -173,6 +175,15 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   // Snow call phone calls (Twilio asks these when the shoveler picks up, presses a key, and when the call ends).
   const twilioOk = (req) => !config.smsEnabled || config.smsProvider !== 'twilio'
     || sms.validTwilioSignature(req.get('X-Twilio-Signature'), config.publicUrl + req.originalUrl, req.body || {});
+  // The recorded words of a snow call (played by the phone system), and the contact card from the setup text.
+  app.get('/voice/audio/:key/:kind.mp3', h(async (req, res) => {
+    const buf = await snow.audio(req.params.key, req.params.kind);
+    if (!buf) return res.status(404).end();
+    res.set('Cache-Control', 'public, max-age=86400').type('audio/mpeg').send(buf);
+  }));
+  app.get('/snow/contact.vcf', (_req, res) => {
+    res.set('Content-Disposition', 'attachment; filename="Adams-Bros-Snow-Call.vcf"').type('text/vcard').send(snow.contactCard());
+  });
   app.post('/voice/snow/:token', h(async (req, res) => {
     if (!twilioOk(req)) return res.status(403).send('Bad signature');
     res.type('text/xml').send(await snow.voiceTwiml(req.params.token));
@@ -577,11 +588,25 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
   // ---------- snow call-outs ----------
-  api.get('/snow', needSnow, json(async () => ({ current: await snow.current(), shovelers: await snow.listShovelers({ all: true }),
-    recent: await snow.recent(5), notify: JSON.parse((await db.get('SELECT value FROM settings WHERE key = ?', 'snow_notify'))?.value || '[]') })));
+  api.get('/snow', needSnow, json(async () => ({ current: await snow.current(), last: await snow.last(), shovelers: await snow.listShovelers({ all: true }),
+    recent: await snow.recent(5), notify: JSON.parse((await db.get('SELECT value FROM settings WHERE key = ?', 'snow_notify'))?.value || '[]'),
+    place: (await db.get('SELECT value FROM settings WHERE key = ?', 'snow_place'))?.value || '',
+    number: sms.prettyPhone(snow.voiceFrom()),
+    voice: { configured: voice.configured, ...(await voice.chosen()) } })));
+  api.post('/snow/setup-text', needSnow, json((req) => snow.sendSetupText(Array.isArray(req.body?.ids) ? req.body.ids : null)));
+  // The ElevenLabs voice: the account's voices, the one picked, and a sample of the real call in a voice.
+  api.get('/snow/voices', need('dispatcher'), json(async () => ({ voices: await voice.voices(), ...(await voice.chosen()) })));
+  api.post('/snow/voice', need('dispatcher'), json((req) => voice.choose(req.body?.voice_id, req.body?.name)));
+  api.post('/snow/voice/preview', need('dispatcher'), h(async (req, res) => {
+    const text = String(req.body?.text || 'Adams Bros snow call. Start at 4 AM at the yard. Press 1 if you are coming. Press 2 if you can\'t.').slice(0, 300);
+    const buf = await voice.speak(text, req.body?.voice_id || null);
+    res.type('audio/mpeg').send(buf);
+  }));
   api.post('/snow/start', needSnow, json(async (req) => {
     const out = await snow.start(req.body || {}, req.user.name || req.user.email);
-    await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', 'snow_notify', JSON.stringify(out.notify));
+    const remember = (k, v) => db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, v);
+    await remember('snow_notify', JSON.stringify(out.notify));
+    await remember('snow_place', out.place);
     return out;
   }));
   api.post('/snow/:id/cancel', needSnow, json((req) => snow.cancel(req.params.id)));
@@ -750,7 +775,7 @@ async function main() {
   const alerts = createAlerts(db);
   const summary = createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   const recurring = createRecurring(db, dispatch);
-  const snow = createSnow(db);
+  const snow = createSnow(db, { voice: createVoice(db) });
   await alerts.checkDowntime(config.timeZone);
   // A planned stop (Republish, a restart from Replit): noted, so it isn't reported as the app being down.
   for (const sig of ['SIGTERM', 'SIGINT']) {
