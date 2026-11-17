@@ -23,6 +23,7 @@ const { createAlerts } = require('./alerts');
 const { createSummary } = require('./summary');
 const { createRecurring } = require('./recurring');
 const { createRoutes } = require('./routes');
+const { createDrive } = require('./gdrive');
 const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
@@ -49,10 +50,11 @@ const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, 
 
 function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
   qbo = createQuickBooks(db, dispatch), sunwire = createSunwire(), sendReply = (to, body) => sms.sendSms(to, body),
-  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null, recurring = null }) {
+  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null, recurring = null, drive = null }) {
   const intake = createIntake(db);
   alerts = alerts || createAlerts(db, { listen: false });
   recurring = recurring || createRecurring(db, dispatch);
+  drive = drive || createDrive(db);
   const routes = createRoutes(db, dispatch, distance);
   summary = summary || createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
@@ -304,6 +306,15 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   }));
   api.get('/qbo/log', admin, json(() => qbo.log(100)));
   api.get('/qbo/preview/:jobId', admin, json((req) => qbo.preview(req.params.jobId)));
+  // ---------- Google Drive (Setup → Backups) ----------
+  api.get('/gdrive', admin, json(() => drive.status()));
+  api.get('/gdrive/connect', admin, json(async () => ({ url: await drive.authUrl() })));
+  api.post('/gdrive/disconnect', admin, json(() => drive.disconnect()));
+  api.post('/gdrive/backup', admin, json(async () => {
+    if (!backups) throw new ValidationError('Backups are off');
+    if (!(await drive.active())) throw new ValidationError('Connect Google Drive first');
+    return backups.run({ reason: 'by hand', kind: 'nightly', only: [drive.target] });
+  }));
   api.post('/qbo/invoice/:jobId', admin, json((req) => qbo.invoice(req.params.jobId, { email: Boolean(req.body?.email) })));
   api.post('/qbo/disconnect', admin, json(() => qbo.disconnect()));
 
@@ -615,6 +626,15 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
 
   app.get('/', auth.requireUser, (_req, res) => res.sendFile(path.join(pub, 'index.html')));
   // Back from QuickBooks's sign-in page.
+  app.get('/gdrive/callback', auth.requireUser, need('admin'), h(async (req, res) => {
+    if (req.query.error) return res.redirect('/?gdrive=error&msg=' + encodeURIComponent('Google sign-in was cancelled'));
+    try {
+      await drive.finishConnect({ code: String(req.query.code || ''), state: String(req.query.state || '') });
+      res.redirect('/?gdrive=connected');
+    } catch (err) {
+      res.redirect('/?gdrive=error&msg=' + encodeURIComponent(err.message));
+    }
+  }));
   app.get('/qbo/callback', auth.requireUser, need('admin'), h(async (req, res) => {
     try {
       await qbo.finishConnect({ code: String(req.query.code || ''), state: String(req.query.state || ''), realmId: String(req.query.realmId || '') });
@@ -666,7 +686,10 @@ async function main() {
   if (linked) console.log(`Address book: linked ${linked} earlier job(s) to customers.`);
   // DEMO_DATA=true: fill an empty database with sample jobs (for showing the app off).
   if (process.env.DEMO_DATA === 'true' && await require('./demo').seedDemo(dispatch)) console.log('Loaded demo data.');
+  // Google Drive: a third place for the nightly backup, once an admin connects it (Setup → Backups).
+  const drive = createDrive(db);
   const backups = createBackups(db, {
+    extra: [drive.target],
     today: dispatch.today,
     nowHm: () => nowHmIn(),
     readPhoto: async (id) => (await dispatch.getTicket(id))?.data || null,
@@ -688,7 +711,7 @@ async function main() {
   const summary = createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   const recurring = createRecurring(db, dispatch);
   await alerts.checkDowntime(config.timeZone);
-  createApp({ db, dispatch, backups, qbo, sites, alerts, summary, recurring }).listen(config.port, () => {
+  createApp({ db, dispatch, backups, qbo, sites, alerts, summary, recurring, drive }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });

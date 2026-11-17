@@ -241,6 +241,7 @@
         <a class="btn primary" id="backup-download" href="/api/backups/download" title="One .zip: the database and every ticket photo, in a folder per work order">Download a copy (with photos)</a>
         <a class="link small" href="/api/backups/download?only=database">database only</a>
       </div>
+      <div class="gdrive-box" id="gdrive-box" data-need="admin"></div>
       <p class="muted small">For the office hard drive: press <b>Download a copy</b> each evening and move the .zip onto the drive.
         It holds everything; <b>Restore</b> (below, owner only) puts it all back, photos included.</p>
       <table class="table compact"><thead><tr><th>When</th><th>Where</th><th>Copy</th><th>Size</th><th>New photos</th><th></th></tr></thead><tbody id="backup-rows"></tbody></table>
@@ -690,5 +691,6 @@
   <script src="/alerts-ui.js"></script>
   <script src="/repeat-ui.js"></script>
   <script src="/routes-ui.js"></script>
+  <script src="/gdrive-ui.js"></script>
 </body>
 </html>
