@@ -93,6 +93,7 @@
     if (tab === 'people') window.QBO_UI?.loadQbo().catch(() => {});
     if (tab === 'board') loadBoard();
     if (tab === 'sites') window.SITES?.mount($('#sites-root')).catch((err) => toast(err.message));
+    if (tab === 'snow') window.SNOW_UI?.mount($('#snow-root')).catch((err) => toast(err.message));
     if (tab === 'people' && state.can?.admin) window.SETUP_UI?.start();
   }
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));

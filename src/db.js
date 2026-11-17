@@ -368,6 +368,46 @@ CREATE TABLE IF NOT EXISTS job_series (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Snow call-outs (src/snow.js): the shovelers, each call-out, and each person's call in it.
+CREATE TABLE IF NOT EXISTS shovelers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  call_ahead_min INTEGER NOT NULL DEFAULT 30,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS snow_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  start_at TEXT NOT NULL,
+  place TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'ahead',
+  notify TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'running',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+-- status: waiting | calling | no_answer_retry | coming | not_coming | no_answer | failed | cancelled
+CREATE TABLE IF NOT EXISTS snow_call_people (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  call_id INTEGER NOT NULL REFERENCES snow_calls(id) ON DELETE CASCADE,
+  shoveler_id INTEGER,
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  due_at TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'waiting',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_call_sid TEXT NOT NULL DEFAULT '',
+  last_attempt_at TEXT,
+  answered_at TEXT,
+  via TEXT NOT NULL DEFAULT ''
+);
+
 -- Problems the office should hear about (texts failing, a backup failing, the app having been down).
 CREATE TABLE IF NOT EXISTS alerts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

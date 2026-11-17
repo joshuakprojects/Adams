@@ -24,6 +24,7 @@ const { createSummary } = require('./summary');
 const { createRecurring } = require('./recurring');
 const { createRoutes } = require('./routes');
 const { createDrive } = require('./gdrive');
+const { createSnow } = require('./snow');
 const { renderSitePage, requestFromForm, renderSiteNotFound } = require('./sitePage');
 
 /** Download a photo a driver texted in (MMS). Only Twilio's own media URLs are fetched. */
@@ -50,11 +51,12 @@ const h = (fn) => (req, res, next) => Promise.resolve().then(() => fn(req, res, 
 
 function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = config.intakeKey, backups = null, distance = createDistance(db),
   qbo = createQuickBooks(db, dispatch), sunwire = createSunwire(), sendReply = (to, body) => sms.sendSms(to, body),
-  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null, recurring = null, drive = null }) {
+  smsProvider = config.smsProvider, sites = null, alerts = null, summary = null, recurring = null, drive = null, snow = null }) {
   const intake = createIntake(db);
   alerts = alerts || createAlerts(db, { listen: false });
   recurring = recurring || createRecurring(db, dispatch);
   drive = drive || createDrive(db);
+  snow = snow || createSnow(db);
   const routes = createRoutes(db, dispatch, distance);
   summary = summary || createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   sites = sites || createSites(db, dispatch, { send: sendReply, today: dispatch.today });
@@ -160,9 +162,29 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
         console.error('Could not download texted photo:', err.message);
       }
     }
-    const asSite = media.length ? null : await sites.handleReply(sms.normalizePhone(req.body.From) || req.body.From, req.body.Body);
+    const fromPhone = sms.normalizePhone(req.body.From) || req.body.From;
+    // A shoveler answering a snow call (1 / 2), a site head answering "what do you need?", or a driver.
+    const asSnow = media.length ? null : await snow.handleReply(fromPhone, req.body.Body);
+    const asSite = asSnow || (media.length ? null : await sites.handleReply(fromPhone, req.body.Body));
     const { reply } = asSite || await dispatch.handleInbound(req.body.From, req.body.Body, { media });
     res.type('text/xml').send(sms.twiml(reply));
+  }));
+
+  // Snow call phone calls (Twilio asks these when the shoveler picks up, presses a key, and when the call ends).
+  const twilioOk = (req) => !config.smsEnabled || config.smsProvider !== 'twilio'
+    || sms.validTwilioSignature(req.get('X-Twilio-Signature'), config.publicUrl + req.originalUrl, req.body || {});
+  app.post('/voice/snow/:token', h(async (req, res) => {
+    if (!twilioOk(req)) return res.status(403).send('Bad signature');
+    res.type('text/xml').send(await snow.voiceTwiml(req.params.token));
+  }));
+  app.post('/voice/snow/:token/answer', h(async (req, res) => {
+    if (!twilioOk(req)) return res.status(403).send('Bad signature');
+    res.type('text/xml').send(await snow.voiceAnswer(req.params.token, String(req.body?.Digits || '')));
+  }));
+  app.post('/voice/snow/:token/status', h(async (req, res) => {
+    if (!twilioOk(req)) return res.status(403).send('Bad signature');
+    await snow.voiceStatus(req.params.token, String(req.body?.CallStatus || ''));
+    res.status(204).end();
   }));
 
   // Incoming texts through Sunwire (SolSwitch): JSON, checked with the key Sunwire sends. Photos arrive as links.
@@ -549,6 +571,18 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
   api.get('/customers/:id/septic-prefill', json((req) => dispatch.customers.septicPrefill(req.params.id)));
   api.get('/jobs/:id/history', json((req) => dispatch.historyFor(req.params.id)));
   // ---------- our own job sites (Sites tab) ----------
+  // ---------- snow call-outs ----------
+  api.get('/snow', need('dispatcher'), json(async () => ({ current: await snow.current(), shovelers: await snow.listShovelers({ all: true }),
+    recent: await snow.recent(5), notify: JSON.parse((await db.get('SELECT value FROM settings WHERE key = ?', 'snow_notify'))?.value || '[]') })));
+  api.post('/snow/start', need('dispatcher'), json(async (req) => {
+    const out = await snow.start(req.body || {}, req.user.name || req.user.email);
+    await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', 'snow_notify', JSON.stringify(out.notify));
+    return out;
+  }));
+  api.post('/snow/:id/cancel', need('dispatcher'), json((req) => snow.cancel(req.params.id)));
+  api.post('/snow/people/:id', need('dispatcher'), json((req) => snow.act(req.params.id, String(req.body?.action || ''))));
+  api.post('/snow/shovelers', need('dispatcher'), json((req) => snow.saveShoveler(req.body || {})));
+
   // ---------- route planning (Board → Plan route) ----------
   const routeTypes = (q) => String(q.types ?? 'septic').split(',').map((s) => s.trim()).filter(Boolean);
   api.get('/routes/plan', need('dispatcher'), json(async (req) => ({
@@ -711,6 +745,7 @@ async function main() {
   const alerts = createAlerts(db);
   const summary = createSummary(db, { today: dispatch.today, nowHm: () => nowHmIn() });
   const recurring = createRecurring(db, dispatch);
+  const snow = createSnow(db);
   await alerts.checkDowntime(config.timeZone);
   // A planned stop (Republish, a restart from Replit): noted, so it isn't reported as the app being down.
   for (const sig of ['SIGTERM', 'SIGINT']) {
@@ -719,7 +754,7 @@ async function main() {
       process.exit(0);
     });
   }
-  createApp({ db, dispatch, backups, qbo, sites, alerts, summary, recurring, drive }).listen(config.port, () => {
+  createApp({ db, dispatch, backups, qbo, sites, alerts, summary, recurring, drive, snow }).listen(config.port, () => {
     console.log(`Dispatch running on ${config.publicUrl} (port ${config.port}), time zone ${config.timeZone}`);
     if (!config.smsEnabled) console.log('Texting is NOT configured — texts will be printed here instead of sent.');
   });
@@ -750,6 +785,8 @@ async function main() {
       .then((out) => out && console.log(`Day summary texted to ${out.results.filter((r) => r.ok).length} number(s)`))
       .catch((err) => console.error('Day summary failed:', err));
     alerts.heartbeat().catch(() => {});
+    // Snow call-outs: phone whoever is due (asks the database nothing when no call-out is running).
+    snow.tick().catch((err) => { console.error('Snow call failed:', err); alerts.notify('task', `The snow call could not phone everyone: ${err.message}`); });
     // Repeating work orders: make the next two weeks' visits, once a day.
     recurring.runScheduled()
       .then((made) => made?.length && console.log(`Repeat visits made: ${made.map((id) => '#' + id).join(', ')}`))
