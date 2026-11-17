@@ -55,6 +55,7 @@
         <button data-layout="month" aria-pressed="false">Calendar</button>
       </div>
       <span id="lineup-status" class="muted small"></span>
+      <button class="btn outline" id="repeat-list-btn" data-need="dispatch" title="Work orders that repeat: next visits, pause, skip or stop">🔁 Repeating</button>
       <button class="btn outline" id="day-summary" data-need="dispatch" title="What got done today, what's still open, and tomorrow">Day summary</button>
       <button class="btn outline" id="send-lineup" data-need="dispatch" title="Text each driver a list of all their jobs for this day">Text drivers their day</button>
       <button class="btn primary big" id="new-job">+ New job</button>
@@ -501,6 +502,11 @@
         </div>
       </fieldset>
 
+      <fieldset class="sec repeat-sec" id="repeat-sec">
+        <legend>Repeat</legend>
+        <div id="repeat-box"></div>
+      </fieldset>
+
       <fieldset class="sec" data-pricing>
         <legend>Customer</legend>
         <div class="grid">
@@ -606,6 +612,17 @@
   </dialog>
 
   <!-- JOB HISTORY -->
+  <dialog id="repeat-dialog" class="summary-dialog">
+    <div class="ticket-wrap">
+      <div class="dialog-head">
+        <h2>Repeating work orders</h2>
+        <button type="button" class="link" data-close-repeat aria-label="Close">✕</button>
+      </div>
+      <p class="muted small">Visits are made two weeks ahead, with no driver: pick the driver on the Board as usual.
+        To change what a repeat does, open one of its visits and choose <b>This and future visits</b>.</p>
+      <div id="repeat-list"></div>
+    </div>
+  </dialog>
   <dialog id="summary-dialog" class="summary-dialog">
     <div class="ticket-wrap">
       <div class="dialog-head">
@@ -655,5 +672,6 @@
   <script src="/setup-ui.js"></script>
   <script src="/reception.js"></script>
   <script src="/alerts-ui.js"></script>
+  <script src="/repeat-ui.js"></script>
 </body>
 </html>

@@ -642,6 +642,7 @@
         <span class="job-num">#${job.id}</span>
         <span class="job-time ${job.time_slot === 'first' || job.first_thing ? 'first' : ''}">${esc(jobTime(job) || 'Any time')}</span>
         ${Number(job.draft) ? '<span class="tag st-draft" title="Not finished — can\'t be texted yet">DRAFT</span>' : ''}
+        ${job.series_id ? '<span class="tag repeat" title="A repeating work order">🔁</span>' : ''}
         ${statusTag}
         <span class="spacer"></span>
         ${job.job_type === 'site' ? '<span class="tag own-site" title="One of our own job sites, not a customer">OUR SITE</span>'
@@ -850,6 +851,7 @@
   document.addEventListener('click', (e) => { if (e.target.closest('[data-back-board]')) showTab('board'); });
   $('#board-date').addEventListener('change', (e) => { if (e.target.value) { state.date = e.target.value; loadBoard(); } });
   $('#new-job').addEventListener('click', () => openJobForm());
+  document.addEventListener('board-refresh', () => loadBoard());
 
   $('#send-lineup').addEventListener('click', async () => {
     const lu = state.board.lineup;
@@ -1110,6 +1112,7 @@
     await computeBusy(data.scheduled_date, data.id);
     applyType(data.job_type, data.details || {});
     window.PRICE_UI?.openForm(data);
+    window.REPEAT_UI?.openForm(data);
     dialog.showModal();
   }
 
@@ -1147,7 +1150,8 @@
     const sendNow = false; // saving never texts drivers: text them from the board when ready
     const asDraft = e.submitter?.value === 'draft';
     const fd = new FormData(form);
-    const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.') && !k.startsWith('po.') && !k.startsWith('ln.')));
+    const body = Object.fromEntries([...fd.entries()].filter(([k]) => !k.startsWith('d.') && !k.startsWith('po.') && !k.startsWith('ln.') && !k.startsWith('rp.')));
+    Object.assign(body, window.REPEAT_UI?.collect() || {});
     body.details = collectDetails();
     Object.assign(body, window.PRICE_UI?.collect() || {});
     body.time_slot = $('input[name=time_slot]:checked', form)?.value || '';
