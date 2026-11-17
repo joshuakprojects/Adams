@@ -390,6 +390,8 @@ const ADDED_COLUMNS = {
   jobs: {
     // The repeating series this visit belongs to (job_series), if any.
     series_id: 'INTEGER',
+    // Stop number in the day's planned route (Board → Plan route); jobs are listed in this order within a time of day.
+    route_order: 'INTEGER',
     // Customer & billing, as on the paper work orders.
     customer_phone: "TEXT NOT NULL DEFAULT ''",
     customer_email: "TEXT NOT NULL DEFAULT ''",

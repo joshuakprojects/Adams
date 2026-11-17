@@ -125,7 +125,33 @@ function createDistance(db, { key = config.maps.serverKey, fetchImpl = (...a) =>
     };
   }
 
-  return { measure, geocode };
+  /**
+   * A drive through `points` in order (first = start, last = end), or with Google choosing the best order of the
+   * stops in between (optimize). → { order: [indexes of the stops in between], legs: [{ meters, seconds }], meters, seconds }
+   */
+  async function routeThrough(points, { optimize = false } = {}) {
+    if (!key) throw new DistanceError('Route planning by road needs a Google key (GOOGLE_MAPS_SERVER_KEY).');
+    if (points.length < 2) return { order: [], legs: [], meters: 0, seconds: 0 };
+    const point = (p) => ({ location: { latLng: { latitude: p.lat, longitude: p.lng } } });
+    const mids = points.slice(1, -1);
+    const res = await fetchImpl('https://routes.googleapis.com/directions/v2:computeRoutes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': 'routes.optimizedIntermediateWaypointIndex,routes.legs.distanceMeters,routes.legs.duration,routes.distanceMeters,routes.duration' },
+      body: JSON.stringify({ origin: point(points[0]), destination: point(points[points.length - 1]), intermediates: mids.map(point),
+        travelMode: 'DRIVE', routingPreference: 'TRAFFIC_UNAWARE', units: 'METRIC', ...(optimize && mids.length > 1 ? { optimizeWaypointOrder: true } : {}) }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new DistanceError(explain(body.error?.status || `HTTP ${res.status}`, body.error?.message), 502);
+    const r = body.routes?.[0];
+    if (!r) throw new DistanceError('Google found no driving route through those stops.');
+    const secs = (d) => Number(String(d || '0s').replace('s', '')) || 0;
+    const optimized = Array.isArray(r.optimizedIntermediateWaypointIndex) && r.optimizedIntermediateWaypointIndex.length === mids.length && r.optimizedIntermediateWaypointIndex[0] !== -1;
+    const order = optimized ? r.optimizedIntermediateWaypointIndex : mids.map((_, i) => i);
+    return { optimized, order, legs: (r.legs || []).map((l) => ({ meters: l.distanceMeters || 0, seconds: secs(l.duration) })), meters: r.distanceMeters || 0, seconds: secs(r.duration) };
+  }
+
+  return { measure, geocode, routeThrough, hasKey: Boolean(key) };
 }
 
 module.exports = { createDistance, DistanceError, pointInPolygon, municipalityFrom, cleanMunicipality };
