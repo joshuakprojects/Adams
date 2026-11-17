@@ -175,16 +175,25 @@
   let voices = null;
   function voiceBox() {
     const v = data.voice || {};
+    const done = v.voice_id && v.usual && v.recorded >= v.usual;
+    const library = v.voice_id ? `<div class="sn-library ${done ? 'ok' : ''}">
+        <b>${done ? '✓ The usual lines are recorded' : `${v.recorded || 0} of ${v.usual || 0} usual lines recorded`}</b>
+        <span class="small">The greeting, "Press 1…", the thank-yous, start times 3:00 to 8:00 AM, and the place. Recorded once, kept forever and played on every call — no more ElevenLabs charges for them.${v.kept > v.recorded ? ` (${v.kept} lines kept in all.)` : ''}</span>
+        ${!done && v.configured ? `<button class="btn primary" data-snow="record" id="sn-record">Record the usual lines now</button><span class="muted small">Takes about a minute; uses about 600 characters of ElevenLabs credit, once.</span>` : ''}
+        ${done && v.configured ? '<span class="muted small">You can now remove ELEVENLABS_API_KEY from the Secrets if you like. Only a new place or a one-off note would then be read by the standard voice.</span>' : ''}
+      </div>` : '';
     if (!v.configured) {
-      return `<details class="sn-card"><summary><h3>Call voice: standard</h3></summary>
-        <p class="small">Calls use the phone system's voice. For a natural voice, add an ElevenLabs API key to Replit's Secrets as <code>ELEVENLABS_API_KEY</code>, Republish, and pick a voice here.</p></details>`;
+      return `<details class="sn-card"><summary><h3>Call voice: ${v.voice_id && v.recorded ? esc(v.voice_name || 'ElevenLabs') + ' (recorded)' : 'standard'}</h3></summary>
+        ${library}
+        <p class="small">${v.voice_id && v.recorded ? 'Calls play the kept recordings. A new place or a one-off note is read by the phone system\'s voice. To record more, add' : 'Calls use the phone system\'s voice. For a natural voice, add'} an ElevenLabs API key to Replit's Secrets as <code>ELEVENLABS_API_KEY</code>, Republish, and ${v.voice_id ? 'press Record here' : 'pick a voice here'}.</p></details>`;
     }
-    return `<details class="sn-card" id="sn-voice" ${voices ? 'open' : ''}><summary><h3>Call voice: ${esc(v.voice_name || 'not picked yet (standard voice)')}</h3></summary>
+    return `<details class="sn-card" id="sn-voice" ${voices || (v.voice_id && !done) ? 'open' : ''}><summary><h3>Call voice: ${esc(v.voice_name || 'not picked yet (standard voice)')}</h3></summary>
+      ${library}
       ${voices ? `<div class="sn-voices">${voices.map((x) => `<label class="sn-voice ${x.voice_id === v.voice_id ? 'on' : ''}"><input type="radio" name="sn-voice" value="${esc(x.voice_id)}" data-name="${esc(x.name)}" ${x.voice_id === v.voice_id ? 'checked' : ''}>
           <b>${esc(x.name)}</b><span>${esc(x.about || '')}</span>
           <button type="button" class="btn tiny" data-hear="${esc(x.voice_id)}">▶ Hear our call</button></label>`).join('')}</div>
-        <p class="muted small">"Hear our call" plays this voice saying a real snow call. Pick one and it's used from the next call-out.</p>`
-        : '<button class="btn" data-snow="voices">Choose a voice</button>'}
+        <p class="muted small">"Hear our call" plays this voice saying a real snow call. Pick one, then record the usual lines in it.</p>`
+        : `<button class="btn ${v.voice_id ? 'outline' : 'primary'}" data-snow="voices">${v.voice_id ? 'Change the voice' : 'Choose a voice'}</button>`}
     </details>`;
   }
 
@@ -207,7 +216,7 @@
       hear.disabled = true; hear.textContent = '…';
       try {
         const res = await fetch('/api/snow/voice/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ voice_id: hear.dataset.hear, text: `Adams Bros snow call. Start at ${sayHm(form.time)} at ${form.place || 'the yard'}. Press 1 if you are coming. Press 2 if you can't.` }) });
+          body: JSON.stringify({ voice_id: hear.dataset.hear, text: `Adams Bros snow call. Start at ${sayHm(form.time)}. Report to ${form.place || 'the yard'}. Press 1 if you are coming. Press 2 if you can't.` }) });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not make the sample');
         new Audio(URL.createObjectURL(await res.blob())).play();
       } catch (err) { toast(err.message); }
@@ -238,6 +247,11 @@
         if (!ids.length) return toast('Everyone already has it');
         const out = await api('/snow/setup-text', { method: 'POST', body: { ids } });
         toast(`Setup text sent to ${out.results.filter((r) => r.ok).length}`);
+      } else if (act === 'record') {
+        b.disabled = true;
+        b.textContent = 'Recording… (about a minute)';
+        const out = await api('/snow/voice/record', { method: 'POST' });
+        toast(out.made ? `Recorded ${out.made} lines — kept for good` : 'Already recorded');
       } else if (act === 'voices') {
         voices = (await api('/snow/voices')).voices;
         return render();

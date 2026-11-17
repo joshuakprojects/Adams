@@ -12,6 +12,7 @@
 const crypto = require('node:crypto');
 const config = require('./config');
 const sms = require('./sms');
+const { PHRASES } = require('./voice');
 
 const RETRY_MINUTES = 5;
 const MAX_CALLS = 3;
@@ -136,44 +137,47 @@ function createSnow(db, {
 
   // ---------- calling ----------
   const message = (c) => `Adams Bros snow call. Start at ${sayTime(c.start_time)} at ${c.place}.${c.note ? ' ' + c.note + '.' : ''}`;
-  // Everything the call can say, by part.
-  const lines = (c) => ({
-    main: `${message(c)} Press 1 if you are coming. Press 2 if you can't.`,
-    coming: `Thank you. See you at ${sayTime(c.start_time)} at ${c.place}.`,
-    not_coming: 'Thank you. We will let the office know.',
-    no_answer: 'We did not get an answer. We will try again soon.',
-    cancelled: 'The Adams Bros snow call was cancelled. Thank you.',
+  // Everything the call can say, in parts: each part is its own recording, so the usual ones are reused forever.
+  const parts = (c) => ({
+    main: [PHRASES.intro, PHRASES.start(c.start_time), PHRASES.place(c.place), ...(c.note ? [PHRASES.note(c.note)] : []), PHRASES.press],
+    coming: [PHRASES.coming, PHRASES.start(c.start_time), PHRASES.place(c.place)],
+    not_coming: [PHRASES.not_coming],
+    no_answer: [PHRASES.no_answer],
+    cancelled: [PHRASES.cancelled],
   });
 
-  /** With an ElevenLabs voice: record the call-out's words once, at the start (never stops a call-out if it fails). */
+  /**
+   * With an ElevenLabs voice: make sure every part of this call-out is recorded (the usual ones already are; a new
+   * place or note is recorded now and kept). Never stops a call-out: a part that can't be recorded is spoken instead.
+   */
   async function record(callId) {
-    if (!voice || !(await voice.ready().catch(() => false))) return false;
+    if (!voice || !(await voice.chosen().catch(() => ({}))).voice_id) return false;
     const call = await db.get('SELECT * FROM snow_calls WHERE id = ?', callId);
-    const key = crypto.randomBytes(12).toString('base64url');
-    try {
-      for (const [kind, text] of Object.entries(lines(call))) {
-        await db.run('INSERT INTO snow_audio (call_id, kind, data) VALUES (?, ?, ?)', callId, kind, await voice.speak(text));
-      }
-      const chosen = await voice.chosen();
-      await db.run('UPDATE snow_calls SET audio_key = ?, voice = ? WHERE id = ?', key, chosen.voice_name || chosen.voice_id, callId);
-      return true;
-    } catch (err) {
-      console.error('Snow call recording failed (the standard voice is used):', err.message);
-      await db.run('DELETE FROM snow_audio WHERE call_id = ?', callId);
-      return false;
+    let all = true;
+    let failed = null;
+    for (const text of new Set(Object.values(parts(call)).flat())) {
+      if (failed) { all = false; break; } // ElevenLabs is down: don't hold up the call-out trying every line
+      try { if (!(await voice.ensure(text))) all = false; } catch (err) { all = false; failed = err; }
     }
+    if (failed) console.error('Snow call recording failed (the missing parts are read by the standard voice):', failed.message);
+    const chosen = await voice.chosen();
+    await db.run('UPDATE snow_calls SET voice = ? WHERE id = ?', `${chosen.voice_name || 'ElevenLabs'}${all ? '' : ' (some parts in the standard voice)'}`, callId);
+    return all;
   }
-  /** A recorded part, for the phone system to play. */
-  async function audio(key, kind) {
-    const call = await db.get("SELECT id FROM snow_calls WHERE audio_key = ? AND audio_key != ''", String(key || ''));
-    if (!call) return null;
-    const row = await db.get('SELECT data FROM snow_audio WHERE call_id = ? AND kind = ?', call.id, String(kind));
-    return row ? Buffer.from(row.data) : null;
-  }
-  /** TwiML for one part: the recording when there is one, else the standard voice. */
-  function speech(call, kind) {
-    if (call.audio_key) return `<Play>${xml(publicUrl.replace(/\/$/, ''))}/voice/audio/${xml(call.audio_key)}/${kind}.mp3</Play>`;
-    return `<Say voice="${FALLBACK_VOICE}">${xml(lines(call)[kind])}</Say>`;
+  /** A recorded line, for the phone system to play. */
+  async function audio(id) { return voice ? voice.clipData(id) : null; }
+  /** TwiML for one part of the call: the recordings where there are some, else the standard voice. */
+  async function speech(call, kind) {
+    const base = publicUrl.replace(/\/$/, '');
+    let out = '';
+    let say = []; // parts with no recording run together, so the standard voice reads them as one sentence
+    const flush = () => { if (say.length) out += `<Say voice="${FALLBACK_VOICE}">${xml(say.join(' '))}</Say>`; say = []; };
+    for (const text of parts(call)[kind]) {
+      const clip = voice ? await voice.clip(text).catch(() => null) : null;
+      if (clip) { flush(); out += `<Play>${xml(base)}/voice/clip/${xml(clip.id)}.mp3</Play>`; } else say.push(text);
+    }
+    flush();
+    return out;
   }
 
   async function placeCall(person, call) {
@@ -262,12 +266,13 @@ function createSnow(db, {
     const p = await personByToken(token);
     if (!p) return '<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
     const call = await db.get('SELECT * FROM snow_calls WHERE id = ?', p.call_id);
-    if (call.status === 'cancelled') return `<?xml version="1.0" encoding="UTF-8"?><Response>${speech(call, 'cancelled')}</Response>`;
+    if (call.status === 'cancelled') return `<?xml version="1.0" encoding="UTF-8"?><Response>${await speech(call, 'cancelled')}</Response>`;
     const action = `/voice/snow/${xml(token)}/answer`;
+    const main = await speech(call, 'main');
     return '<?xml version="1.0" encoding="UTF-8"?><Response>'
-      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST">${speech(call, 'main')}</Gather>`
-      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST">${speech(call, 'main')}</Gather>`
-      + `${speech(call, 'no_answer')}</Response>`;
+      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST">${main}</Gather>`
+      + `<Gather numDigits="1" timeout="8" action="${action}" method="POST">${main}</Gather>`
+      + `${await speech(call, 'no_answer')}</Response>`;
   }
   async function voiceAnswer(token, digits) {
     const p = await personByToken(token);
@@ -275,7 +280,7 @@ function createSnow(db, {
     const call = await db.get('SELECT * FROM snow_calls WHERE id = ?', p.call_id);
     if (digits === '1' || digits === '2') {
       await answer(p.id, digits === '1' ? 'coming' : 'not_coming', 'call');
-      return `<?xml version="1.0" encoding="UTF-8"?><Response>${speech(call, digits === '1' ? 'coming' : 'not_coming')}</Response>`;
+      return `<?xml version="1.0" encoding="UTF-8"?><Response>${await speech(call, digits === '1' ? 'coming' : 'not_coming')}</Response>`;
     }
     return voiceTwiml(token);
   }
