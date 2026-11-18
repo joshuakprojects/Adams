@@ -149,13 +149,14 @@
   function people() {
     const row = (s) => editing === s.id ? `<li class="sn-edit">${shovelerForm(s)}</li>`
       : `<li class="${s.active ? '' : 'inactive'}"><div><b>${esc(s.name)}</b> <span class="muted">${esc(prettyPhone(s.phone))} · called ${s.call_ahead_min} min ahead${s.active ? '' : ' · not called'}</span>
-          <div class="small ${s.setup_texted_at ? 'muted' : 'sn-warn-text'}">${s.setup_texted_at ? '✓ Sent how to save our number' : '⚠ Not sent how to save our number yet'}</div></div>
+          <div class="small ${s.setup_replied_at ? 'muted' : 'sn-warn-text'}">${s.setup_replied_at ? '✓ Replied SNOW and got our contact' : s.setup_texted_at ? '… Setup text sent: waiting for them to reply SNOW' : '⚠ Not sent the setup text yet'}</div></div>
         <button class="btn tiny" data-snow-edit="${s.id}">Edit</button></li>`;
     const notSent = data.shovelers.filter((s) => s.active && !s.setup_texted_at).length;
     return `<details class="sn-card sn-people" ${data.shovelers.length && !editing ? '' : 'open'}><summary><h3>Shovelers <span class="muted">(${active().length})</span></h3>
         ${notSent ? `<span class="pill warn">${notSent} not set up</span>` : ''}</summary>
-      <div class="sn-setup"><b>So the call rings at 3 AM:</b> phones often silence or flag calls from numbers that aren't saved. <b>Send setup text</b> texts each shoveler a link that saves
-        our number (${esc(data.number || '')}) as "Adams Bros Snow Call", and how to make it a Favourite so it rings through Do Not Disturb.
+      <div class="sn-setup"><b>So the call rings at 3 AM:</b> phones often silence or flag calls from numbers that aren't saved. <b>Send setup text</b> asks each shoveler to reply SNOW
+        (replying tells their phone we're not spam); then they're sent our number (${esc(data.number || '')}) to save as "Adams Bros Snow Call", and how to make it a Favourite so it rings through Do Not Disturb.
+        <span class="muted">If they don't see the text, it may be in their spam or "Unknown senders" folder: ask them to open it, mark it "Not spam" and reply SNOW.</span>
         <div><button class="btn" data-snow="setup" data-scope="new">${notSent ? `Send setup text to the ${notSent} not set up` : 'Everyone has the setup text'}</button>
           <button class="btn tiny" data-snow="setup" data-scope="all">Send to everyone again</button></div></div>
       <ul class="sn-list">${data.shovelers.map(row).join('') || '<li class="muted">No shovelers yet.</li>'}</ul>

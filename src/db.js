@@ -455,6 +455,7 @@ const ADDED_COLUMNS = {
   // When the shoveler was texted how to save the snow call number.
   shovelers: {
     setup_texted_at: 'TEXT',
+    setup_replied_at: 'TEXT', // replied SNOW to the setup text (and was sent the contact)
   },
   // Invoices made from a work order (Send invoice): QuickBooks's id and number.
   qbo_sync: {

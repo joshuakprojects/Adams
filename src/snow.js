@@ -303,6 +303,8 @@ function createSnow(db, {
 
   /** A text from a shoveler during a running call-out: "1" / "yes" = coming, "2" / "no" = can't. Null if it isn't one. */
   async function handleReply(phone, body) {
+    const setup = await setupReply(phone, body);
+    if (setup) return setup;
     if (active === false) return null;
     const p = await db.get(`SELECT p.* FROM snow_call_people p JOIN snow_calls c ON c.id = p.call_id
       WHERE c.status = 'running' AND p.phone = ? ORDER BY p.id DESC LIMIT 1`, phone);
@@ -344,15 +346,18 @@ function createSnow(db, {
       'NOTE:Early-morning snow call-outs. Mark this contact as a favourite so it rings through Do Not Disturb.', 'END:VCARD', ''].join('\r\n');
   }
   /** Text shovelers (all, or the ids given) how to save the number so the call rings at night and isn't flagged as spam. */
+  /**
+   * The setup text, in two steps so it isn't taken for spam: the first text has no link and asks for a reply
+   * (a number they've texted back is "known" to the phone); the contact to save goes out once they reply SNOW.
+   */
   async function sendSetupText(ids = null) {
     let people = await listShovelers();
     if (Array.isArray(ids)) { const pick = new Set(ids.map(Number)); people = people.filter((p) => pick.has(p.id)); }
-    const link = `${publicUrl.replace(/\/$/, '')}/snow/contact.vcf`;
     const number = sms.prettyPhone(voiceFrom);
     const results = [];
     for (const p of people) {
-      const body = `Adams Bros: snow call-outs will phone you from ${number}. Please save it so the call rings at night: tap ${link} and save the contact. `
-        + 'Then make it a Favourite (iPhone: Favourites; Android: tap the star) so it rings through Do Not Disturb / sleep mode.';
+      const body = `Hi ${p.name.split(' ')[0]}, it's Adams Bros. This winter our snow call-outs will phone you from ${number}, `
+        + 'usually early in the morning. Please reply SNOW so we know you got this, and we will send you the contact to save.';
       try {
         await send(p.phone, body);
         await db.run('UPDATE shovelers SET setup_texted_at = ? WHERE id = ?', sqlTime(now()), p.id);
@@ -360,6 +365,16 @@ function createSnow(db, {
       } catch (err) { results.push({ id: p.id, name: p.name, ok: false, error: err.message }); }
     }
     return { results, number };
+  }
+  /** A shoveler answering the setup text with SNOW: send the contact and how to let it ring at night. */
+  async function setupReply(phone, body) {
+    if (!/^\W*snow\b/i.test(String(body || '').trim())) return null;
+    const p = await db.get('SELECT * FROM shovelers WHERE phone = ? AND setup_texted_at IS NOT NULL ORDER BY id DESC LIMIT 1', phone);
+    if (!p) return null;
+    await db.run('UPDATE shovelers SET setup_replied_at = ? WHERE id = ?', sqlTime(now()), p.id);
+    const link = `${publicUrl.replace(/\/$/, '')}/snow/contact.vcf`;
+    return { reply: `Thanks ${p.name.split(' ')[0]}! Save our number ${sms.prettyPhone(voiceFrom)} as "Adams Bros Snow Call" (or open ${link} to add it). `
+      + 'Then make it a Favourite so the call rings through Do Not Disturb at night.' };
   }
 
   return { listShovelers, saveShoveler, start, current, last, clear, get, recent, tick, voiceTwiml, voiceAnswer, voiceStatus, handleReply, act, cancel, sayTime,

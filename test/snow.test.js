@@ -189,7 +189,7 @@ test('ElevenLabs voice: the usual lines are recorded once and kept; calls then n
 });
 
 test('snow call: only the ticked shovelers; results stay on screen after; setup text and contact card', async (t) => {
-  const { snow, texts, bob } = await setup(t, { live: false });
+  const { db, snow, texts, bob } = await setup(t, { live: false });
   await assert.rejects(() => snow.start({ day: '2026-12-03', time: '04:00', shovelers: [] }), /Tick at least one/);
   const c = await snow.start({ day: '2026-12-03', time: '04:00', mode: 'now', shovelers: [bob.id] });
   assert.deepEqual(c.people.map((p) => p.name), ['Bob Smith']);
@@ -207,7 +207,14 @@ test('snow call: only the ticked shovelers; results stay on screen after; setup 
   assert.equal((await snow.last()).id, c2.id, 'the next call-out shows again');
   const out = await snow.sendSetupText();
   assert.equal(out.results.length, 2);
-  assert.match(texts.at(-1).body, /snow call-outs will phone you from 705-555-0000\. .*\/snow\/contact\.vcf .*Favourite/);
+  // Step 1: no link (links from a new number look like spam), asks for a reply.
+  assert.match(texts.at(-1).body, /^Hi \w+, it's Adams Bros\. .*phone you from 705-555-0000, .*reply SNOW/);
+  assert.doesNotMatch(texts.at(-1).body, /https?:/);
+  assert.equal(await snow.handleReply(bob.phone, 'hello'), null, 'not the setup reply, no call running');
+  // Step 2: they reply SNOW and get the contact and how to let it ring.
+  const r = await snow.handleReply(bob.phone, 'Snow');
+  assert.match(r.reply, /Save our number 705-555-0000 as "Adams Bros Snow Call" .*\/snow\/contact\.vcf.*Favourite/);
+  assert.ok((await db.get('SELECT setup_replied_at FROM shovelers WHERE id = ?', bob.id)).setup_replied_at);
   const card = snow.contactCard();
   assert.match(card, /^BEGIN:VCARD\r\nVERSION:3\.0\r\nFN:Adams Bros Snow Call\r\n/);
   assert.match(card, /TEL;TYPE=WORK,VOICE:\+17055550000/);
