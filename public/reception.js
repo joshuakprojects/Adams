@@ -37,7 +37,7 @@
   const slotWords = { first: 'first thing in the morning', am: 'in the morning', pm: 'in the afternoon', any: '' };
 
   function freshCall() {
-    return { step: 1, svc: '', f: { truck: 'Triaxle', qty: 1, trip: 'Deliver', period: 'week', service: 'Deliver bin', waste: 'mixed' },
+    return { step: 1, svc: '', f: { truck: 'Triaxle', qty: 1, trip: 'Deliver', period: 'week', service: 'Deliver bin', waste: 'mixed', toilets: {} }, pay: '',
       addr: { to_location: '', municipality: '' }, dist: {}, distError: '', distBusy: false, pin: null, x: {},
       cust: { phone: '', name: '', email: '', billing_address: '', customer_id: '' }, contact: { name: '', phone: '' }, match: null,
       day: '', slot: '', notes: '', editId: null, quoteId: null, existing: null, error: '', missing: null };
@@ -211,7 +211,7 @@
     const j = { ...base, to_location: W.addr.to_location, municipality: W.addr.municipality,
       distance_km: W.dist.km ?? '', distance_from: W.dist.from || '', distance_mode: W.dist.mode || '', in_town: W.dist.in_town ?? '',
       customer: W.cust.name, customer_phone: W.cust.phone, customer_email: W.cust.email, billing_address: W.cust.billing_address,
-      customer_id: W.cust.customer_id || '', contact_name: W.contact.name.trim(), contact_phone: W.contact.phone.trim(),
+      customer_id: W.cust.customer_id || '', contact_name: W.contact.name.trim(), contact_phone: W.contact.phone.trim(), payment_method: W.pay || '',
       scheduled_date: W.day, time_slot: W.slot, notes: W.notes, price_options: {} };
     const details = { ...(base.details || {}) };
     if (W.svc === 'haul') {
@@ -228,7 +228,12 @@
       j.price_options = { waste: f.waste };
     } else if (W.svc === 'toilet') {
       Object.assign(j, { job_type: 'toilet' });
-      Object.assign(details, { trip: f.trip, toilet1_type: f.toilet || '', toilet1_qty: f.qty });
+      const kinds = Object.entries(f.toilets || {}).filter(([, n]) => Number(n) > 0).slice(0, 3);
+      details.trip = f.trip;
+      for (let i = 1; i <= 3; i++) {
+        details[`toilet${i}_type`] = kinds[i - 1] ? kinds[i - 1][0] : '';
+        details[`toilet${i}_qty`] = kinds[i - 1] ? Number(kinds[i - 1][1]) : '';
+      }
       j.price_options = { period: f.period, ...(f.off ? { off_schedule: true } : {}) };
     } else if (W.svc === 'water') {
       Object.assign(j, { job_type: 'misc', material: 'Water', loads_planned: f.qty, quantity: '' });
@@ -299,9 +304,12 @@
         <div class="rc-label">What's going in it?</div><div class="rc-chips">${chip('waste', 'mixed', f.waste, 'Mixed waste')}${chip('waste', 'concrete', f.waste, 'Clean concrete')}${chip('waste', 'metal', f.waste, 'Scrap metal')}${chip('waste', 'asbestos', f.waste, 'Asbestos')}</div>`;
     } else if (W.svc === 'toilet') {
       const types = [...new Set(Object.values(book.items).filter((it) => it.category === 'toilet' && it.grp).map((it) => it.grp))];
-      more = `<div class="rc-label">Which kind?</div><div class="rc-chips">${types.map((v) => chip('toilet', v, f.toilet)).join('')}</div>
-        <div class="rc-label">How many, and for how long?</div><div class="rc-chips">${stepper('qty', f.qty, f.qty === 1 ? 'toilet' : 'toilets')}<span class="rc-gap"></span>
-          ${chip('period', 'week', f.period, 'Weekly')}${chip('period', 'month', f.period, 'Monthly')}</div>
+      const tq = f.toilets || {};
+      more = `<div class="rc-label">How many of each kind? <span class="muted">(up to 3 kinds)</span></div>
+        <div class="rc-tq-list">${types.map((v) => { const n = Number(tq[v]) || 0; return `<div class="rc-tq ${n ? 'on' : ''}"><span class="t">${esc(v)}</span>
+          <span class="rc-stepper"><button type="button" class="rc-chip" data-tq="${esc(v)}" data-by="-1" ${n ? '' : 'disabled'}>−</button>
+          <span class="rc-chip ${n ? 'on' : ''}">${n}</span><button type="button" class="rc-chip" data-tq="${esc(v)}" data-by="1">+</button></span></div>`; }).join('')}</div>
+        <div class="rc-label">For how long?</div><div class="rc-chips">${chip('period', 'week', f.period, 'Weekly')}${chip('period', 'month', f.period, 'Monthly')}</div>
         <div class="rc-chips rc-checks">${chip('trip', 'Deliver', f.trip, 'Deliver')}${chip('trip', 'Service', f.trip, 'Extra service / pump-out')}
           <label><input type="checkbox" data-check="off" ${f.off ? 'checked' : ''}> Off-schedule (+$100)</label></div>`;
     } else if (W.svc === 'water') {
@@ -323,7 +331,8 @@
       ['elevation', 'Is the tank uphill or downhill from there?', 'e.g. downhill, about 10 ft'],
       ['directions', 'Is it hard to find?', 'e.g. second lane past the marina, green house']],
     toilet: [['placement', 'Where should it go?', 'e.g. beside the garage, on level ground'],
-      ['pickup_date', 'When should we pick it up?', '']],
+      ['pickup_date', 'When should we pick it up?', ''],
+      ['extra_servicing', 'Will it need extra servicing (a busy event, heavy use)?', 'e.g. pump it twice a week during the event']],
   };
   // Questions answered in the driver note.
   const ASK_NOTE = {
@@ -382,6 +391,12 @@
   }
 
   function whereSection() {
+    return `<h2 class="rc-h2">Where is it going?</h2>
+      <div class="rc-grid2"><label class="rc-label">Address<input class="rc-input" data-addr="to_location" value="${esc(W.addr.to_location)}" placeholder="Street address, e.g. 45 Bay Rd" list="dl-locations" autocomplete="off"></label>
+        <label class="rc-label">Town / township<input class="rc-input" data-addr="municipality" value="${esc(W.addr.municipality)}" list="dl-municipalities" autocomplete="off"></label></div>
+      <div id="rc-where-out">${whereOut()}</div>`;
+  }
+  function whereOut() {
     const d = W.dist;
     const km = d.km != null && d.km !== '' ? `🚚 <b>${esc(String(d.km))} km</b> from the yard${Number(d.in_town) ? ' · inside Parry Sound' : ''}${d.mode === 'pin' ? ' (map pin)' : ''}` : '';
     const job = jobFromCall();
@@ -390,10 +405,7 @@
     W.lines = lines;
     const rows = lines.filter((l) => l.kind !== 'deposit').map((l) => `<div class="ln"><span>${esc(l.description)}${Number(l.qty) !== 1 ? ` — ${esc(String(l.qty))} × ${money(l.unit_price)}` : ''}</span><span>${l.unit_price == null ? 'to be priced' : money(P.amount(l))}</span></div>`).join('');
     const dep = lines.filter((l) => l.kind === 'deposit').map((l) => `<div class="ln dep"><span>Deposit to collect (not in the total)</span><span>${money(l.unit_price)}</span></div>`).join('');
-    return `<h2 class="rc-h2">Where is it going?</h2>
-      <div class="rc-grid2"><label class="rc-label">Address<input class="rc-input" data-addr="to_location" value="${esc(W.addr.to_location)}" placeholder="Street address, e.g. 45 Bay Rd" list="dl-locations" autocomplete="off"></label>
-        <label class="rc-label">Town / township<input class="rc-input" data-addr="municipality" value="${esc(W.addr.municipality)}" list="dl-municipalities" autocomplete="off"></label></div>
-      <div class="rc-dist">${W.distBusy ? 'Working out the distance…' : km}${W.distError ? `<span class="rc-err">${esc(W.distError)}</span>` : ''}
+    return `<div class="rc-dist">${W.distBusy ? 'Working out the distance…' : km}${W.distError ? `<span class="rc-err">${esc(W.distError)}</span>` : ''}
         <button type="button" class="link" data-pin>📍 No address yet? Drop a pin on the map</button></div>
       ${W.svc ? `<div class="rc-price"><div class="hd">PRICE</div>${rows || '<div class="ln"><span>Pick what they need above</span><span></span></div>'}
         ${t.subtotal ? `<div class="ln"><span>HST ${esc(String(book?.hst_rate ?? 13))}%</span><span>${money(t.hst)}</span></div>` : ''}${dep}
@@ -412,7 +424,9 @@
       <div class="rc-grid2"><label class="rc-label">Name<input class="rc-input" data-cust="name" value="${esc(c.name)}" autocomplete="off"></label>
         <label class="rc-label">Email <span class="muted">(optional)</span><input class="rc-input" data-cust="email" type="email" value="${esc(c.email)}"></label></div>
       <label class="rc-label">Mailing address for the bill <span class="muted">(if different from the job address)</span>
-        <input class="rc-input" data-cust="billing_address" value="${esc(c.billing_address)}"></label>`;
+        <input class="rc-input" data-cust="billing_address" value="${esc(c.billing_address)}"></label>
+      <div class="rc-label">"How will you be paying?"</div>
+      <div class="rc-chips">${window.FORMS.PAYMENT_METHODS.map((m) => `<button type="button" class="rc-chip ${W.pay === m ? 'on' : ''}" data-pay="${esc(m)}">${esc(m)}</button>`).join('')}</div>`;
   }
   function matchCard(m) {
     const used = String(W.cust.customer_id) === String(m.id);
@@ -471,6 +485,7 @@
       <div>${esc([W.addr.to_location, W.addr.municipality].filter(Boolean).join(', ')) || '<span class="muted">No address yet</span>'}</div>
       <div>${esc(window.FORMS.summary(job) || (SVC[W.svc] || [])[2] || '')}</div>
       <div><b>${W.day ? esc(shortDay(W.day)) : '<span class="muted">No day yet</span>'}${W.slot ? ' · ' + esc(window.FORMS.slotLabel(W.slot)) : ''}</b></div>
+      ${W.pay ? `<div>Paying: ${esc(W.pay)}</div>` : ''}
       ${t.total ? `<div class="rc-sum-tot">${money(t.total)} <small>incl. HST</small></div>` : ''}
       <p class="muted small">Dispatch picks the driver and texts them.</p></div>`;
   }
@@ -567,36 +582,39 @@
     if (box) box.innerHTML = W.match ? matchCard(W.match) : '';
   }
 
-  // Redraw the call without losing what's being typed in the address boxes (the distance comes back while they type).
-  function syncAddr() { $$('[data-addr]').forEach((el) => { W.addr[el.dataset.addr] = el.value; }); }
-  function renderKeepTyping() {
-    const a = document.activeElement;
-    const key = a?.dataset?.addr;
-    const pos = key ? a.selectionStart : null;
-    syncAddr();
-    renderCall();
-    if (!key) return;
-    const el = $(`[data-addr="${key}"]`);
-    if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch { /* not a text box */ } }
+  /** What's typed in the address boxes right now (a box may not have sent "change" yet). */
+  function syncAddr() { $$('[data-addr]').forEach((el) => { W.addr[el.dataset.addr] = el.value.trim(); }); }
+  /** Redraw just the distance and price (and the summary beside them), leaving the boxes alone. */
+  function refreshWhere() {
+    const box = $('#rc-where-out');
+    if (!box) return renderCall();
+    box.innerHTML = whereOut();
+    const sum = $('.rc-summary');
+    if (sum) sum.outerHTML = summaryCard();
   }
 
   async function lookupDistance(point) {
+    syncAddr();
     const address = [W.addr.to_location, W.addr.municipality].filter(Boolean).join(', ');
-    if (!point && !W.addr.to_location) return renderCall();
+    if (!point && !W.addr.to_location) return refreshWhere();
     if (!state.maps?.distance) {
       W.distError = 'Distances aren\'t set up yet — ask an admin. The price is shown without delivery.';
-      return renderCall();
+      return refreshWhere();
     }
     W.distBusy = true; W.distError = '';
-    renderKeepTyping();
+    refreshWhere();
     try {
       const d = await api('/distance', { method: 'POST', body: { address: point ? undefined : address, lat: point?.lat, lng: point?.lng } });
       W.dist = d;
       syncAddr();
-      if (!W.addr.municipality.trim() && d.municipality) W.addr.municipality = d.municipality;
+      const town = $('[data-addr="municipality"]');
+      if (!W.addr.municipality && d.municipality && !(town && town.value.trim())) {
+        W.addr.municipality = d.municipality;
+        if (town) town.value = d.municipality;
+      }
     } catch (err) { W.distError = err.message; }
     W.distBusy = false;
-    renderKeepTyping();
+    refreshWhere();
   }
 
   function bodyForSave(draft = false) {
@@ -609,6 +627,7 @@
 
   async function bookIt(draft = false) {
     if (!W.svc) { W.error = 'Pick what they need first.'; return renderCall(); }
+    if (W.svc === 'toilet' && !Object.values(W.f.toilets || {}).some((n) => Number(n) > 0)) { W.error = 'How many toilets? Press + beside the kind.'; W.step = 1; return renderCall(); }
     if (!W.day) { W.error = 'Pick a day.'; W.step = 4; return renderCall(); }
     const body = bodyForSave(draft);
     try {
@@ -626,6 +645,7 @@
 
   async function saveQuote() {
     if (!W.svc) { W.error = 'Pick what they need first.'; return renderCall(); }
+    if (W.svc === 'toilet' && !Object.values(W.f.toilets || {}).some((n) => Number(n) > 0)) { W.error = 'How many toilets? Press + beside the kind.'; W.step = 1; return renderCall(); }
     // A quote is for calling back: get a name and number if we don't have them yet.
     if (!W.cust.phone) {
       const phone = prompt('Their phone number, to call them back:', '');
@@ -659,7 +679,11 @@
     if (W.svc === 'haul') Object.assign(W.f, { material: job.material, truck: d.truck || (job.quantity ? 'Yards' : 'Triaxle'), qty: Number(job.loads_planned || job.quantity) || 1 });
     if (W.svc === 'septic') Object.assign(W.f, { gallons: String(d.tank_size || '').replace(/\D/g, ''), tank_type: d.tank_type || 'Septic', chamber: po.pump_chamber_too, off: po.off_schedule });
     if (W.svc === 'bin') Object.assign(W.f, { size: job.material, service: d.service || 'Deliver bin', waste: po.waste || 'mixed' });
-    if (W.svc === 'toilet') Object.assign(W.f, { toilet: d.toilet1_type, qty: Number(d.toilet1_qty) || 1, trip: d.trip || 'Deliver', period: po.period || 'week', off: po.off_schedule });
+    if (W.svc === 'toilet') {
+      const toilets = {};
+      for (let i = 1; i <= 3; i++) if (d[`toilet${i}_type`]) toilets[d[`toilet${i}_type`]] = Number(d[`toilet${i}_qty`]) || 1;
+      Object.assign(W.f, { toilets, trip: d.trip || 'Deliver', period: po.period || 'week', off: po.off_schedule });
+    }
     if (W.svc === 'water') W.f.qty = Number(job.loads_planned) || 1;
     if (W.svc === 'other') W.f.what = job.material;
     W.x = Object.fromEntries(callFields(W.svc).filter((f) => d[f.key] !== undefined).map((f) => [f.key, d[f.key]]));
@@ -667,6 +691,7 @@
     W.dist = job.distance_km != null ? { km: job.distance_km, in_town: job.in_town, from: job.distance_from, mode: job.distance_mode } : {};
     W.cust = { phone: A.prettyPhone(job.customer_phone || ''), name: job.customer || '', email: job.customer_email || '', billing_address: job.billing_address || '', customer_id: job.customer_id || '' };
     W.contact = { name: job.contact_name || '', phone: A.prettyPhone(job.contact_phone || '') };
+    W.pay = job.payment_method || '';
     W.notes = job.notes || '';
     if (again) {
       W.existing = null;
@@ -686,12 +711,14 @@
     W = freshCall();
     W.svc = j._svc || '';
     W.f = { ...W.f, ...(j._f || {}) };
+    if (W.f.toilet && !Object.keys(W.f.toilets || {}).length) W.f.toilets = { [W.f.toilet]: Number(W.f.qty) || 1 }; // quotes saved before several kinds
     W.x = Object.fromEntries(callFields(W.svc).filter((f) => (j.details || {})[f.key] !== undefined).map((f) => [f.key, j.details[f.key]]));
     W.dist = j._dist || {};
     W.pin = j._pin || null;
     W.addr = { to_location: j.to_location || '', municipality: j.municipality || '' };
     W.cust = { phone: j.customer_phone || '', name: j.customer || '', email: j.customer_email || '', billing_address: j.billing_address || '', customer_id: j.customer_id || '' };
     W.contact = { name: j.contact_name || '', phone: j.contact_phone || '' };
+    W.pay = j.payment_method || '';
     W.notes = j.notes || '';
     W.quoteId = q.id;
     W.step = 3;
@@ -700,7 +727,7 @@
   // One click handler for the whole reception view.
   document.addEventListener('click', async (e) => {
     if (!document.body.classList.contains('reception')) return;
-    const el = e.target.closest('[data-xset],[data-go],[data-mode],[data-svc],[data-set],[data-step],[data-day],[data-next],[data-back],[data-step-to],[data-book],[data-draft],[data-save-quote],[data-pin],[data-use-match],[data-quote],[data-drop-quote],[data-edit],[data-cancel],[data-again],[data-cust-jobs],[data-call-for],[data-find-back]');
+    const el = e.target.closest('[data-xset],[data-tq],[data-pay],[data-go],[data-mode],[data-svc],[data-set],[data-step],[data-day],[data-next],[data-back],[data-step-to],[data-book],[data-draft],[data-save-quote],[data-pin],[data-use-match],[data-quote],[data-drop-quote],[data-edit],[data-cancel],[data-again],[data-cust-jobs],[data-call-for],[data-find-back]');
     if (!el || !root().contains(el)) return;
     const ds = el.dataset;
     try {
@@ -715,9 +742,19 @@
         return renderCall();
       }
       if (ds.step) { W.f[ds.step] = Math.max(1, (Number(W.f[ds.step]) || 1) + Number(ds.by)); return renderCall(); }
+      if (ds.tq) {
+        const tq = { ...(W.f.toilets || {}) };
+        const n = Math.max(0, (Number(tq[ds.tq]) || 0) + Number(ds.by));
+        if (n && !tq[ds.tq] && Object.values(tq).filter((x) => Number(x) > 0).length >= 3) { toast('Up to 3 kinds of toilet per work order: make a second one for more.'); return; }
+        if (n) tq[ds.tq] = n; else delete tq[ds.tq];
+        W.f.toilets = tq; W.error = '';
+        return renderCall();
+      }
+      if (ds.pay !== undefined) { W.pay = W.pay === ds.pay ? '' : ds.pay; return renderCall(); }
       if (ds.day) { W.day = ds.day; W.error = ''; return renderCall(); }
       if ('next' in ds) {
         if (W.step === 1 && !W.svc) { W.error = 'Pick what they need.'; return renderCall(); }
+        if (W.step === 1 && W.svc === 'toilet' && !Object.values(W.f.toilets || {}).some((n) => Number(n) > 0)) { W.error = 'How many toilets? Press + beside the kind.'; return renderCall(); }
         W.error = ''; W.step = Math.min(4, W.step + 1); return renderCall();
       }
       if ('back' in ds) { W.error = ''; W.step = Math.max(1, W.step - 1); return renderCall(); }
