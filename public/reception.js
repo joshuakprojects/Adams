@@ -516,6 +516,19 @@
     if (box) box.innerHTML = W.match ? matchCard(W.match) : '';
   }
 
+  // Redraw the call without losing what's being typed in the address boxes (the distance comes back while they type).
+  function syncAddr() { $$('[data-addr]').forEach((el) => { W.addr[el.dataset.addr] = el.value; }); }
+  function renderKeepTyping() {
+    const a = document.activeElement;
+    const key = a?.dataset?.addr;
+    const pos = key ? a.selectionStart : null;
+    syncAddr();
+    renderCall();
+    if (!key) return;
+    const el = $(`[data-addr="${key}"]`);
+    if (el) { el.focus(); try { el.setSelectionRange(pos, pos); } catch { /* not a text box */ } }
+  }
+
   async function lookupDistance(point) {
     const address = [W.addr.to_location, W.addr.municipality].filter(Boolean).join(', ');
     if (!point && !W.addr.to_location) return renderCall();
@@ -524,14 +537,15 @@
       return renderCall();
     }
     W.distBusy = true; W.distError = '';
-    renderCall();
+    renderKeepTyping();
     try {
       const d = await api('/distance', { method: 'POST', body: { address: point ? undefined : address, lat: point?.lat, lng: point?.lng } });
       W.dist = d;
-      if (!W.addr.municipality && d.municipality) W.addr.municipality = d.municipality;
+      syncAddr();
+      if (!W.addr.municipality.trim() && d.municipality) W.addr.municipality = d.municipality;
     } catch (err) { W.distError = err.message; }
     W.distBusy = false;
-    renderCall();
+    renderKeepTyping();
   }
 
   function bodyForSave(draft = false) {
