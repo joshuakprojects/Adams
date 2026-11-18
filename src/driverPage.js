@@ -138,6 +138,7 @@ function renderDriverPage(a, otherJobs = [], tickets = [], { saved = false } = {
   <div class="actions">${finish}</div>
   ${config.dispatchPhone ? `<a class="btn call-dispatch" href="tel:${esc(config.dispatchPhone)}">📞 Call dispatch</a>` : ''}
   <p class="tip">You can also just text back <b>OK</b> to confirm or <b>DONE</b> when finished.</p>
+  <p class="tip"><a href="/videos/#driver">▶ How this page works (35 s video)</a></p>
   ${others}
 </main>
 <script>

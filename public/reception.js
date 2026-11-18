@@ -96,7 +96,7 @@
     const helpOff = (window.APP_HELP?.helpHidden() || []).includes('reception');
     root().innerHTML = nav() + `<div class="rc-wrap">
       ${helpOff ? '' : `<div class="help-strip" data-help="reception"><p>Phone rings? Press <b>New call</b>: pick the service, the price works itself out, then book it. To change or cancel a booking use <b>Find</b>. Site heads calling in what they need go under <b>Our sites</b>.</p>
-        <a href="/guide.html#reception" target="_blank" rel="noopener">Full guide ↗</a><button type="button" class="link" data-help-hide="reception">Got it</button></div>`}
+        <a href="#" class="vid-link" data-video="book-a-call">▶ Watch the video</a><a href="/guide.html#reception" target="_blank" rel="noopener">Full guide ↗</a><button type="button" class="link" data-help-hide="reception">Got it</button></div>`}
       <h1 class="rc-h1">${hello}, ${esc((state.user?.name || '').split(' ')[0])}</h1>
       <div class="rc-sub">${esc(dayName(state.today))} · ${h.today_jobs} job${h.today_jobs === 1 ? '' : 's'} today · ${h.week_jobs} this week</div>
       ${notes.length ? `<div class="rc-boss"><h3>📌 Notes from the boss</h3>${notes.map((n) => `<div class="rc-boss-note">
@@ -607,10 +607,20 @@
       const d = await api('/distance', { method: 'POST', body: { address: point ? undefined : address, lat: point?.lat, lng: point?.lng } });
       W.dist = d;
       syncAddr();
+      // The town the map found fills an empty town box. If they're in that box (about to type it), it's only
+      // suggested, and filled in when they leave the box still empty, so it never mixes with their typing.
       const town = $('[data-addr="municipality"]');
       if (!W.addr.municipality && d.municipality && !(town && town.value.trim())) {
-        W.addr.municipality = d.municipality;
-        if (town) town.value = d.municipality;
+        if (town && document.activeElement === town) {
+          town.placeholder = d.municipality;
+          town.addEventListener('blur', () => {
+            if (town.value.trim() || W.addr.municipality) return;
+            town.value = d.municipality; W.addr.municipality = d.municipality; refreshWhere();
+          }, { once: true });
+        } else {
+          W.addr.municipality = d.municipality;
+          if (town) town.value = d.municipality;
+        }
       }
     } catch (err) { W.distError = err.message; }
     W.distBusy = false;
