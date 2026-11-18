@@ -39,7 +39,7 @@
   function freshCall() {
     return { step: 1, svc: '', f: { truck: 'Triaxle', qty: 1, trip: 'Deliver', period: 'week', service: 'Deliver bin', waste: 'mixed' },
       addr: { to_location: '', municipality: '' }, dist: {}, distError: '', distBusy: false, pin: null, x: {},
-      cust: { phone: '', name: '', email: '', billing_address: '', customer_id: '' }, match: null,
+      cust: { phone: '', name: '', email: '', billing_address: '', customer_id: '' }, contact: { name: '', phone: '' }, match: null,
       day: '', slot: '', notes: '', editId: null, quoteId: null, existing: null, error: '', missing: null };
   }
 
@@ -211,7 +211,8 @@
     const j = { ...base, to_location: W.addr.to_location, municipality: W.addr.municipality,
       distance_km: W.dist.km ?? '', distance_from: W.dist.from || '', distance_mode: W.dist.mode || '', in_town: W.dist.in_town ?? '',
       customer: W.cust.name, customer_phone: W.cust.phone, customer_email: W.cust.email, billing_address: W.cust.billing_address,
-      customer_id: W.cust.customer_id || '', scheduled_date: W.day, time_slot: W.slot, notes: W.notes, price_options: {} };
+      customer_id: W.cust.customer_id || '', contact_name: W.contact.name.trim(), contact_phone: W.contact.phone.trim(),
+      scheduled_date: W.day, time_slot: W.slot, notes: W.notes, price_options: {} };
     const details = { ...(base.details || {}) };
     if (W.svc === 'haul') {
       const yards = f.truck === 'Yards';
@@ -235,7 +236,7 @@
       Object.assign(j, { job_type: 'misc', material: f.what || '' });
     }
     // Details fields for this type (only the ones still shown on reception, so a changed service doesn't carry stray answers).
-    for (const f of receptionFields(W.svc)) {
+    for (const f of callFields(W.svc)) {
       if (W.x[f.key] !== undefined && String(W.x[f.key]).trim() !== '') details[f.key] = String(W.x[f.key]).trim();
       else delete details[f.key];
     }
@@ -313,9 +314,57 @@
 
   // Fields admins added and set to show on reception (Setup → Work order fields).
   const jobTypeOf = (svc) => (svc === 'water' || svc === 'other' ? 'misc' : svc);
+  // "Ask them": what reception asks before booking, so the driver knows what they're walking into.
+  // [work order box, how to ask it, example] — the answer goes in that box (and the driver's text).
+  const ASK_BOXES = {
+    septic: [['lids_uncovered', 'Are the tank lids dug up?'], ['tank_location', 'Where is the tank?', 'e.g. back yard, left of the deck'],
+      ['steep_driveway', 'Is the driveway steep?'], ['back_in', 'Will the truck have to back in from the road?'],
+      ['hose_length', 'How far is the tank from where the truck can park?', 'e.g. about 50 ft'],
+      ['elevation', 'Is the tank uphill or downhill from there?', 'e.g. downhill, about 10 ft'],
+      ['directions', 'Is it hard to find?', 'e.g. second lane past the marina, green house']],
+    toilet: [['placement', 'Where should it go?', 'e.g. beside the garage, on level ground'],
+      ['pickup_date', 'When should we pick it up?', '']],
+  };
+  // Questions answered in the driver note.
+  const ASK_NOTE = {
+    haul: ['Where do they want it dumped?', 'Anything in the way: overhead wires, soft ground, a tight turn?'],
+    bin: ['Where should the bin go?', 'Anything in the way: wires, branches, parked cars?'],
+    water: ['Where is the tank or cistern, and how close can the truck get?'],
+    septic: [], toilet: [], other: [],
+  };
+  const ASK_ALL = ['A gate code, a locked gate or a dog?'];
+  function askFields(svc) {
+    if (!svc || !ASK_BOXES[svc]) return [];
+    const fields = window.FORMS.typeInfo(jobTypeOf(svc)).fields;
+    return ASK_BOXES[svc].map(([key, ask, eg]) => {
+      const f = fields.find((x) => x.key === key && !x.hidden);
+      return f ? { ...f, ask, eg } : null;
+    }).filter(Boolean);
+  }
   function receptionFields(svc) {
     if (!svc) return [];
-    return window.FORMS.typeInfo(jobTypeOf(svc)).fields.filter((f) => f.reception && !f.hidden && !window.FORMS.RECEPTION_ASKS.includes(f.key));
+    const asked = new Set(askFields(svc).map((f) => f.key));
+    return window.FORMS.typeInfo(jobTypeOf(svc)).fields.filter((f) => f.reception && !f.hidden && !window.FORMS.RECEPTION_ASKS.includes(f.key) && !asked.has(f.key));
+  }
+  /** Every work order box reception fills in for this service (Details plus Ask them). */
+  const callFields = (svc) => [...receptionFields(svc), ...askFields(svc)];
+  function askSection() {
+    const v = (k) => W.x[k] ?? '';
+    const boxes = askFields(W.svc).map((f) => {
+      if (f.kind === 'choice') {
+        return `<div class="rc-ask-q"><span class="q">"${esc(f.ask)}"</span><div class="rc-chips">${f.options.map((o) =>
+          `<button type="button" class="rc-chip ${v(f.key) === o ? 'on' : ''}" data-xset="${esc(f.key)}" data-val="${esc(o)}">${esc(o)}</button>`).join('')}</div></div>`;
+      }
+      const type = f.kind === 'date' ? 'date' : 'text';
+      return `<label class="rc-ask-q"><span class="q">"${esc(f.ask)}"</span><input class="rc-input" type="${type}" data-xf="${esc(f.key)}" value="${esc(v(f.key))}" placeholder="${esc(f.eg || '')}"${type === 'date' ? ` min="${state.today}"` : ''}></label>`;
+    }).join('');
+    const contact = `<div class="rc-ask-q"><span class="q">"Who will be there, if it isn't you?"</span><div class="rc-grid2 tight">
+        <input class="rc-input" data-contact="name" value="${esc(W.contact.name)}" placeholder="Name (leave blank if it's the caller)" autocomplete="off">
+        <input class="rc-input" data-contact="phone" type="tel" value="${esc(W.contact.phone)}" placeholder="Their cell" autocomplete="off"></div></div>`;
+    const notes = [...(ASK_NOTE[W.svc] || []), ...ASK_ALL];
+    return `<div class="rc-ask"><div class="rc-label">Ask them <span class="muted">— the driver gets the answers in their text</span></div>
+      ${boxes}${contact}
+      <ul class="rc-ask-list">${notes.map((q) => `<li>"${esc(q)}"</li>`).join('')}</ul></div>`;
   }
   function detailsFields() {
     const list = receptionFields(W.svc);
@@ -409,8 +458,9 @@
       <div class="rc-days ${compact ? 'compact' : ''}">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((w) => `<span class="wh">${w}</span>`).join('')}${cells.join('')}</div>
       <div class="rc-chips" style="margin-top:6px"><label class="small">Later than that? <input type="date" class="rc-input rc-date" data-pick-date value="${esc(W.day && W.day > addDays(start, days - 1) ? W.day : '')}" min="${state.today}"></label></div>
       <div class="rc-label">What time?</div><div class="rc-chips">${window.FORMS.TIME_SLOTS.map(([k, l]) => chip('slot', k, W.slot, l)).join('')}</div>
-      <label class="rc-label">Anything the driver should know? <span class="muted">(optional)</span>
-        <textarea class="rc-input" rows="2" data-text-notes placeholder="e.g. dump half by the garage, gate code 4321">${esc(W.notes)}</textarea></label>`;
+      ${W.svc ? askSection() : ''}
+      <label class="rc-label">Note for the driver <span class="muted">— their answers, and anything else the driver should know</span>
+        <textarea class="rc-input" rows="2" data-text-notes placeholder="e.g. dump half by the garage, gate code 4321, dog in the yard">${esc(W.notes)}</textarea></label>`;
   }
 
   function summaryCard() {
@@ -489,6 +539,7 @@
       W.pin = null;
       lookupDistance();
     }));
+    $$('[data-contact]', r).forEach((el) => el.addEventListener('input', () => { W.contact[el.dataset.contact] = el.value; }));
     $$('[data-cust]', r).forEach((el) => el.addEventListener('input', () => {
       W.cust[el.dataset.cust] = el.value;
       if (el.dataset.cust === 'phone' || el.dataset.cust === 'name') {
@@ -551,7 +602,7 @@
   function bodyForSave(draft = false) {
     const job = jobFromCall();
     const out = { ...job, lines: W.lines || [], draft, assignments: W.existing?.assignments?.map((a) => ({ driver_id: a.driver_id, truck_id: a.truck_id })) || [] };
-    if (W.svc === 'water' && !out.notes.includes('$130/hour')) out.notes = [out.notes, 'Water delivery billed $130/hour.'].filter(Boolean).join(' ');
+    if (W.svc === 'water' && !out.notes.includes('$130/hour')) out.notes = [out.notes.trim().replace(/([^.!?])$/, '$1.'), 'Water delivery billed $130/hour.'].filter(Boolean).join(' ');
     if (W.quoteId) out.quote_id = W.quoteId;
     return out;
   }
@@ -611,10 +662,11 @@
     if (W.svc === 'toilet') Object.assign(W.f, { toilet: d.toilet1_type, qty: Number(d.toilet1_qty) || 1, trip: d.trip || 'Deliver', period: po.period || 'week', off: po.off_schedule });
     if (W.svc === 'water') W.f.qty = Number(job.loads_planned) || 1;
     if (W.svc === 'other') W.f.what = job.material;
-    W.x = Object.fromEntries(receptionFields(W.svc).filter((f) => d[f.key] !== undefined).map((f) => [f.key, d[f.key]]));
+    W.x = Object.fromEntries(callFields(W.svc).filter((f) => d[f.key] !== undefined).map((f) => [f.key, d[f.key]]));
     W.addr = { to_location: job.to_location || '', municipality: job.municipality || '' };
     W.dist = job.distance_km != null ? { km: job.distance_km, in_town: job.in_town, from: job.distance_from, mode: job.distance_mode } : {};
     W.cust = { phone: A.prettyPhone(job.customer_phone || ''), name: job.customer || '', email: job.customer_email || '', billing_address: job.billing_address || '', customer_id: job.customer_id || '' };
+    W.contact = { name: job.contact_name || '', phone: A.prettyPhone(job.contact_phone || '') };
     W.notes = job.notes || '';
     if (again) {
       W.existing = null;
@@ -634,11 +686,12 @@
     W = freshCall();
     W.svc = j._svc || '';
     W.f = { ...W.f, ...(j._f || {}) };
-    W.x = Object.fromEntries(receptionFields(W.svc).filter((f) => (j.details || {})[f.key] !== undefined).map((f) => [f.key, j.details[f.key]]));
+    W.x = Object.fromEntries(callFields(W.svc).filter((f) => (j.details || {})[f.key] !== undefined).map((f) => [f.key, j.details[f.key]]));
     W.dist = j._dist || {};
     W.pin = j._pin || null;
     W.addr = { to_location: j.to_location || '', municipality: j.municipality || '' };
     W.cust = { phone: j.customer_phone || '', name: j.customer || '', email: j.customer_email || '', billing_address: j.billing_address || '', customer_id: j.customer_id || '' };
+    W.contact = { name: j.contact_name || '', phone: j.contact_phone || '' };
     W.notes = j.notes || '';
     W.quoteId = q.id;
     W.step = 3;
