@@ -216,7 +216,9 @@ function createApp({ db, dispatch, fetchMedia = fetchTwilioMedia, intakeKey = co
         console.error('Could not download texted photo:', err.message);
       }
     }
-    const asSite = media.length ? null : await sites.handleReply(sms.normalizePhone(b.From) || b.From, text);
+    const fromPhone = sms.normalizePhone(b.From) || b.From;
+    const asSnow = media.length ? null : await snow.handleReply(fromPhone, text);
+    const asSite = asSnow || (media.length ? null : await sites.handleReply(fromPhone, text));
     const { reply } = asSite || await dispatch.handleInbound(b.From, text, { media });
     if (b.ID) {
       seenSunwire.set(String(b.ID), Date.now());
