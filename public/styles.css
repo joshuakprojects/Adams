@@ -1190,3 +1190,27 @@ details.sn-card[open] > summary::after { content: '▴'; }
 .sn-library .btn { justify-self: start; }
 .sn-hero-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 .sn-hero-foot .btn { background: transparent; color: inherit; border-color: rgba(255,255,255,.45); }
+
+/* ---------- how-to videos ---------- */
+.vid-btn { background: none; cursor: pointer; font-family: inherit; }
+body.snow-only .vid-btn { display: inline-block !important; }
+.help-strip .vid-link { font-weight: 700; white-space: nowrap; margin-right: 12px; }
+#vid-dialog { border: 0; border-radius: 14px; padding: 0; width: min(1100px, 96vw); max-height: 94vh; }
+#vid-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.vid-wrap { display: grid; gap: 10px; padding: 14px 18px 12px; }
+.vid-head { display: flex; align-items: center; justify-content: space-between; }
+.vid-head h2 { margin: 0; font: 800 1.3rem var(--head, inherit); text-transform: uppercase; }
+.vid-head .x { border: 0; background: none; font-size: 28px; cursor: pointer; line-height: 1; }
+.vid-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+.vid-main video { width: 100%; border-radius: 10px; background: #000; display: block; max-height: 70vh; }
+.vid-main video.phone { width: auto; max-width: 100%; margin: 0 auto; }
+.vid-title { font-weight: 700; margin-top: 6px; }
+.vid-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 70vh; overflow: auto; }
+.vid-list button { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: center; width: 100%; text-align: left; background: #fff;
+  border: 2px solid var(--line, #e2e2dc); border-radius: 10px; padding: 5px; cursor: pointer; font: inherit; }
+.vid-list button.on { border-color: #111; background: #fff8d6; }
+.vid-list img { width: 96px; height: 54px; object-fit: cover; border-radius: 6px; background: #111; }
+.vid-list b { display: block; font-size: 14px; line-height: 1.25; }
+.vid-list span span { font-size: 12.5px; color: var(--muted, #666); }
+.vid-foot { margin: 0; font-size: 13px; color: var(--muted, #666); }
+@media (max-width: 800px) { .vid-body { grid-template-columns: 1fr; } .vid-list { max-height: none; } }
