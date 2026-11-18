@@ -761,6 +761,11 @@ body:not(.can-notes) [data-need="notes"] { display: none !important; }
 .rc-xf { display: flex; flex-direction: column; gap: 6px; }
 .rc-xf.wide { grid-column: 1 / -1; }
 .rc-xl { font-size: 14px; font-weight: 600; color: #444; }
+.rc-tq-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+.rc-tq { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 2px solid var(--line, #e2e2dc); border-radius: 12px; padding: 6px 8px 6px 14px; background: #fff; }
+.rc-tq.on { border-color: #111; background: #fff8d6; }
+.rc-tq .t { font-weight: 600; }
+.rc-tq .rc-chip[disabled] { opacity: .35; }
 .rc-ask { background: #fff8d6; border-radius: 12px; padding: 12px 14px; margin-top: 14px; display: grid; gap: 10px; }
 .rc-ask > .rc-label { margin: 0; }
 .rc-ask-q { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 10px; align-items: center; }
