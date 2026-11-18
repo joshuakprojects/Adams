@@ -406,7 +406,11 @@
       if (!f.sms || f.hidden) continue;
       if (/^toilet\d_/.test(f.key)) continue;
       if (['service', 'trip', 'tank_type', 'tank_size', 'truck', 'direction', 'until_stop'].includes(f.key) || /^aggregate2_/.test(f.key)) continue; // already in the summary line
-      if (!isEmpty(d[f.key])) out.push([f.label, d[f.key]]);
+      if (isEmpty(d[f.key])) continue;
+      const v = f.kind === 'date' && /^\d{4}-\d\d-\d\d$/.test(d[f.key])
+        ? new Date(d[f.key] + 'T12:00:00Z').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).replace(/\./g, '')
+        : d[f.key];
+      out.push([f.label, v]);
     }
     return out; // toilet types & counts are already in the summary line
   }

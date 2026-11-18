@@ -56,7 +56,8 @@ function cargoSummary(job) {
 function siteAddress(job) {
   const to = job.to_location || '';
   const muni = job.municipality || '';
-  if (!muni || to.toLowerCase().includes(muni.toLowerCase())) return to;
+  const esc = muni.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!muni || new RegExp(`(^|[\\s,])${esc}\\.?\\s*$`, 'i').test(to)) return to;
   return to ? `${to}, ${muni}` : muni;
 }
 
